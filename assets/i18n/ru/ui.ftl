@@ -22,7 +22,7 @@ battle-defeat = Отряд пал
 battle-to-menu = В меню
 battle-downed = На краю
 battle-raise-hint = Перетащите любую карту на павшего: 2 энергии и сброс этой карты.
-battle-waiting = Ждём остальных…
+battle-waiting = Ждём…
 
 intent-Attack = Атака
 intent-AttackAll = Атака по всем

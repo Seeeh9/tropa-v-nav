@@ -1,6 +1,7 @@
 //! Development-only helpers, compiled in with `--features dev`.
 //!
 //!   TROPA_AUTOSTART=<players>   skip the menu, fight at once; extra heroes are bots
+//!   TROPA_BOT_ME=1              the local hero is a bot too
 //!   TROPA_SEED=<n>              fixed seed for that fight
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 
@@ -24,7 +25,9 @@ fn autostart(mut commands: Commands, db: Res<Db>, mut next: ResMut<NextState<App
     let players = players.clamp(1, 4);
     let hero = battle.party[0].clone();
     battle.party = (0..players).map(|_| hero.clone()).collect();
-    battle.bots = (1..players).collect();
+    // TROPA_BOT_ME also hands the local hero to the autopilot, for unattended runs
+    let first = if std::env::var("TROPA_BOT_ME").is_ok() { 0 } else { 1 };
+    battle.bots = (first..players).collect();
     commands.insert_resource::<PendingBattle>(battle);
     next.set(AppState::Battle);
 }

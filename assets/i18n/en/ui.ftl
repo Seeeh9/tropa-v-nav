@@ -22,7 +22,7 @@ battle-defeat = The party has fallen
 battle-to-menu = To menu
 battle-downed = On the Edge
 battle-raise-hint = Drag any card onto a fallen ally: 2 Energy and that card is discarded.
-battle-waiting = Waiting for the others…
+battle-waiting = Waiting…
 
 intent-Attack = Attack
 intent-AttackAll = Attack all

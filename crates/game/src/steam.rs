@@ -26,6 +26,11 @@ pub fn install(app: &mut App, client: Client) {
     app.insert_resource(Steam { client }).add_systems(PreUpdate, pump);
 }
 
-fn pump(steam: Res<Steam>) {
+fn pump(steam: Res<Steam>, time: Res<Time>, mut reported: Local<bool>) {
     steam.client.run_callbacks();
+    // the overlay hooks in a moment after the first frames are presented
+    if !*reported && time.elapsed_secs() > 4.0 {
+        *reported = true;
+        info!("Steam overlay enabled: {}", steam.client.utils().is_overlay_enabled());
+    }
 }

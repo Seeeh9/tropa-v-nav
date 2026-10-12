@@ -132,11 +132,12 @@ struct HoverTop(Option<u32>);
 // ---- layout ----
 
 fn hero_foot(slot: u8) -> Vec2 {
+    // staggered front and back rows, far enough apart that every HP bar stays readable
     match slot {
-        0 => Vec2::new(600.0, 700.0),
-        1 => Vec2::new(380.0, 690.0),
-        2 => Vec2::new(500.0, 585.0),
-        _ => Vec2::new(280.0, 575.0),
+        0 => Vec2::new(670.0, 700.0),
+        1 => Vec2::new(480.0, 630.0),
+        2 => Vec2::new(300.0, 700.0),
+        _ => Vec2::new(120.0, 630.0),
     }
 }
 
@@ -297,7 +298,7 @@ fn enter(
                 },
                 BackgroundColor(theme::RUST_BLOOD),
                 BorderColor::all(theme::CANDLE),
-                children![(Label::Ready, theme::text("", &fonts.title, 30.0, theme::BONE))],
+                children![(Label::Ready, theme::text("", &fonts.title, 26.0, theme::BONE), TextLayout::justify(Justify::Center))],
                 observe(|_: On<Activate>, session: Res<Session>, mut outbox: ResMut<Outbox>| {
                     let h = session.my_hero();
                     if !h.downed && session.truth.phase == Phase::Heroes {
@@ -717,8 +718,10 @@ fn spawn_card(
             ChildOf(layer),
         ))
         .with_children(|c| {
+            let name = l10n.card_name(&card.def, card.upgraded);
             c.spawn((
-                theme::text(l10n.card_name(&card.def, card.upgraded), &fonts.title, 19.0, if card.upgraded { theme::ROTLIGHT } else { theme::BONE }),
+                // long names shrink to stay on one line
+                theme::text(name.clone(), &fonts.title, if name.chars().count() > 13 { 14.5 } else { 19.0 }, if card.upgraded { theme::ROTLIGHT } else { theme::BONE }),
                 Node { height: px(28), ..default() },
             ));
             c.spawn((
@@ -832,7 +835,7 @@ fn layout_hand(
             let cost = if view.x_cost { 0 } else { view.cost };
             let ok = !view.has(Keyword::Unplayable) && cost <= h.energy && !h.downed;
             let frame = card_frame(def);
-            let want = if ok { frame } else { frame.darker(0.08) };
+            let want = if ok { frame } else { frame.mix(&theme::SOOT, 0.45) };
             if bg.0 != want {
                 bg.0 = want;
             }

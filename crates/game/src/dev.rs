@@ -1,18 +1,23 @@
 //! Development-only helpers, compiled in with `--features dev`.
 //!
-//!   TROPA_AUTOSTART=<players>   skip the menu, fight at once; extra heroes are bots
-//!   TROPA_BOT_ME=1              the local hero is a bot too
-//!   TROPA_SCREEN=coop|local|localfight|host  open the party menu, a bot lobby, or a real Steam lobby
-//!   TROPA_SEED=<n>              fixed seed for that fight
+//!   TROPA_SCREEN=coop|lobby|run|host  open the party menu, an offline lobby, a run in progress, or a real Steam lobby
+//!   TROPA_BOTS=<0..3>           bot companions for `lobby` and `run`
+//!   TROPA_HERO=<id>             the local hero for `run`
+//!   TROPA_BOT_ME=1              the local seat is played by the autopilot too
+//!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 
-use crate::session::{Db, PendingBattle};
+use crate::session::Db;
 use crate::AppState;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Menu), (autostart, open_screen)).add_systems(Update, shot);
+    app.add_systems(OnEnter(AppState::Menu), open_screen).add_systems(Update, shot);
+}
+
+fn env<T: std::str::FromStr>(name: &str) -> Option<T> {
+    std::env::var(name).ok().and_then(|v| v.parse().ok())
 }
 
 fn open_screen(
@@ -29,16 +34,18 @@ fn open_screen(
         return;
     }
     *done = true;
+    let bots = env::<usize>("TROPA_BOTS").unwrap_or(0).min(3);
     match screen.as_str() {
         "coop" => next.set(AppState::Coop),
-        "local" => {
-            crate::net::start_local(&mut commands, &db.0, 3);
+        "lobby" => {
+            crate::net::start_offline(&mut commands, &db.0, "dev", bots);
             next.set(AppState::Lobby);
         }
-        // a four-hero fight over the real protocol, the other three seats played by bots
-        "localfight" => {
-            let seed = std::env::var("TROPA_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(7);
-            crate::net::start_local_fight(&mut commands, &db.0, 3, seed, vec!["kikimora".into(), "grey_wolf".into(), "grey_wolf".into()]);
+        // straight into a run over the real protocol; the stage router opens the right screen
+        "run" => {
+            let seed = env("TROPA_SEED").unwrap_or(7);
+            let bot_me = std::env::var("TROPA_BOT_ME").is_ok();
+            crate::net::start_offline_run(&mut commands, &db.0, bots, seed, std::env::var("TROPA_HERO").ok(), bot_me);
         }
         "host" => {
             if let (Some(steam), Some(inbox)) = (steam, inbox) {
@@ -49,27 +56,9 @@ fn open_screen(
     }
 }
 
-fn autostart(mut commands: Commands, db: Res<Db>, mut next: ResMut<NextState<AppState>>, mut done: Local<bool>) {
-    let Some(players) = std::env::var("TROPA_AUTOSTART").ok().and_then(|v| v.parse::<u8>().ok()) else { return };
-    if *done {
-        return;
-    }
-    *done = true;
-    let seed = std::env::var("TROPA_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(7);
-    let Some(mut battle) = crate::menu::solo_battle(&db.0, "bogatyr", seed) else { return };
-    let players = players.clamp(1, 4);
-    let hero = battle.party[0].clone();
-    battle.party = (0..players).map(|_| hero.clone()).collect();
-    // TROPA_BOT_ME also hands the local hero to the autopilot, for unattended runs
-    let first = if std::env::var("TROPA_BOT_ME").is_ok() { 0 } else { 1 };
-    battle.bots = (first..players).collect();
-    commands.insert_resource::<PendingBattle>(battle);
-    next.set(AppState::Battle);
-}
-
 fn shot(mut commands: Commands, time: Res<Time>, mut taken: Local<Option<f32>>, mut exit: MessageWriter<AppExit>) {
     let Ok(path) = std::env::var("TROPA_SHOT") else { return };
-    let at = std::env::var("TROPA_SHOT_AT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(3.0);
+    let at = env::<f32>("TROPA_SHOT_AT").unwrap_or(3.0);
     let now = time.elapsed_secs();
     match *taken {
         None if now >= at => {

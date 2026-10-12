@@ -8,6 +8,7 @@ mod l10n;
 mod lobby;
 mod menu;
 mod net;
+mod run_ui;
 mod session;
 mod steam;
 mod theme;
@@ -30,7 +31,13 @@ pub enum AppState {
     Coop,
     /// Seats, heroes, ready.
     Lobby,
+    /// The path map: vote for the next node.
+    Map,
     Battle,
+    Reward,
+    /// The fire.
+    Rest,
+    RunEnd,
 }
 
 /// Parent of every screen: a 1920x1080 node centred in the window.
@@ -90,7 +97,7 @@ fn main() {
     .init_state::<AppState>()
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);

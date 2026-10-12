@@ -3,10 +3,11 @@
 //! same node can instead talk to in-process bot clients with no Steam at all.
 
 use crate::session::{Db, Session};
+use nav_core::{RunEvent, Stage};
 use crate::steam::Steam;
 use crate::AppState;
 use bevy::prelude::*;
-use nav_core::{bot, Phase};
+use nav_core::run_bot;
 use nav_net::{Msg, Node, Note, Peer, To};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -23,7 +24,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<NetStatus>()
         .add_systems(Startup, hook_callbacks.run_if(resource_exists::<Steam>))
         .add_systems(PreUpdate, (steam_events, receive).chain().run_if(resource_exists::<Steam>))
-        .add_systems(Update, (local_peers, autopilot, notes).chain().run_if(resource_exists::<Net>))
+        .add_systems(Update, (crate::session::submit, local_peers, autopilot, notes, follow_stage).chain().run_if(resource_exists::<Net>))
         .add_systems(PostUpdate, send.run_if(resource_exists::<Net>));
 }
 
@@ -37,6 +38,8 @@ pub struct Net {
     /// Extra clients living in this process (dev build), played by the autopilot.
     pub locals: Vec<Node>,
     timer: f32,
+    /// Dev: the local seat is played by the autopilot too.
+    pub bot_me: bool,
 }
 
 impl Net {
@@ -49,9 +52,12 @@ impl Net {
 #[derive(Resource, Default)]
 pub struct NetStatus {
     pub busy: bool,
+    /// A message key or ready text to show the player.
     pub error: Option<String>,
     /// The lobby list changed; the lobby screen should redraw.
     pub dirty: bool,
+    /// The run changed; map, reward and rest screens should redraw.
+    pub run_dirty: bool,
 }
 
 enum SteamEv {
@@ -161,41 +167,36 @@ pub fn invite(steam: &Steam, net: &Net) {
     }
 }
 
-/// A Steam-free session with bot clients in the same process (dev build only).
-#[cfg(feature = "dev")]
-pub fn start_local(commands: &mut Commands, db: &nav_core::Content, bots: usize) {
-    let mut node = Node::host(1, "dev");
+/// A session that never touches Steam: this machine hosts, and `bots` extra
+/// clients live in the same process. With no bots it is simply a solo run.
+pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str, bots: usize) {
+    let mut node = Node::host(1, name);
     let mut locals: Vec<Node> = (0..bots).map(|i| Node::join(2 + i as u64, &format!("bot {}", i + 1), 1)).collect();
-    // seat everyone and give each bot a free hero
-    for _ in 0..4 {
-        route(db, &mut node, &mut locals);
-    }
+    route(db, &mut node, &mut locals);
+    // each bot takes a hero and readies up; the host's own seat is left for the player
     let heroes: Vec<String> = db.heroes.keys().cloned().collect();
     for (i, bot) in locals.iter_mut().enumerate() {
-        if let Some(h) = heroes.get(i + 1) {
-            bot.pick_hero(Some(h.clone()));
-        }
+        bot.pick_hero(heroes.get(i + 1).cloned());
     }
-    for _ in 0..4 {
-        route(db, &mut node, &mut locals);
-    }
+    route(db, &mut node, &mut locals);
     for bot in &mut locals {
         bot.set_ready(true);
     }
     route(db, &mut node, &mut locals);
-    commands.insert_resource(Net { node, lobby: None, code: "LOCAL".into(), locals, timer: 0.0 });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false });
 }
 
-/// Like [`start_local`], but seats the host too and starts the fight at once.
+/// Like [`start_offline`], but picks a hero for the host too and sets out at once.
 #[cfg(feature = "dev")]
-pub fn start_local_fight(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, enemies: Vec<String>) {
+pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, hero: Option<String>, bot_me: bool) {
     let mut node = Node::host(1, "dev");
     let mut locals: Vec<Node> = (0..bots).map(|i| Node::join(2 + i as u64, &format!("bot {}", i + 1), 1)).collect();
     route(db, &mut node, &mut locals);
-    let heroes: Vec<String> = db.heroes.keys().cloned().collect();
-    node.pick_hero(heroes.first().cloned());
+    let mine = hero.unwrap_or_else(|| db.heroes.keys().next().cloned().unwrap_or_default());
+    node.pick_hero(Some(mine.clone()));
+    let rest: Vec<String> = db.heroes.keys().filter(|h| **h != mine).cloned().collect();
     for (i, bot) in locals.iter_mut().enumerate() {
-        bot.pick_hero(heroes.get(i + 1).cloned());
+        bot.pick_hero(rest.get(i).cloned());
     }
     route(db, &mut node, &mut locals);
     node.set_ready(true);
@@ -203,15 +204,16 @@ pub fn start_local_fight(commands: &mut Commands, db: &nav_core::Content, bots: 
         bot.set_ready(true);
     }
     route(db, &mut node, &mut locals);
-    node.start(db, seed, enemies);
+    node.start(db, seed);
     route(db, &mut node, &mut locals);
-    commands.insert_resource(Net { node, lobby: None, code: "LOCAL".into(), locals, timer: 0.0 });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me });
 }
 
 // ---- systems ----
 
 fn steam_events(
     mut commands: Commands,
+    db: Res<Db>,
     steam: Res<Steam>,
     inbox: Res<Inbox>,
     allowed: Res<Allowed>,
@@ -230,7 +232,7 @@ fn steam_events(
                 let code = new_code(lobby.raw() ^ time.elapsed().as_nanos() as u64);
                 mm.set_lobby_data(lobby, GAME_KEY, GAME_VALUE);
                 mm.set_lobby_data(lobby, CODE_KEY, &code);
-                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0 });
+                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);
@@ -266,7 +268,7 @@ fn steam_events(
                 if let Ok(mut set) = allowed.0.lock() {
                     set.extend(mm.lobby_members(lobby).iter().map(|m| m.raw()));
                 }
-                commands.insert_resource(Net { node: Node::join(me.raw(), &name, host.raw()), lobby: Some(lobby), code, locals: vec![], timer: 0.0 });
+                commands.insert_resource(Net { node: Node::join(me.raw(), &name, host.raw()), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);
@@ -282,7 +284,7 @@ fn steam_events(
                     net.node.peer_left(user.raw());
                 }
                 // Steam picks the new owner itself when the host goes
-                net.node.host_changed(mm.lobby_owner(lobby).raw());
+                net.node.host_changed(&db.0, mm.lobby_owner(lobby).raw());
                 status.dirty = true;
             }
         }
@@ -369,20 +371,23 @@ fn route(db: &nav_core::Content, node: &mut Node, locals: &mut [Node]) {
 
 /// In-process clients take their turns with the autopilot, at a watchable pace.
 fn local_peers(db: Res<Db>, time: Res<Time>, mut net: ResMut<Net>, session: Option<Res<Session>>) {
-    if net.locals.is_empty() || session.is_some_and(|s| !s.idle()) {
+    if (net.locals.is_empty() && !net.bot_me) || session.is_some_and(|s| !s.idle()) {
         return;
     }
     net.timer -= time.delta_secs();
     if net.timer > 0.0 {
         return;
     }
-    net.timer = 0.5;
-    for l in net.locals.iter_mut() {
-        let (Some(slot), Some(state)) = (l.my_slot(), l.state.as_ref()) else { continue };
-        let Some(h) = state.hero(slot) else { continue };
-        if state.phase == Phase::Heroes && !h.downed && !h.ready {
-            let action = bot::choose(&db.0, state, slot);
-            l.submit(&db.0, action);
+    net.timer = 0.45;
+    let net = &mut *net;
+    let mut seats: Vec<&mut Node> = net.locals.iter_mut().collect();
+    if net.bot_me {
+        seats.insert(0, &mut net.node);
+    }
+    for seat in seats {
+        let (Some(slot), Some(state)) = (seat.my_slot(), seat.state.as_ref()) else { continue };
+        if let Some(action) = run_bot(&db.0, state, slot) {
+            seat.submit(&db.0, action);
             return;
         }
     }
@@ -397,52 +402,77 @@ fn autopilot(db: Res<Db>, time: Res<Time>, mut net: ResMut<Net>, mut wait: Local
 }
 
 /// Turns protocol notes into what the screens need.
-fn notes(
-    mut commands: Commands,
-    mut net: ResMut<Net>,
-    mut session: Option<ResMut<Session>>,
-    mut status: ResMut<NetStatus>,
-    mut next: ResMut<NextState<AppState>>,
-    l10n: Res<crate::l10n::L10n>,
-) {
+fn notes(mut commands: Commands, mut net: ResMut<Net>, mut session: Option<ResMut<Session>>, mut status: ResMut<NetStatus>, l10n: Res<crate::l10n::L10n>) {
     for note in net.node.take_notes() {
         match note {
             Note::LobbyChanged | Note::HostChanged => status.dirty = true,
-            Note::Started => {
-                if let (Some(state), Some(me)) = (net.node.state.clone(), net.node.my_slot()) {
-                    commands.insert_resource(Session::from_state(state, me));
-                    next.set(AppState::Battle);
-                }
-            }
+            Note::Started => status.run_dirty = true,
             Note::Applied { events, .. } => {
-                if let (Some(s), Some(state)) = (session.as_mut(), net.node.state.as_ref()) {
-                    s.truth = state.clone();
-                    s.queue.extend(events);
+                status.run_dirty = true;
+                let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { continue };
+                let combat_events: Vec<nav_core::Event> = events.iter().filter_map(|e| if let RunEvent::Combat(c) = e { Some(c.clone()) } else { None }).collect();
+                let started = events.iter().any(|e| matches!(e, RunEvent::CombatStarted));
+                match (session.as_mut(), run.combat.as_ref()) {
+                    // a new fight: its opening already sits in the state
+                    (_, Some(combat)) if started => commands.insert_resource(Session::from_state(combat.clone(), me, combat_events)),
+                    (Some(s), Some(combat)) => {
+                        s.truth = combat.clone();
+                        s.queue.extend(combat_events);
+                    }
+                    _ => {}
                 }
             }
             Note::Resynced => {
-                if let Some(state) = net.node.state.clone() {
-                    match (session.as_mut(), net.node.my_slot()) {
-                        (Some(s), _) => {
-                            s.truth = state.clone();
-                            s.shown = state;
-                            s.queue.clear();
-                        }
-                        // rejoined mid-fight: straight to the battle screen
-                        (None, Some(me)) => {
-                            commands.insert_resource(Session::from_state(state, me));
-                            next.set(AppState::Battle);
-                        }
-                        _ => {}
-                    }
+                status.run_dirty = true;
+                if let (Some(combat), Some(me)) = (net.node.state.as_ref().and_then(|r| r.combat.clone()), net.node.my_slot()) {
+                    // no animation to catch up on: show the fight as it now stands
+                    commands.insert_resource(Session::from_state(combat, me, []));
                 }
             }
             Note::Refused(e) => {
-                if let Some(s) = session.as_mut() {
-                    s.error = Some((l10n.t(&format!("error-{e:?}")), 1.6));
+                let text = match e {
+                    nav_core::RunError::Combat(c) => l10n.t(&format!("error-{c:?}")),
+                    other => l10n.t(&format!("error-{other:?}")),
+                };
+                match session.as_mut() {
+                    Some(s) => s.error = Some((text, 1.6)),
+                    None => status.error = Some(text),
                 }
             }
             Note::Ping { .. } => {}
         }
     }
+}
+
+/// Opens the screen that matches where the run is. A fight is left only
+/// once its last blow has been shown.
+fn follow_stage(net: Res<Net>, session: Option<Res<Session>>, state: Res<State<AppState>>, mut next: ResMut<NextState<AppState>>, time: Res<Time>, mut linger: Local<f32>) {
+    let Some(run) = net.node.state.as_ref() else { return };
+    let want = match run.stage {
+        Stage::Map { .. } => AppState::Map,
+        Stage::Combat => AppState::Battle,
+        Stage::Reward { .. } => AppState::Reward,
+        Stage::Rest { .. } => AppState::Rest,
+        Stage::Victory | Stage::Defeat => AppState::RunEnd,
+    };
+    let now = *state.get();
+    if now == want || !matches!(now, AppState::Lobby | AppState::Map | AppState::Battle | AppState::Reward | AppState::Rest | AppState::RunEnd | AppState::Menu) {
+        *linger = 0.0;
+        return;
+    }
+    if now == AppState::Battle {
+        if session.as_ref().is_some_and(|s| !s.idle()) {
+            return;
+        }
+        // let the killing blow land before the screen changes
+        *linger += time.delta_secs();
+        if *linger < 0.9 {
+            return;
+        }
+    }
+    if want == AppState::Battle && session.is_none() {
+        return;
+    }
+    *linger = 0.0;
+    next.set(want);
 }

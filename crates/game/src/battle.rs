@@ -14,8 +14,8 @@ use bevy::ui_widgets::{observe, Activate, Button};
 use nav_core::*;
 use nav_core::Event;
 
-const CARD_W: f32 = 220.0;
-const CARD_H: f32 = 310.0;
+pub const CARD_W: f32 = 220.0;
+pub const CARD_H: f32 = 310.0;
 const HAND_TOP: f32 = 762.0;
 const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
 const ENEMY_SIZE: Vec2 = Vec2::new(230.0, 345.0);
@@ -26,6 +26,7 @@ const UNIT_W: f32 = 280.0;
 pub fn plugin(app: &mut App) {
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
+        .init_resource::<RunOutbox>()
         .init_resource::<Cues>()
         .init_resource::<HoverTop>()
         .init_resource::<TooltipText>()
@@ -34,10 +35,10 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (submit, run_bots, playback).chain(),
+                playback,
                 (sync_units, sync_hand, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, animate_sprites, update_labels, update_bars, update_tooltip),
-                (floaters, dying, style_buttons, show_result),
+                (floaters, dying, style_buttons),
             )
                 .chain()
                 .run_if(in_state(AppState::Battle))
@@ -59,8 +60,6 @@ struct UnitLayer;
 struct HandLayer;
 #[derive(Component)]
 struct FloatLayer;
-#[derive(Component)]
-struct ResultOverlay;
 #[derive(Component)]
 struct Tooltip;
 #[derive(Component)]
@@ -181,28 +180,17 @@ fn hand_slot(i: usize, n: usize) -> Vec2 {
 
 fn enter(
     mut commands: Commands,
-    pending: Option<Res<PendingBattle>>,
-    existing: Option<Res<Session>>,
-    db: Res<Db>,
+    session: Option<Res<Session>>,
     stage: Single<Entity, With<Stage>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     art: Res<Art>,
     assets: Res<AssetServer>,
 ) {
-    // a co-op fight arrives with its session already built from the host's state
-    let fresh = match (&existing, pending) {
-        (Some(_), _) => None,
-        (None, Some(pending)) => Some(Session::new(&db.0, &pending)),
-        (None, None) => {
-            warn!("battle opened with nothing to fight");
-            return;
-        }
-    };
-    let session: &Session = match (&fresh, &existing) {
-        (Some(s), _) => s,
-        (None, Some(s)) => s,
-        (None, None) => return,
+    // the session is built from the run's state before this screen opens
+    let Some(session) = session else {
+        warn!("battle opened with nothing to fight");
+        return;
     };
     let layer = || Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() };
 
@@ -347,10 +335,6 @@ fn enter(
         })
         .id();
     let _ = root;
-    if let Some(session) = fresh {
-        commands.insert_resource(session);
-    }
-    commands.remove_resource::<PendingBattle>();
 }
 
 fn exit(mut commands: Commands, roots: Query<Entity, With<BattleRoot>>) {
@@ -692,7 +676,7 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
 
 // ---- hand ----
 
-fn card_frame(def: &CardDef) -> Color {
+pub fn card_frame(def: &CardDef) -> Color {
     match (def.kind, def.rarity) {
         (CardType::Curse, _) => Color::srgb(0.16, 0.09, 0.17),
         (CardType::Status, _) => Color::srgb(0.17, 0.20, 0.18),
@@ -702,19 +686,22 @@ fn card_frame(def: &CardDef) -> Color {
     }
 }
 
-fn spawn_card(
+/// Spawns a card face under `parent`: free-floating at `pos`, or in the parent's flow when `pos` is `None`.
+/// `extra` carries whatever makes the card behave (drag in the hand, a button in a reward).
+pub fn spawn_card<B: Bundle>(
     commands: &mut Commands,
-    layer: Entity,
+    parent: Entity,
     card: &Card,
     form: Form,
-    pos: Vec2,
+    pos: Option<Vec2>,
+    extra: B,
     db: &Content,
     l10n: &L10n,
     fonts: &Fonts,
     art: &Art,
     assets: &AssetServer,
-) {
-    let Some(def) = db.cards.get(&card.def) else { return };
+) -> Option<Entity> {
+    let def = db.cards.get(&card.def)?;
     let view = def.view(card.upgraded, form);
     let edge = if def.hero.is_empty() { theme::DIM } else { theme::hero_color(&def.hero) };
     let cost = if view.has(Keyword::Unplayable) {
@@ -724,16 +711,15 @@ fn spawn_card(
     } else {
         view.cost.to_string()
     };
-    commands
+    let id = commands
         .spawn((
-            CardWidget { uid: card.uid, form, pos, drag: Vec2::ZERO, dragging: false },
+            extra,
             Hovered::default(),
-            // let the pointer through, so a dragged card can be dropped on the unit under it
-            Pickable { should_block_lower: false, is_hoverable: true },
             Node {
-                position_type: PositionType::Absolute,
-                left: px(pos.x),
-                top: px(pos.y),
+                position_type: if pos.is_some() { PositionType::Absolute } else { PositionType::Relative },
+                left: pos.map(|p| px(p.x)).unwrap_or(Val::Auto),
+                top: pos.map(|p| px(p.y)).unwrap_or(Val::Auto),
+                flex_shrink: 0.0,
                 width: px(CARD_W),
                 height: px(CARD_H),
                 border: UiRect::all(px(4)),
@@ -747,7 +733,7 @@ fn spawn_card(
             BorderColor::all(edge),
             UiTransform::IDENTITY,
             ZIndex(0),
-            ChildOf(layer),
+            ChildOf(parent),
         ))
         .with_children(|c| {
             let name = l10n.card_name(&card.def, card.upgraded);
@@ -788,7 +774,9 @@ fn spawn_card(
                     children![theme::text(cost, &fonts.num, 28.0, theme::CANDLE)],
                 ));
             }
-        });
+        })
+        .id();
+    Some(id)
 }
 
 fn sync_hand(
@@ -812,7 +800,13 @@ fn sync_hand(
     for card in &h.hand {
         if !cards.iter().any(|(_, w)| w.uid == card.uid && w.form == h.form) {
             // new cards slide in from the draw pile
-            spawn_card(&mut commands, *layer, card, h.form, Vec2::new(60.0, 900.0), &db.0, &l10n, &fonts, &art, &assets);
+            let from = Vec2::new(60.0, 900.0);
+            let widget = (
+                CardWidget { uid: card.uid, form: h.form, pos: from, drag: Vec2::ZERO, dragging: false },
+                // let the pointer through, so a dragged card can be dropped on the unit under it
+                Pickable { should_block_lower: false, is_hoverable: true },
+            );
+            spawn_card(&mut commands, *layer, card, h.form, Some(from), widget, &db.0, &l10n, &fonts, &art, &assets);
         }
     }
 }
@@ -1086,52 +1080,4 @@ pub fn style_buttons(mut buttons: Query<(&Btn, &Hovered, Has<Pressed>, &mut Back
             bg.0 = want;
         }
     }
-}
-
-fn show_result(
-    mut commands: Commands,
-    session: Res<Session>,
-    existing: Query<(), With<ResultOverlay>>,
-    root: Single<Entity, With<BattleRoot>>,
-    fonts: Res<Fonts>,
-    l10n: Res<L10n>,
-) {
-    if session.truth.phase == Phase::Heroes || !session.idle() || !existing.is_empty() {
-        return;
-    }
-    let won = session.truth.phase == Phase::Won;
-    commands.spawn((
-        ResultOverlay,
-        Node {
-            position_type: PositionType::Absolute,
-            width: px(STAGE_W),
-            height: px(STAGE_H),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: px(36),
-            ..default()
-        },
-        BackgroundColor(theme::SOOT.with_alpha(0.78)),
-        GlobalZIndex(90),
-        ChildOf(*root),
-        children![
-            theme::text(l10n.t(if won { "battle-victory" } else { "battle-defeat" }), &fonts.title, 84.0, if won { theme::CANDLE } else { theme::FRESH_BLOOD }),
-            (
-                Button,
-                Hovered::default(),
-                Btn(theme::PEAT),
-                Node { padding: UiRect::axes(px(40), px(16)), border: UiRect::all(px(3)), ..default() },
-                BackgroundColor(theme::PEAT),
-                BorderColor::all(theme::CANDLE),
-                children![theme::text(l10n.t("battle-to-menu"), &fonts.title, 34.0, theme::BONE)],
-                observe(|_: On<Activate>, mut commands: Commands, steam: Option<Res<crate::steam::Steam>>, net: Option<Res<crate::net::Net>>, mut next: ResMut<NextState<AppState>>| {
-                    if let Some(net) = net {
-                        crate::net::leave(&mut commands, steam.as_deref(), &net);
-                    }
-                    next.set(AppState::Menu);
-                }),
-            ),
-        ],
-    ));
 }

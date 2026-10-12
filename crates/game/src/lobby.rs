@@ -12,7 +12,6 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
-use nav_core::*;
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<CodeEntry>()
@@ -98,7 +97,7 @@ fn enter_coop(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts:
         p.spawn((
             menu_button(l10n.t("coop-local"), &fonts),
             observe(|_: On<Activate>, mut commands: Commands, db: Res<Db>, mut next: ResMut<NextState<AppState>>| {
-                net::start_local(&mut commands, &db.0, 3);
+                net::start_offline(&mut commands, &db.0, "dev", 3);
                 next.set(AppState::Lobby);
             }),
         ));
@@ -148,22 +147,6 @@ fn coop_labels(entry: Res<CodeEntry>, status: Res<NetStatus>, l10n: Res<L10n>, m
     }
 }
 
-/// Fight for a freshly started party: an act-one encounter sized to the group.
-fn first_fight(db: &Content, players: usize, seed: u64) -> Vec<Id> {
-    let mut rng = Rng::new(seed);
-    let pool: Vec<&EncounterDef> = db.encounters.values().filter(|e| e.act == 1 && e.kind == EncounterKind::Normal).collect();
-    let Some(enc) = rng.pick(&pool) else { return vec![] };
-    let mut enemies = enc.enemies.clone();
-    // +0-1 enemy with three players, +1 with four (design doc, section 2)
-    if players == 3 && rng.chance(50) {
-        enemies.extend(enc.extra3.iter().cloned());
-    }
-    if players >= 4 {
-        enemies.extend(enc.extra4.iter().cloned());
-    }
-    enemies
-}
-
 fn draw_lobby(
     mut commands: Commands,
     mut status: ResMut<NetStatus>,
@@ -193,7 +176,9 @@ fn draw_lobby(
 
     commands.spawn((LobbyRoot, column(AppState::Lobby, *stage))).with_children(|p| {
         p.spawn(theme::text(l10n.t("lobby-title"), &fonts.title, 64.0, theme::BONE));
-        p.spawn(theme::text(l10n.tf("lobby-code", &[("code", net.code.clone().into())]), &fonts.num, 40.0, theme::CANDLE));
+        if net.lobby.is_some() {
+            p.spawn(theme::text(l10n.tf("lobby-code", &[("code", net.code.clone().into())]), &fonts.num, 40.0, theme::CANDLE));
+        }
 
         // seats
         p.spawn((Node { column_gap: px(18), margin: UiRect::vertical(px(12)), ..default() }, Pickable::IGNORE)).with_children(|row| {
@@ -288,8 +273,7 @@ fn draw_lobby(
                     menu_button(l10n.t("lobby-start"), &fonts),
                     observe(|_: On<Activate>, mut net: ResMut<Net>, db: Res<Db>, time: Res<Time>| {
                         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) ^ time.elapsed().as_nanos() as u64;
-                        let enemies = first_fight(&db.0, net.node.lobby.players.len(), seed);
-                        net.node.start(&db.0, seed, enemies);
+                        net.node.start(&db.0, seed);
                     }),
                 ));
             }

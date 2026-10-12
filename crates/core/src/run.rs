@@ -462,6 +462,7 @@ impl Run {
         // past the boss there is no map left in this act
         let boss_done = self.fighting == Some(NodeKind::Boss);
         self.fighting = None;
+        self.combat = None;
         if boss_done {
             ev.push(RunEvent::ActCleared { act: self.act });
             if self.act >= 3 {
@@ -546,7 +547,8 @@ impl Run {
     }
 
     fn after_fight(&mut self, c: &Content, ev: &mut Vec<RunEvent>) {
-        let Some(combat) = self.combat.take() else { return };
+        // the finished fight stays readable until the party walks on
+        let Some(combat) = self.combat.clone() else { return };
         let kind = self.fighting.unwrap_or(NodeKind::Fight);
         for (pl, h) in self.players.iter_mut().zip(&combat.heroes) {
             pl.hp = h.hp.max(1);

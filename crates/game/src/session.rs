@@ -3,23 +3,12 @@
 //! queue between them.
 
 use bevy::prelude::*;
-use nav_core::*;
 use nav_core::Event;
+use nav_core::*;
 use std::collections::VecDeque;
 
 #[derive(Resource)]
 pub struct Db(pub Content);
-
-/// What to fight next; consumed when the battle screen opens.
-#[derive(Resource, Clone)]
-pub struct PendingBattle {
-    pub party: Vec<HeroSetup>,
-    pub enemies: Vec<Id>,
-    pub seed: u64,
-    pub me: u8,
-    /// Slots played by the autopilot on this machine.
-    pub bots: Vec<u8>,
-}
 
 #[derive(Resource)]
 pub struct Session {
@@ -28,16 +17,18 @@ pub struct Session {
     /// What the unit widgets show; catches up with `truth` event by event.
     pub shown: Combat,
     pub me: u8,
-    pub bots: Vec<u8>,
     pub queue: VecDeque<Event>,
     pub wait: f32,
-    pub bot_wait: f32,
     pub error: Option<(String, f32)>,
 }
 
-/// Actions the local player wants to take this frame.
+/// Combat actions the local player wants to take this frame.
 #[derive(Resource, Default)]
 pub struct Outbox(pub Vec<CombatAction>);
+
+/// Everything else the local player wants: votes, card picks, the fire.
+#[derive(Resource, Default)]
+pub struct RunOutbox(pub Vec<RunAction>);
 
 /// Events released to the screen this frame, for floaters and animations.
 #[derive(Resource, Default)]
@@ -48,24 +39,17 @@ pub struct Cues(pub Vec<Event>);
 pub struct AnimSpeed(pub f32);
 
 impl Session {
-    pub fn new(db: &Content, p: &PendingBattle) -> Session {
-        let (truth, events) = start(db, &p.party, &p.enemies, p.seed);
+    /// A fight as it stands in the run, with only the cosmetic part of `opening` left to play.
+    pub fn from_state(state: Combat, me: u8, opening: impl IntoIterator<Item = Event>) -> Session {
         Session {
-            shown: truth.clone(),
-            truth,
-            me: p.me,
-            bots: p.bots.clone(),
-            // the opening events already happened in `shown`; replay only the cosmetic ones
-            queue: events.into_iter().filter(|e| matches!(e, Event::RoundStart(_))).collect(),
+            shown: state.clone(),
+            truth: state,
+            me,
+            // the opening already happened in `shown`; replay only what is pure show
+            queue: opening.into_iter().filter(|e| matches!(e, Event::RoundStart(_))).collect(),
             wait: 0.0,
-            bot_wait: 0.6,
             error: None,
         }
-    }
-
-    /// A fight whose state came from the network.
-    pub fn from_state(state: Combat, me: u8) -> Session {
-        Session { shown: state.clone(), truth: state, me, bots: vec![], queue: VecDeque::new(), wait: 0.0, bot_wait: 0.6, error: None }
     }
 
     pub fn my_hero(&self) -> &Hero {
@@ -74,12 +58,6 @@ impl Session {
 
     pub fn idle(&self) -> bool {
         self.queue.is_empty()
-    }
-
-    fn act(&mut self, db: &Content, slot: u8, action: &CombatAction) -> Result<(), ActionError> {
-        let events = apply(db, &mut self.truth, slot, action)?;
-        self.queue.extend(events);
-        Ok(())
     }
 }
 
@@ -204,39 +182,19 @@ fn show(shown: &mut Combat, truth: &Combat, e: &Event) {
     }
 }
 
-pub fn submit(
-    mut session: ResMut<Session>,
-    mut outbox: ResMut<Outbox>,
-    db: Res<Db>,
-    l10n: Res<crate::l10n::L10n>,
-    mut net: Option<ResMut<crate::net::Net>>,
-) {
-    let me = session.me;
+/// Hands the local player's wishes to the protocol node; the host decides,
+/// and the answer comes back as a note (see `net::notes`).
+pub fn submit(mut outbox: ResMut<Outbox>, mut run_outbox: ResMut<RunOutbox>, db: Res<Db>, mut net: Option<ResMut<crate::net::Net>>) {
+    let Some(net) = net.as_mut() else {
+        outbox.0.clear();
+        run_outbox.0.clear();
+        return;
+    };
     for action in outbox.0.drain(..) {
-        // in a party the host decides; the result comes back as a protocol note
-        if let Some(net) = net.as_mut() {
-            net.node.submit(&db.0, action);
-            continue;
-        }
-        if let Err(e) = session.act(&db.0, me, &action) {
-            session.error = Some((l10n.t(&format!("error-{e:?}")), 1.6));
-        }
+        net.node.submit(&db.0, RunAction::Combat(action));
     }
-}
-
-pub fn run_bots(mut session: ResMut<Session>, db: Res<Db>, time: Res<Time>) {
-    if session.bots.is_empty() || session.truth.phase != Phase::Heroes || !session.idle() {
-        return;
-    }
-    session.bot_wait -= time.delta_secs();
-    if session.bot_wait > 0.0 {
-        return;
-    }
-    session.bot_wait = 0.45;
-    let next = session.bots.iter().copied().find(|b| session.truth.hero(*b).is_some_and(|h| !h.downed && !h.ready));
-    if let Some(slot) = next {
-        let action = bot::choose(&db.0, &session.truth, slot);
-        let _ = session.act(&db.0, slot, &action);
+    for action in run_outbox.0.drain(..) {
+        net.node.submit(&db.0, action);
     }
 }
 

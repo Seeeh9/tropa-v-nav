@@ -2,26 +2,14 @@ use nav_core::*;
 use nav_net::*;
 use std::path::PathBuf;
 
-const EXTRA_HEROES: &str = r#"[
-    (id: "h2", max_hp: 70, mechanic: Curse, relic: "father_amulet", deck: ["bogatyr_strike", "bogatyr_strike", "bogatyr_strike", "bogatyr_defend", "bogatyr_defend", "bogatyr_shield_wall"]),
-    (id: "h3", max_hp: 72, mechanic: Runes, relic: "father_amulet", deck: ["bogatyr_strike", "bogatyr_strike", "bogatyr_strike", "bogatyr_defend", "bogatyr_defend", "bogatyr_sweep"]),
-    (id: "h4", max_hp: 80, mechanic: Moon, relic: "father_amulet", deck: ["bogatyr_strike", "bogatyr_strike", "bogatyr_strike", "bogatyr_defend", "bogatyr_defend", "bogatyr_guard"]),
-]"#;
-const HEROES: [&str; 4] = ["bogatyr", "h2", "h3", "h4"];
+const HEROES: [&str; 4] = ["bogatyr", "volhv", "volkolak", "znaharka"];
 
 fn content() -> Content {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data");
-    let mut c = Content::load_dir(&dir).unwrap();
-    c.add_heroes(EXTRA_HEROES).unwrap();
-    c
+    Content::load_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/data")).unwrap()
 }
 
-fn ids(v: &[&str]) -> Vec<Id> {
-    v.iter().map(|s| s.to_string()).collect()
-}
-
-/// A started fight with `n` players; peer ids are 1..=n and peer 1 hosts.
-fn party(c: &Content, n: usize, enemies: &[&str], seed: u64) -> Hub {
+/// A started run with `n` players; peer ids are 1..=n and peer 1 hosts.
+fn party(c: &Content, n: usize, seed: u64) -> Hub {
     let mut hub = Hub::default();
     hub.nodes.push(Node::host(1, "host"));
     for p in 2..=n as u64 {
@@ -36,13 +24,17 @@ fn party(c: &Content, n: usize, enemies: &[&str], seed: u64) -> Hub {
         node.set_ready(true);
     }
     hub.pump(c);
-    assert!(hub.node(1).start(c, seed, ids(enemies)), "lobby should be startable");
+    assert!(hub.node(1).start(c, seed), "lobby should be startable");
     hub.pump(c);
     hub
 }
 
+fn online(hub: &Hub) -> impl Iterator<Item = &Node> {
+    hub.nodes.iter().filter(|n| !hub.offline.contains(&n.me))
+}
+
 fn hashes(hub: &Hub) -> Vec<u64> {
-    hub.nodes.iter().filter(|n| !hub.offline.contains(&n.me)).map(|n| n.state.as_ref().unwrap().hash64()).collect()
+    online(hub).map(|n| n.state.as_ref().unwrap().hash64()).collect()
 }
 
 fn assert_in_sync(hub: &Hub) {
@@ -50,35 +42,58 @@ fn assert_in_sync(hub: &Hub) {
     assert!(h.windows(2).all(|w| w[0] == w[1]), "nodes diverged: {h:x?}");
 }
 
-/// Every connected player's own machine picks a move with the autopilot logic and submits it.
-fn play_out(c: &Content, hub: &mut Hub, limit: usize) -> Phase {
-    for _ in 0..limit {
-        let phase = hub.nodes.iter().find(|n| !hub.offline.contains(&n.me)).unwrap().state.as_ref().unwrap().phase;
-        if phase != Phase::Heroes {
-            return phase;
+fn stage(hub: &Hub) -> Stage {
+    online(hub).next().unwrap().state.as_ref().unwrap().stage.clone()
+}
+
+fn over(hub: &Hub) -> bool {
+    matches!(stage(hub), Stage::Victory | Stage::Defeat)
+}
+
+/// One pass: every connected player's own machine picks a move and submits it,
+/// then the host steers the seats nobody holds. Returns whether anything happened.
+fn step(c: &Content, hub: &mut Hub) -> bool {
+    let mut moved = false;
+    for i in 0..hub.nodes.len() {
+        let node = &mut hub.nodes[i];
+        if hub.offline.contains(&node.me) {
+            continue;
         }
-        for i in 0..hub.nodes.len() {
-            let node = &mut hub.nodes[i];
-            if hub.offline.contains(&node.me) {
-                continue;
-            }
-            let (Some(slot), Some(state)) = (node.my_slot(), node.state.as_ref()) else { continue };
-            let Some(h) = state.hero(slot) else { continue };
-            if state.phase != Phase::Heroes || h.downed || h.ready {
-                continue;
-            }
-            let action = bot::choose(c, state, slot);
+        let (Some(slot), Some(state)) = (node.my_slot(), node.state.as_ref()) else { continue };
+        if let Some(action) = run_bot(c, state, slot) {
             node.submit(c, action);
             hub.pump(c);
             assert_in_sync(hub);
-        }
-        // the host steers anyone who dropped
-        while hub.nodes.iter_mut().find(|n| n.is_host() && !hub.offline.contains(&n.me)).is_some_and(|h| h.autopilot(c)) {
-            hub.pump(c);
-            assert_in_sync(hub);
+            moved = true;
         }
     }
-    panic!("fight did not end in {limit} rounds of moves");
+    while hub.nodes.iter_mut().find(|n| n.is_host() && !hub.offline.contains(&n.me)).is_some_and(|h| h.autopilot(c)) {
+        hub.pump(c);
+        assert_in_sync(hub);
+        moved = true;
+    }
+    moved
+}
+
+fn play_out(c: &Content, hub: &mut Hub, limit: usize) -> Stage {
+    for _ in 0..limit {
+        if over(hub) {
+            return stage(hub);
+        }
+        assert!(step(c, hub), "nobody can move in {:?}", stage(hub));
+    }
+    panic!("the run did not end in {limit} passes");
+}
+
+/// Votes and plays until the party is in a fight.
+fn into_combat(c: &Content, hub: &mut Hub) {
+    for _ in 0..50 {
+        if stage(hub) == Stage::Combat {
+            return;
+        }
+        assert!(step(c, hub));
+    }
+    panic!("never reached a fight");
 }
 
 #[test]
@@ -107,20 +122,22 @@ fn lobby_fills_and_heroes_are_unique() {
     hub.node(2).set_ready(true);
     hub.pump(&c);
     assert!(!hub.node(1).lobby.players[1].ready, "no ready without a hero");
-    assert!(!hub.node(1).start(&c, 1, ids(&["grey_wolf"])), "can't start until everyone is ready");
-    assert!(!hub.node(2).start(&c, 1, ids(&["grey_wolf"])), "only the host starts");
+    assert!(!hub.node(1).start(&c, 1), "can't start until everyone is ready");
+    assert!(!hub.node(2).start(&c, 1), "only the host starts");
 }
 
 #[test]
-fn four_players_stay_in_sync_to_the_end() {
+fn four_players_stay_in_sync_through_a_whole_run() {
     let c = content();
-    for seed in [3, 4, 5] {
-        let mut hub = party(&c, 4, &["kikimora", "grey_wolf", "grey_wolf", "grey_wolf"], seed);
+    for seed in [3, 4] {
+        let mut hub = party(&c, 4, seed);
         assert_in_sync(&hub);
-        assert_eq!(hub.node(2).state.as_ref().unwrap().heroes.len(), 4);
+        let run = hub.node(2).state.clone().unwrap();
+        assert_eq!(run.players.len(), 4);
+        assert_eq!(run.players[2].hero, "volkolak");
         assert_eq!(hub.node(3).my_slot(), Some(2));
-        let end = play_out(&c, &mut hub, 400);
-        assert_ne!(end, Phase::Heroes);
+        let end = play_out(&c, &mut hub, 20_000);
+        assert!(matches!(end, Stage::Victory | Stage::Defeat));
         assert_in_sync(&hub);
         assert!(hub.nodes.iter().all(|n| n.n == hub.nodes[0].n));
     }
@@ -129,22 +146,28 @@ fn four_players_stay_in_sync_to_the_end() {
 #[test]
 fn illegal_action_is_refused_and_changes_nothing() {
     let c = content();
-    let mut hub = party(&c, 2, &["kikimora"], 9);
+    let mut hub = party(&c, 2, 9);
+    into_combat(&c, &mut hub);
     let before = hashes(&hub);
     hub.node(2).take_notes();
-    hub.node(2).submit(&c, CombatAction::Play { card: 999_999, target: None });
+    hub.node(2).submit(&c, RunAction::Combat(CombatAction::Play { card: 999_999, target: None }));
     hub.pump(&c);
     assert_eq!(hashes(&hub), before);
-    assert!(hub.node(2).take_notes().contains(&Note::Refused(ActionError::NoSuchCard)));
+    assert!(hub.node(2).take_notes().contains(&Note::Refused(RunError::Combat(ActionError::NoSuchCard))));
+    // and an action for the wrong stage
+    hub.node(2).submit(&c, RunAction::Sleep);
+    hub.pump(&c);
+    assert_eq!(hashes(&hub), before);
+    assert!(hub.node(2).take_notes().contains(&Note::Refused(RunError::WrongStage)));
 }
 
 #[test]
 fn a_cheating_client_cannot_act_for_someone_else() {
     let c = content();
-    let mut hub = party(&c, 2, &["kikimora"], 9);
-    // peer 2 forges a "host says" message; it must be ignored by peer 1 (the real host)
+    let mut hub = party(&c, 2, 9);
+    // peer 2 forges a "host says" message; the real host must ignore it
     let before = hashes(&hub);
-    hub.node(1).handle(&c, 2, Msg::Did { n: 1, player: 0, action: CombatAction::Ready(true) });
+    hub.node(1).handle(&c, 2, Msg::Did { n: 1, player: 0, action: RunAction::Vote(0) });
     hub.pump(&c);
     assert_eq!(hashes(&hub), before);
 }
@@ -152,13 +175,13 @@ fn a_cheating_client_cannot_act_for_someone_else() {
 #[test]
 fn drifted_client_is_repaired_by_snapshot() {
     let c = content();
-    let mut hub = party(&c, 2, &["kikimora"], 9);
-    hub.node(2).state.as_mut().unwrap().heroes[0].hp -= 7;
+    let mut hub = party(&c, 2, 9);
+    hub.node(2).state.as_mut().unwrap().players[0].gold += 500;
     assert_ne!(hashes(&hub)[0], hashes(&hub)[1]);
     hub.node(2).take_notes();
-    // closing the round makes the host publish a hash
-    hub.node(1).submit(&c, CombatAction::Ready(true));
-    hub.node(2).submit(&c, CombatAction::Ready(true));
+    // moving on (here: into the first fight) makes the host publish a hash
+    hub.node(1).submit(&c, RunAction::Vote(0));
+    hub.node(2).submit(&c, RunAction::Vote(0));
     hub.pump(&c);
     assert_in_sync(&hub);
     assert!(hub.node(2).take_notes().contains(&Note::Resynced));
@@ -167,86 +190,74 @@ fn drifted_client_is_repaired_by_snapshot() {
 #[test]
 fn dropped_player_is_steered_by_autopilot_and_can_return() {
     let c = content();
-    let mut hub = party(&c, 3, &["kikimora", "grey_wolf"], 6);
+    let mut hub = party(&c, 3, 6);
+    into_combat(&c, &mut hub);
     // peer 3 loses connection
     hub.offline.push(3);
     hub.node(1).peer_left(3);
     hub.node(2).peer_left(3);
     hub.pump(&c);
     assert!(!hub.node(2).lobby.players[2].connected);
-    let round = hub.node(1).state.as_ref().unwrap().round;
-    for _ in 0..40 {
-        if hub.node(1).state.as_ref().unwrap().round > round + 1 {
+    let floors = hub.node(1).state.as_ref().unwrap().floors_cleared;
+    for _ in 0..4000 {
+        if over(&hub) || hub.node(1).state.as_ref().unwrap().floors_cleared >= floors + 2 {
             break;
         }
-        for p in [1, 2] {
-            let node = hub.node(p);
-            let (slot, state) = (node.my_slot().unwrap(), node.state.as_ref().unwrap());
-            if state.phase == Phase::Heroes && !state.heroes[slot as usize].ready && !state.heroes[slot as usize].downed {
-                let a = bot::choose(&c, state, slot);
-                node.submit(&c, a);
-                hub.pump(&c);
-            }
-        }
-        while hub.node(1).autopilot(&c) {
-            hub.pump(&c);
-        }
+        assert!(step(&c, &mut hub));
     }
-    assert!(hub.node(1).state.as_ref().unwrap().round > round + 1, "rounds keep closing without the dropped player");
+    assert!(over(&hub) || hub.node(1).state.as_ref().unwrap().floors_cleared >= floors + 2, "the run goes on without the dropped player");
+    if over(&hub) {
+        return;
+    }
 
-    // peer 3 comes back with a stale state and says hello again
+    // peer 3 comes back with a stale run and says hello again
     hub.offline.clear();
     let stale = hub.node(3).state.as_ref().unwrap().hash64();
     assert_ne!(stale, hub.node(1).state.as_ref().unwrap().hash64());
-    let rejoin = Node::join(3, "p3", 1);
-    *hub.node(3) = rejoin;
+    *hub.node(3) = Node::join(3, "p3", 1);
     hub.pump(&c);
     assert_in_sync(&hub);
     assert!(hub.node(1).lobby.players[2].connected);
     assert_eq!(hub.node(3).my_slot(), Some(2));
-    assert!(!hub.node(1).autopilot(&c) || hub.node(1).state.as_ref().unwrap().heroes[2].ready, "autopilot lets go of a returned player");
-    let end = play_out(&c, &mut hub, 400);
-    assert_ne!(end, Phase::Heroes);
+    assert!(!hub.node(1).autopilot(&c), "the autopilot lets go of a returned player");
+    let end = play_out(&c, &mut hub, 20_000);
+    assert!(matches!(end, Stage::Victory | Stage::Defeat));
     assert_in_sync(&hub);
 }
 
 #[test]
-fn fight_survives_the_host_leaving() {
+fn the_run_survives_the_host_leaving() {
     let c = content();
-    let mut hub = party(&c, 3, &["kikimora", "grey_wolf"], 8);
-    // a few moves under the first host
-    for p in [2, 3] {
-        let node = hub.node(p);
-        let a = bot::choose(&c, node.state.as_ref().unwrap(), node.my_slot().unwrap());
-        node.submit(&c, a);
-        hub.pump(&c);
-    }
+    let mut hub = party(&c, 3, 8);
+    into_combat(&c, &mut hub);
     // peer 2 asks for something the host never gets to answer
     hub.offline.push(1);
     let node = hub.node(2);
-    let a = bot::choose(&c, node.state.as_ref().unwrap(), node.my_slot().unwrap());
+    let action = run_bot(&c, node.state.as_ref().unwrap(), node.my_slot().unwrap()).unwrap();
     let before = node.n;
-    node.submit(&c, a);
+    node.submit(&c, action);
     hub.pump(&c);
     assert_eq!(hub.node(2).n, before, "nothing confirms it while the host is gone");
 
     // Steam hands the lobby to peer 2
     for p in [2, 3] {
         hub.node(p).peer_left(1);
-        hub.node(p).host_changed(2);
+        hub.node(p).host_changed(&c, 2);
     }
     hub.pump(&c);
     assert!(hub.node(2).is_host());
+    assert!(hub.node(2).n > before, "the unanswered request went to the new host");
     assert_in_sync(&hub);
-    let end = play_out(&c, &mut hub, 400);
-    assert_ne!(end, Phase::Heroes);
+    let end = play_out(&c, &mut hub, 20_000);
+    assert!(matches!(end, Stage::Victory | Stage::Defeat));
     assert_in_sync(&hub);
 }
 
 #[test]
 fn messages_round_trip_through_bytes() {
     let c = content();
-    let hub = party(&c, 2, &["kikimora"], 9);
+    let mut hub = party(&c, 2, 9);
+    into_combat(&c, &mut hub);
     let state = hub.nodes[0].state.clone().unwrap();
     let msg = Msg::Snapshot { n: 5, lobby: hub.nodes[0].lobby.clone(), state: Box::new(state.clone()) };
     let Some(Msg::Snapshot { n, state: back, .. }) = Msg::decode(&msg.encode()) else { panic!("lost in transit") };

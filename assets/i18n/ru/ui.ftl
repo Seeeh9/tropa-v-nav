@@ -71,3 +71,40 @@ lobby-invite = Позвать друга
 lobby-start = В путь
 lobby-waiting = Ждём, пока каждый выберет героя и нажмёт «Готов».
 lobby-leave = Покинуть отряд
+
+lobby-wanderer = Путник
+
+run-party-line = { $name }  ·  HP { $hp }/{ $max }  ·  золото { $gold }  ·  карт { $cards }
+run-waiting = Ждём остальных…
+
+map-title = Акт { $act }
+map-hint = Выберите следующий узел тропы. Отряд идёт туда, куда укажет большинство; при равенстве решает жребий.
+map-voted = Ваша фишка стоит. Её можно переставить, пока не проголосовали все.
+node-Fight = Бой
+node-Elite = Элита
+node-Event = Знамение
+node-Rest = Костёр
+node-Shop = Коробейник
+node-Chest = Ларь
+node-Boss = Босс
+
+reward-title = Добыча
+reward-gold = Золото: +{ $n }
+reward-relic = Реликвия: { $relic }
+reward-pick = Возьмите одну карту в колоду или пропустите.
+reward-skip = Пропустить
+
+rest-title = Костёр
+rest-sleep = Отдохнуть (+{ $n } HP)
+rest-upgrade = Улучшить карту
+rest-upgrade-hint = Какую карту улучшить? Показано, какой она станет.
+
+end-victory = Игла сломана
+end-defeat = Тропа оборвалась
+end-stats = Этажей пройдено: { $floors }  ·  элит: { $elites }  ·  боссов: { $bosses }
+end-oberegi = Обереги: +{ $n }
+
+error-WrongStage = Сейчас это сделать нельзя
+error-BadChoice = Так выбрать нельзя
+error-AlreadyDone = Вы уже сделали выбор
+error-NotEnoughGold = Не хватает золота

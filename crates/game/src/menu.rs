@@ -3,13 +3,12 @@
 use crate::art::Art;
 use crate::battle::Btn;
 use crate::l10n::L10n;
-use crate::session::{Db, PendingBattle};
+use crate::session::Db;
 use crate::theme::{self, Fonts};
 use crate::{AppState, Stage, STAGE_H, STAGE_W};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
-use nav_core::*;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), enter_menu)
@@ -53,18 +52,6 @@ pub fn menu_button(label: String, fonts: &Fonts) -> impl Bundle {
     )
 }
 
-/// Picks a fight for a lone hero: any normal encounter of the first act.
-pub fn solo_battle(db: &Content, hero: &str, seed: u64) -> Option<PendingBattle> {
-    let mut rng = Rng::new(seed);
-    let pool: Vec<&EncounterDef> = db.encounters.values().filter(|e| e.act == 1 && e.kind == EncounterKind::Normal).collect();
-    let enc = rng.pick(&pool)?;
-    Some(PendingBattle { party: vec![HeroSetup::fresh(db, hero)?], enemies: enc.enemies.clone(), seed, me: 0, bots: vec![] })
-}
-
-fn now_seed() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)
-}
-
 fn enter_menu(
     mut commands: Commands,
     stage: Single<Entity, With<Stage>>,
@@ -87,11 +74,11 @@ fn enter_menu(
             (theme::text(l10n.t("game-subtitle"), &fonts.body, 30.0, theme::CANDLE), Node { margin: UiRect::bottom(px(40)), ..default() }),
             (
                 menu_button(l10n.t("menu-solo"), &fonts),
-                observe(|_: On<Activate>, mut commands: Commands, db: Res<Db>, mut next: ResMut<NextState<AppState>>| {
-                    if let Some(b) = solo_battle(&db.0, "bogatyr", now_seed()) {
-                        commands.insert_resource(b);
-                        next.set(AppState::Battle);
-                    }
+                observe(|_: On<Activate>, mut commands: Commands, db: Res<Db>, steam: Option<Res<crate::steam::Steam>>, l10n: Res<L10n>, mut next: ResMut<NextState<AppState>>| {
+                    // alone is just a party of one: same lobby, same rules, no Steam traffic
+                    let name = steam.map(|s| s.client.friends().name()).unwrap_or_else(|| l10n.t("lobby-wanderer"));
+                    crate::net::start_offline(&mut commands, &db.0, &name, 0);
+                    next.set(AppState::Lobby);
                 }),
             ),
             (

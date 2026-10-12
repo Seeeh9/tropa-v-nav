@@ -3,8 +3,9 @@
 //! The host is the single source of truth. A client sends the action it wants;
 //! the host validates it against its own state, applies it, and broadcasts it
 //! with a running number. Every machine applies the same numbered actions to
-//! the same deterministic rules, so they all hold the same state. Once a round
-//! the host sends a hash; a client that disagrees asks for a full snapshot.
+//! the same deterministic rules, so they all hold the same run. Whenever the
+//! run moves on (a new round, a new stage, a new floor) the host sends a hash;
+//! a client that disagrees asks for a full snapshot.
 //!
 //! A [`Node`] is one machine's view. It never touches the network: it takes
 //! incoming messages through [`Node::handle`] and leaves outgoing ones in
@@ -50,8 +51,9 @@ impl Lobby {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StartInfo {
     pub seed: u64,
-    pub party: Vec<HeroSetup>,
-    pub enemies: Vec<Id>,
+    /// Heroes in slot order.
+    pub heroes: Vec<Id>,
+    pub circle: u8,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -62,19 +64,19 @@ pub enum Msg {
     Lobby(Lobby),
     PickHero(Option<Id>),
     SetReady(bool),
-    /// Host -> everyone: the fight begins from this exact setup.
+    /// Host -> everyone: the run begins from this exact setup.
     Start(StartInfo),
     /// Client -> host: "I want to do this". `seq` lets the client match a refusal.
-    Want { seq: u32, action: CombatAction },
+    Want { seq: u32, action: RunAction },
     /// Host -> everyone: action number `n` in the shared log.
-    Did { n: u32, player: u8, action: CombatAction },
-    Refused { seq: u32, error: ActionError },
-    /// Host -> everyone at each new round.
+    Did { n: u32, player: u8, action: RunAction },
+    Refused { seq: u32, error: RunError },
+    /// Host -> everyone whenever the run moves on.
     Hash { n: u32, hash: u64 },
     /// Client -> host: my hash differs, or I just rejoined.
     Resync,
     /// Host -> one client: the whole state after `n` actions.
-    Snapshot { n: u32, lobby: Lobby, state: Box<Combat> },
+    Snapshot { n: u32, lobby: Lobby, state: Box<Run> },
     /// Quick signal without chat, pinned to a unit.
     Ping { kind: u8, at: UnitRef },
 }
@@ -101,8 +103,8 @@ pub enum Note {
     LobbyChanged,
     Started,
     /// An action was applied; these are its rule events.
-    Applied { player: u8, events: Vec<Event> },
-    Refused(ActionError),
+    Applied { player: u8, events: Vec<RunEvent> },
+    Refused(RunError),
     /// State was replaced wholesale; redraw without animation.
     Resynced,
     Ping { from: u8, kind: u8, at: UnitRef },
@@ -113,13 +115,13 @@ pub struct Node {
     pub me: Peer,
     pub name: String,
     pub lobby: Lobby,
-    pub state: Option<Combat>,
+    pub state: Option<Run>,
     /// Actions applied so far.
     pub n: u32,
     seq: u32,
     /// Wants sent to the host and not yet answered, resent if the host changes.
-    pending: Vec<(u32, CombatAction)>,
-    last_hashed_round: u32,
+    pending: Vec<(u32, RunAction)>,
+    last_mark: u64,
     out: Vec<(To, Msg)>,
     notes: Vec<Note>,
 }
@@ -150,7 +152,7 @@ impl Node {
             n: 0,
             seq: 0,
             pending: Vec::new(),
-            last_hashed_round: 0,
+            last_mark: 0,
             out: Vec::new(),
             notes: Vec::new(),
         }
@@ -218,15 +220,15 @@ impl Node {
         }
     }
 
-    /// Host only: begin the fight. Returns false if the lobby isn't ready.
-    pub fn start(&mut self, c: &Content, seed: u64, enemies: Vec<Id>) -> bool {
+    /// Host only: begin the run. Returns false if the lobby isn't ready.
+    pub fn start(&mut self, c: &Content, seed: u64) -> bool {
         if !self.is_host() || !self.lobby.can_start() || self.lobby.started {
             return false;
         }
-        let party: Option<Vec<HeroSetup>> = self.lobby.players.iter().map(|p| HeroSetup::fresh(c, p.hero.as_deref()?)).collect();
-        let Some(party) = party else { return false };
+        let heroes: Option<Vec<Id>> = self.lobby.players.iter().map(|p| p.hero.clone().filter(|h| c.heroes.contains_key(h))).collect();
+        let Some(heroes) = heroes else { return false };
         self.lobby.started = true;
-        let info = StartInfo { seed, party, enemies };
+        let info = StartInfo { seed, heroes, circle: self.lobby.circle };
         self.out.push((To::All, Msg::Lobby(self.lobby.clone())));
         self.out.push((To::All, Msg::Start(info.clone())));
         self.begin(c, &info);
@@ -234,8 +236,8 @@ impl Node {
     }
 
     fn begin(&mut self, c: &Content, info: &StartInfo) {
-        let (state, _) = nav_core::start(c, &info.party, &info.enemies, info.seed);
-        self.last_hashed_round = state.round;
+        let Some(state) = Run::new(c, &info.heroes, info.seed, info.circle) else { return };
+        self.last_mark = mark(&state);
         self.state = Some(state);
         self.n = 0;
         self.pending.clear();
@@ -246,7 +248,7 @@ impl Node {
     // ---- actions ----
 
     /// The local player wants to act.
-    pub fn submit(&mut self, c: &Content, action: CombatAction) {
+    pub fn submit(&mut self, c: &Content, action: RunAction) {
         let Some(slot) = self.my_slot() else { return };
         if self.is_host() {
             if let Err(e) = self.host_apply(c, slot, action) {
@@ -260,15 +262,15 @@ impl Node {
     }
 
     /// Host: validate, apply, broadcast.
-    fn host_apply(&mut self, c: &Content, slot: u8, action: CombatAction) -> Result<(), ActionError> {
-        let state = self.state.as_mut().ok_or(ActionError::NotHeroPhase)?;
-        let events = nav_core::apply(c, state, slot, &action)?;
+    fn host_apply(&mut self, c: &Content, slot: u8, action: RunAction) -> Result<(), RunError> {
+        let state = self.state.as_mut().ok_or(RunError::WrongStage)?;
+        let events = state.apply(c, slot, &action)?;
         self.n += 1;
         self.out.push((To::All, Msg::Did { n: self.n, player: slot, action }));
         self.notes.push(Note::Applied { player: slot, events });
         let state = self.state.as_ref().unwrap();
-        if state.round != self.last_hashed_round {
-            self.last_hashed_round = state.round;
+        if mark(state) != self.last_mark {
+            self.last_mark = mark(state);
             self.out.push((To::All, Msg::Hash { n: self.n, hash: state.hash64() }));
         }
         Ok(())
@@ -281,15 +283,8 @@ impl Node {
             return false;
         }
         let Some(state) = &self.state else { return false };
-        if state.phase != Phase::Heroes {
-            return false;
-        }
-        let slot = self.lobby.players.iter().enumerate().find_map(|(i, p)| {
-            let h = state.hero(i as u8)?;
-            (!p.connected && !h.downed && !h.ready).then_some(i as u8)
-        });
-        let Some(slot) = slot else { return false };
-        let action = bot::choose(c, state, slot);
+        let due = self.lobby.players.iter().enumerate().find_map(|(i, p)| if p.connected { None } else { run_bot(c, state, i as u8).map(|a| (i as u8, a)) });
+        let Some((slot, action)) = due else { return false };
         self.host_apply(c, slot, action).is_ok()
     }
 
@@ -319,7 +314,7 @@ impl Node {
     }
 
     /// The transport says the lobby has a new owner (the old host left).
-    pub fn host_changed(&mut self, new_host: Peer) {
+    pub fn host_changed(&mut self, c: &Content, new_host: Peer) {
         if self.lobby.host == new_host {
             return;
         }
@@ -328,6 +323,12 @@ impl Node {
         if self.is_host() {
             // everyone holds the full state, so the new host simply carries on
             self.broadcast_lobby();
+            // what this machine asked the old host for, it now decides itself
+            if let Some(slot) = self.my_slot() {
+                for (_, action) in std::mem::take(&mut self.pending) {
+                    let _ = self.host_apply(c, slot, action);
+                }
+            }
             if let Some(state) = &self.state {
                 self.out.push((To::All, Msg::Hash { n: self.n, hash: state.hash64() }));
             }
@@ -394,7 +395,7 @@ impl Node {
                     return;
                 }
                 let Some(state) = self.state.as_mut() else { return };
-                match nav_core::apply(c, state, player, &action) {
+                match state.apply(c, player, &action) {
                     Ok(events) => {
                         self.n = n;
                         if Some(player) == self.lobby.slot_of(self.me) {
@@ -428,6 +429,21 @@ impl Node {
             _ => {}
         }
     }
+}
+
+/// A cheap fingerprint of "where the run is": it changes on a new round, stage or floor.
+fn mark(run: &Run) -> u64 {
+    let stage = match &run.stage {
+        Stage::Map { .. } => 1,
+        Stage::Combat => 2,
+        Stage::Reward { .. } => 3,
+        Stage::Rest { .. } => 4,
+        Stage::Victory => 5,
+        Stage::Defeat => 6,
+    };
+    let round = run.combat.as_ref().map(|c| c.round as u64).unwrap_or(0);
+    let at = run.at.map(|(f, n)| f as u64 * 16 + n as u64 + 1).unwrap_or(0);
+    stage | round << 8 | at << 40 | (run.act as u64) << 56
 }
 
 /// In-memory transport: several nodes in one process, for tests and for the

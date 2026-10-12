@@ -71,3 +71,40 @@ lobby-invite = Invite a friend
 lobby-start = Set out
 lobby-waiting = Waiting for everyone to pick a hero and press Ready.
 lobby-leave = Leave the party
+
+lobby-wanderer = Wanderer
+
+run-party-line = { $name }  ·  HP { $hp }/{ $max }  ·  gold { $gold }  ·  cards { $cards }
+run-waiting = Waiting for the others…
+
+map-title = Act { $act }
+map-hint = Choose the next node on the path. The party goes where most point; a tie is settled by lot.
+map-voted = Your token is placed. You can move it until everyone has voted.
+node-Fight = Fight
+node-Elite = Elite
+node-Event = Omen
+node-Rest = Fire
+node-Shop = Pedlar
+node-Chest = Chest
+node-Boss = Boss
+
+reward-title = Spoils
+reward-gold = Gold: +{ $n }
+reward-relic = Relic: { $relic }
+reward-pick = Take one card into your deck, or skip.
+reward-skip = Skip
+
+rest-title = The Fire
+rest-sleep = Rest (+{ $n } HP)
+rest-upgrade = Upgrade a card
+rest-upgrade-hint = Which card? Shown as it will become.
+
+end-victory = The needle is broken
+end-defeat = The path has ended
+end-stats = Floors cleared: { $floors }  ·  elites: { $elites }  ·  bosses: { $bosses }
+end-oberegi = Wards: +{ $n }
+
+error-WrongStage = You can't do that now
+error-BadChoice = That can't be chosen
+error-AlreadyDone = You have already chosen
+error-NotEnoughGold = Not enough gold

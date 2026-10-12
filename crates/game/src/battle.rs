@@ -201,6 +201,15 @@ struct HoverTop(Option<u32>);
 
 // ---- layout ----
 
+/// How far a backdrop is lifted, in stage pixels, so that its ground meets the units' feet.
+fn ground_lift(backdrop: &str) -> f32 {
+    match backdrop {
+        "bg/act2_battle" => 155.0,
+        "bg/act3_battle" => 140.0,
+        _ => 150.0,
+    }
+}
+
 fn hero_foot(slot: u8) -> Vec2 {
     // staggered front and back rows, far enough apart that every HP bar stays readable
     match slot {
@@ -271,7 +280,23 @@ fn enter(
         .with_children(|p| {
             // each act has its own backdrop; until it is painted, the forest stands in
             let backdrop = [format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(&assets, s).is_some()).unwrap_or_default();
-            p.spawn((layer(), art.node(&assets, &backdrop, theme::SOOT), Pickable::IGNORE));
+            // every backdrop is painted with its open ground at about three quarters of its height;
+            // units stand higher than that to leave room for the hand, so the picture is lifted
+            // until that ground lies under their feet, and the strip it leaves is the hand's dark apron
+            let lift = ground_lift(&backdrop);
+            p.spawn((
+                Node { position_type: PositionType::Absolute, left: px(0), top: px(-lift), width: px(STAGE_W), height: px(STAGE_H), ..default() },
+                art.node(&assets, &backdrop, theme::SOOT),
+                Pickable::IGNORE,
+            ));
+            for (i, alpha) in [0.18, 0.4, 0.62, 0.82, 1.0].into_iter().enumerate() {
+                let top = STAGE_H - lift - 120.0 + 30.0 * i as f32;
+                p.spawn((
+                    Node { position_type: PositionType::Absolute, left: px(0), top: px(top), width: px(STAGE_W), height: px(if i == 4 { lift + 1.0 } else { 30.0 }), ..default() },
+                    BackgroundColor(theme::SOOT.with_alpha(alpha)),
+                    Pickable::IGNORE,
+                ));
+            }
             p.spawn((UnitLayer, layer(), Pickable::IGNORE));
 
             // party panel, top-left
@@ -498,6 +523,8 @@ fn sync_units(
             .with_children(|u| {
                 u.spawn((
                     Node { height: px(HEAD_ROOM), align_items: AlignItems::Center, ..default() },
+                    // text is never hidden by a sprite, this unit's or a neighbour's
+                    GlobalZIndex(20),
                     Pickable::IGNORE,
                     children![match unit {
                         UnitRef::Enemy(uid) => (Label::Intent(uid), theme::text("", &fonts.num, 26.0, theme::BONE)),
@@ -505,11 +532,50 @@ fn sync_units(
                         UnitRef::Hero(_) => (Label::Intent(0), theme::text("", &fonts.num, 26.0, theme::BONE)),
                     }],
                 ));
+                // the feet are painted a little above the bottom edge of the picture
+                u.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px((UNIT_W - size.x * 0.86) / 2.0),
+                        top: px(HEAD_ROOM + size.y * 0.957 - 15.0),
+                        width: px(size.x * 0.86),
+                        height: px(30),
+                        border_radius: BorderRadius::all(percent(50)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::BLACK.with_alpha(0.42)),
+                    Pickable::IGNORE,
+                ));
+                u.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px((UNIT_W - size.x * 0.56) / 2.0),
+                        top: px(HEAD_ROOM + size.y * 0.957 - 9.0),
+                        width: px(size.x * 0.56),
+                        height: px(18),
+                        border_radius: BorderRadius::all(percent(50)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::BLACK.with_alpha(0.45)),
+                    Pickable::IGNORE,
+                ));
                 let sprite = art.node(&assets, &stem, color);
                 let base = sprite.0.color;
                 u.spawn((
                     UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None },
-                    Node { width: px(size.x), height: px(size.y), ..default() },
+                    // elites and bosses are painted square and stand larger than their slot:
+                    // the picture spills over the sides and the top, the layout box stays put
+                    {
+                        let wide = !is_hero && art.aspect(&stem).is_some_and(|a| a > 0.9);
+                        let draw = if wide { Vec2::splat(size.y * 1.25) } else { size };
+                        Node {
+                            width: px(draw.x),
+                            height: px(draw.y),
+                            margin: UiRect { left: px((size.x - draw.x) / 2.0), right: px((size.x - draw.x) / 2.0), top: px(size.y - draw.y), bottom: px(0) },
+                            flex_shrink: 0.0,
+                            ..default()
+                        }
+                    },
                     sprite,
                     UiTransform::IDENTITY,
                     Pickable::IGNORE,
@@ -526,6 +592,7 @@ fn sync_units(
                     },
                     BackgroundColor(theme::SOOT),
                     BorderColor::all(Color::srgb(0.32, 0.26, 0.20)),
+                    GlobalZIndex(20),
                     Pickable::IGNORE,
                     children![
                         (
@@ -563,6 +630,7 @@ fn sync_units(
                     theme::text("", &fonts.body, 16.0, theme::ROTLIGHT),
                     TextLayout::justify(Justify::Center),
                     Node { max_width: px(UNIT_W), ..default() },
+                    GlobalZIndex(20),
                 ));
             });
     }

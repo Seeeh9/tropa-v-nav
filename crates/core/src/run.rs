@@ -854,6 +854,21 @@ impl Run {
         ev.extend(events.into_iter().map(RunEvent::Combat));
     }
 
+    /// Puts the party straight into a fight with exactly these enemies.
+    /// For tests and the dev build's screen shortcuts; never reachable by a player action.
+    pub fn force_fight(&mut self, c: &Content, enemies: &[Id]) {
+        let party: Vec<HeroSetup> = self
+            .players
+            .iter()
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, potions: p.potions.clone() })
+            .collect();
+        let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
+        let (combat, _) = combat::start_with(c, &party, enemies, seed, CombatOpts::default());
+        self.combat = Some(combat);
+        self.fighting = Some(NodeKind::Fight);
+        self.stage = Stage::Combat;
+    }
+
     fn after_fight(&mut self, c: &Content, ev: &mut Vec<RunEvent>) {
         // the finished fight stays readable until the party walks on
         let Some(combat) = self.combat.clone() else { return };

@@ -5,6 +5,7 @@
 //!   TROPA_HERO=<id>             the local hero for `run`
 //!   TROPA_BOT_ME=1              the local seat is played by the autopilot too
 //!   TROPA_FORCE=shop|omen|rest  open `run` straight at that stage
+//!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 

@@ -45,6 +45,17 @@ impl Art {
             .find(|rel| self.root.join(rel).is_file())
     }
 
+    /// Width over height of the picture for `stem`, read from the PNG header.
+    pub fn aspect(&self, stem: &str) -> Option<f32> {
+        use std::io::Read;
+        let rel = self.find(stem, "png", "gemini")?;
+        let mut head = [0u8; 24];
+        std::fs::File::open(self.root.join(rel)).ok()?.read_exact(&mut head).ok()?;
+        let w = u32::from_be_bytes([head[16], head[17], head[18], head[19]]);
+        let h = u32::from_be_bytes([head[20], head[21], head[22], head[23]]);
+        (h > 0).then(|| w as f32 / h as f32)
+    }
+
     pub fn image(&self, assets: &AssetServer, stem: &str) -> Option<Handle<Image>> {
         self.find(stem, "png", "gemini").map(|p| assets.load(p))
     }

@@ -228,6 +228,25 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
+    // dev shortcut: TROPA_FIGHT=leshy,tree_guard opens on that fight
+    if let Ok(list) = std::env::var("TROPA_FIGHT") {
+        let enemies: Vec<String> = list.split(',').map(|s| s.trim().to_string()).filter(|s| db.enemies.contains_key(s)).collect();
+        if !enemies.is_empty() {
+            for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+                if let Some(run) = n.state.as_mut() {
+                    run.force_fight(db, &enemies);
+                    // TROPA_ACT=2 puts that fight on another act's backdrop
+                    if let Some(act) = std::env::var("TROPA_ACT").ok().and_then(|a| a.parse().ok()) {
+                        run.act = act;
+                    }
+                }
+            }
+            // no events announced this fight, so the battle screen is handed its state directly
+            if let (Some(combat), Some(me)) = (node.state.as_ref().and_then(|r| r.combat.clone()), node.my_slot()) {
+                commands.insert_resource(Session::from_state(combat, me, []));
+            }
+        }
+    }
     commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me, booked: false, ephemeral: true });
 }
 

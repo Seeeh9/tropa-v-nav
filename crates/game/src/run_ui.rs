@@ -27,7 +27,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_reward.run_if(in_state(AppState::Reward)))
         .add_systems(Update, draw_rest.run_if(in_state(AppState::Rest)))
         .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
-        .add_systems(Update, draw_omen.run_if(in_state(AppState::Omen)))
+        .add_systems(Update, (draw_omen, draw_trophy).run_if(in_state(AppState::Omen)))
         .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)));
 }
 
@@ -617,6 +617,61 @@ fn draw_omen(
             BackgroundColor(base),
             BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
             children![theme::text(label, &fonts.body, 22.0, if can { theme::BONE } else { theme::DIM })],
+            observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8))),
+            ChildOf(column),
+        ));
+    }
+}
+
+/// The boss's trophy: three relics, one vote, and the winner goes to everyone.
+fn draw_trophy(
+    mut commands: Commands,
+    mut status: ResMut<NetStatus>,
+    net: Option<Res<Net>>,
+    old: Query<Entity, With<ScreenRoot>>,
+    canvas: Single<Entity, With<Canvas>>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+) {
+    let Some(net) = net else { return };
+    let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
+    let Stage::Trophy { offers, picks } = &run.stage else { return };
+    let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Omen, *canvas, Color::srgb(0.06, 0.06, 0.08)) else { return };
+    party_panel(&mut commands, root, run, me, &fonts, &l10n);
+    let column = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(STAGE_W),
+                height: px(STAGE_H),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(18),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(root),
+        ))
+        .id();
+    commands.spawn((theme::text(l10n.t("trophy-title"), &fonts.title, 56.0, theme::BONE), ChildOf(column)));
+    commands.spawn((theme::text(l10n.t("trophy-hint"), &fonts.body, 22.0, theme::DIM), Node { margin: UiRect::bottom(px(14)), ..default() }, ChildOf(column)));
+    let mine = picks[me as usize];
+    for (i, id) in offers.iter().enumerate() {
+        let voters = picks.iter().filter(|v| **v == Some(i as u8)).count();
+        let mut label = format!("{}  —  {}", l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")));
+        if voters > 0 {
+            label.push_str(&format!("   [{voters}]"));
+        }
+        let base = if mine == Some(i as u8) { theme::SWAMP } else { theme::PEAT };
+        commands.spawn((
+            Button,
+            Hovered::default(),
+            Btn(base),
+            Node { width: px(1200), padding: UiRect::axes(px(18), px(12)), border: UiRect::all(px(2)), ..default() },
+            BackgroundColor(base),
+            BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+            children![theme::text(label, &fonts.body, 22.0, theme::BONE)],
             observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8))),
             ChildOf(column),
         ));

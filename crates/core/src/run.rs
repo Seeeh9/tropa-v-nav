@@ -80,6 +80,8 @@ pub enum Stage {
     Shop { stock: Vec<Stock>, done: Vec<bool> },
     /// An omen. `picks[player]` is the chosen option (a vote, for vote omens).
     Omen { id: Id, picks: Vec<Option<u8>> },
+    /// A boss trophy: the party votes for one of `offers`, and every player gets it.
+    Trophy { offers: Vec<Id>, picks: Vec<Option<u8>> },
     Victory,
     Defeat,
 }
@@ -92,7 +94,7 @@ pub struct Unlocks {
     pub relic_tier: u8,
     /// Herbalist's hut level 0..=2: ten potions per level.
     pub potion_tier: u8,
-    /// Tavern level 0..=2: eight omens, then six more per level.
+    /// Tavern level 0..=2: twenty omens, then fifteen more per level.
     pub omen_tier: u8,
     /// Hero level of each player, in slot order: uncommon cards from 2, rare from 4.
     pub hero_levels: Vec<u32>,
@@ -498,7 +500,7 @@ impl Run {
                 }
                 ev.push(RunEvent::CardTaken { player, card });
                 if rewards.iter().all(|r| r.done) {
-                    self.to_map(&mut ev);
+                    self.to_map(c, &mut ev);
                 }
             }
             (RunAction::Sleep, Stage::Rest { done }) | (RunAction::Upgrade(_), Stage::Rest { done }) => {
@@ -526,7 +528,7 @@ impl Run {
                 }
                 done[p] = true;
                 if done.iter().all(|d| *d) {
-                    self.to_map(&mut ev);
+                    self.to_map(c, &mut ev);
                 }
             }
             (RunAction::GiveGold { to, amount }, Stage::Rest { .. } | Stage::Shop { .. }) => {
@@ -600,7 +602,38 @@ impl Run {
             (RunAction::LeaveShop, Stage::Shop { done, .. }) => {
                 done[p] = true;
                 if done.iter().all(|d| *d) {
-                    self.to_map(&mut ev);
+                    self.to_map(c, &mut ev);
+                }
+            }
+            (RunAction::Choose(choice), Stage::Trophy { offers, picks }) => {
+                if *choice as usize >= offers.len() {
+                    return Err(RunError::BadChoice);
+                }
+                picks[p] = Some(*choice);
+                ev.push(RunEvent::Voted { player, choice: *choice });
+                if picks.iter().all(|v| v.is_some()) {
+                    let cast: Vec<u8> = picks.iter().flatten().copied().collect();
+                    let offers = offers.clone();
+                    let mut counts = vec![0u32; offers.len()];
+                    for v in &cast {
+                        counts[*v as usize] += 1;
+                    }
+                    let best = counts.iter().copied().max().unwrap_or(0);
+                    let tied: Vec<u8> = (0..offers.len() as u8).filter(|i| counts[*i as usize] == best).collect();
+                    let winner = if tied.len() == 1 {
+                        tied[0]
+                    } else {
+                        let chosen = *self.rng.pick(&tied).unwrap_or(&tied[0]);
+                        ev.push(RunEvent::Lot { tied: tied.clone(), chosen });
+                        chosen
+                    };
+                    ev.push(RunEvent::OmenResolved { option: winner });
+                    let relic = offers[winner as usize].clone();
+                    for q in 0..self.players.len() {
+                        self.players[q].relics.push(relic.clone());
+                        ev.push(RunEvent::RelicGained { player: q as u8, relic: relic.clone() });
+                    }
+                    self.stage = Stage::Map { votes: vec![None; self.players.len()] };
                 }
             }
             (RunAction::Choose(choice), Stage::Omen { id, picks }) => {
@@ -628,16 +661,16 @@ impl Run {
                             for q in 0..self.players.len() {
                                 self.apply_option(c, q, &gift, &mut ev);
                             }
-                            self.to_map(&mut ev);
+                            self.to_map(c, &mut ev);
                         } else if all {
-                            self.to_map(&mut ev);
+                            self.to_map(c, &mut ev);
                         }
                     }
                     // everyone decides for themselves, at once
                     EventKind::Personal | EventKind::Schism => {
                         self.apply_option(c, p, option, &mut ev);
                         if all {
-                            self.to_map(&mut ev);
+                            self.to_map(c, &mut ev);
                         }
                     }
                     // one choice for the party; a tie goes to the lot
@@ -662,7 +695,7 @@ impl Run {
                             for q in 0..self.players.len() {
                                 self.apply_option(c, q, option, &mut ev);
                             }
-                            self.to_map(&mut ev);
+                            self.to_map(c, &mut ev);
                         }
                     }
                 }
@@ -702,7 +735,7 @@ impl Run {
         }
     }
 
-    fn to_map(&mut self, ev: &mut Vec<RunEvent>) {
+    fn to_map(&mut self, c: &Content, ev: &mut Vec<RunEvent>) {
         // past the boss there is no map left in this act
         let boss_done = self.fighting == Some(NodeKind::Boss);
         self.fighting = None;
@@ -718,6 +751,14 @@ impl Run {
             self.act += 1;
             self.at = None;
             self.map = if self.act >= 4 { Map { floors: vec![] } } else { generate_map(&mut self.rng, Circle(self.circle)) };
+            // the boss leaves a trophy: three are offered, the party votes for one, everyone gets it
+            let mut offers: Vec<Id> = c.relics.values().filter(|r| r.pool == RelicPool::Boss && !self.players.iter().any(|p| p.relics.contains(&r.id))).map(|r| r.id.clone()).collect();
+            self.rng.shuffle(&mut offers);
+            offers.truncate(3);
+            if !offers.is_empty() {
+                self.stage = Stage::Trophy { offers, picks: vec![None; self.players.len()] };
+                return;
+            }
         }
         self.stage = Stage::Map { votes: vec![None; self.players.len()] };
     }
@@ -739,7 +780,7 @@ impl Run {
             NodeKind::Chest => {
                 self.floors_cleared += 1;
                 let rewards = (0..self.players.len()).map(|p| Reward { gold: 0, cards: vec![], relic: self.roll_relic(c, p), done: false }).collect();
-                self.grant(rewards, ev);
+                self.grant(c, rewards, ev);
             }
             NodeKind::Shop => {
                 self.floors_cleared += 1;
@@ -749,7 +790,7 @@ impl Run {
             NodeKind::Event => {
                 self.floors_cleared += 1;
                 let act = self.act;
-                let open = 8 + 6 * self.unlocks.omen_tier as usize;
+                let open = 20 + 15 * self.unlocks.omen_tier as usize;
                 let pool: Vec<&EventDef> = c.events.values().take(open).filter(|e| e.act == 0 || e.act == act).collect();
                 match self.rng.pick(&pool) {
                     Some(e) => self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] },
@@ -840,11 +881,11 @@ impl Run {
                 self.give_potion(c, p, ev);
             }
         }
-        self.grant(rewards, ev);
+        self.grant(c, rewards, ev);
     }
 
     /// Hands out gold and relics at once and leaves the card choice to the players.
-    fn grant(&mut self, mut rewards: Vec<Reward>, ev: &mut Vec<RunEvent>) {
+    fn grant(&mut self, c: &Content, mut rewards: Vec<Reward>, ev: &mut Vec<RunEvent>) {
         for (p, r) in rewards.iter_mut().enumerate() {
             if r.gold != 0 {
                 self.players[p].gold += r.gold;
@@ -862,7 +903,7 @@ impl Run {
         ev.push(RunEvent::Rewards);
         if rewards.iter().all(|r| r.done) {
             self.stage = Stage::Reward { rewards };
-            self.to_map(ev);
+            self.to_map(c, ev);
         } else {
             self.stage = Stage::Reward { rewards };
         }
@@ -1020,7 +1061,13 @@ impl Run {
         }
         let owned = self.players[p].relics.clone();
         let relics: Vec<&RelicDef> =
-            c.relics.values().filter(|r| r.rarity != Rarity::Starter && (r.hero.is_empty() || r.hero == hero) && !owned.contains(&r.id) && self.unlocks.relic_ok(r.rarity)).collect();
+            c.relics.values().filter(|r| r.rarity != Rarity::Starter && r.pool != RelicPool::Boss && (r.hero.is_empty() || r.hero == hero) && !owned.contains(&r.id) && self.unlocks.relic_ok(r.rarity)).collect();
+        // the first shelf is the pedlar's own: something found nowhere else
+        let wares: Vec<&RelicDef> = relics.iter().copied().filter(|r| r.pool == RelicPool::Shop).collect();
+        if let Some(r) = self.rng.pick(&wares) {
+            let cost = price(&mut self.rng, r.rarity) + 80;
+            stock.relics.push(Some((r.id.clone(), cost)));
+        }
         for _ in 0..40 {
             if stock.relics.len() == 3.min(relics.len()) {
                 break;
@@ -1048,7 +1095,7 @@ impl Run {
         let pool: Vec<&RelicDef> = c
             .relics
             .values()
-            .filter(|r| r.rarity != Rarity::Starter && (r.hero.is_empty() || r.hero == pl.hero))
+            .filter(|r| r.rarity != Rarity::Starter && r.pool == RelicPool::Any && (r.hero.is_empty() || r.hero == pl.hero))
             .filter(|r| !pl.relics.contains(&r.id) && self.unlocks.relic_ok(r.rarity))
             .collect();
         self.rng.pick(&pool).map(|r| r.id.clone())
@@ -1108,6 +1155,7 @@ pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
             let i = (0..def.options.len()).find(|i| def.options[*i].price <= pl.gold && closed != Some(*i as u8)).unwrap_or(def.options.len() - 1);
             Some(RunAction::Choose(i as u8))
         }
+        Stage::Trophy { picks, .. } => picks.get(p)?.is_none().then_some(RunAction::Choose(0)),
         Stage::Victory | Stage::Defeat => None,
     }
 }

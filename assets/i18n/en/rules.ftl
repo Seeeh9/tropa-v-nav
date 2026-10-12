@@ -207,3 +207,5 @@ herb-burst = Burst-grass
 herb-fern = Fern Flower
 kw-Passable = Passable
 kw-Passable-help = Drag the card onto an ally to hand it over for 1 Energy.
+trigger-SkillPlayed = When you play a Skill: { $fx }
+trigger-Hurt = When an enemy's blow costs you HP: { $fx }

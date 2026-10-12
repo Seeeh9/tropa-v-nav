@@ -208,3 +208,5 @@ herb-burst = Разрыв-трава
 herb-fern = Цвет папоротника
 kw-Passable = Передаётся
 kw-Passable-help = Перетащите карту на союзника, чтобы отдать её за 1 энергию.
+trigger-SkillPlayed = Когда вы играете умение: { $fx }
+trigger-Hurt = Когда удар врага стоит вам HP: { $fx }

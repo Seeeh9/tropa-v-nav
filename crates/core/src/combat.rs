@@ -436,6 +436,9 @@ impl<'a> Exec<'a> {
                     self.fire(other, Trigger::AllyHpLoss);
                 }
             }
+            if attack && !fell {
+                self.fire(i, Trigger::Hurt);
+            }
             // the upyr drinks: half of what it draws heals it
             if lifesteal {
                 if let Some(s) = src {
@@ -709,6 +712,9 @@ impl<'a> Exec<'a> {
             return Ok(());
         }
         self.fire(p, Trigger::CardPlayed);
+        if view.kind == CardType::Skill {
+            self.fire(p, Trigger::SkillPlayed);
+        }
         if view.kind == CardType::Attack {
             self.fire(p, Trigger::AttackPlayed);
             let h = self.hero(p);

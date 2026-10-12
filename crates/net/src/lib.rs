@@ -477,6 +477,7 @@ fn mark(run: &Run) -> u64 {
         Stage::Rest { .. } => 4,
         Stage::Shop { .. } => 7,
         Stage::Omen { .. } => 8,
+        Stage::Trophy { .. } => 9,
         Stage::Victory => 5,
         Stage::Defeat => 6,
     };

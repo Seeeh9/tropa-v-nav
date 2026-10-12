@@ -30,6 +30,7 @@ data_enum!(
     Tgt { Me, Target, AllFoes, RandomFoe, AllFriends, OtherFriends }
 );
 data_enum!(Pile { Hand, Draw, Discard });
+data_enum!(RelicPool { Any, Shop, Boss });
 data_enum!(Form { Human, Beast });
 data_enum!(MaskKind { Bear, Goat, Mara });
 data_enum!(RuneKind { Thunder, Frost, Mist, Flame, Zhiva });
@@ -166,6 +167,9 @@ data_enum!(Trigger {
     AttackPlayed,
     AllyHpLoss,
     Kill,
+    SkillPlayed,
+    // an enemy's blow cost you HP, and you are still standing
+    Hurt,
     Shifted,
     MaskChanged,
     AllyRaised,
@@ -305,12 +309,19 @@ pub struct HeroDef {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RelicDef {
     pub id: Id,
+    /// Where it turns up: anywhere, only on the pedlar's shelves, or as a boss trophy.
+    #[serde(default = "any_pool")]
+    pub pool: RelicPool,
     #[serde(default = "common")]
     pub rarity: Rarity,
     #[serde(default)]
     pub hero: Id,
     #[serde(default)]
     pub passives: Vec<Passive>,
+}
+
+fn any_pool() -> RelicPool {
+    RelicPool::Any
 }
 
 fn common() -> Rarity {

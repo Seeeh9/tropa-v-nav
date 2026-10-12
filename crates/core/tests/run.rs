@@ -605,3 +605,48 @@ fn fifty_omens_of_all_four_kinds() {
         }
     }
 }
+
+#[test]
+fn two_hundred_and_ten_relics_fifteen_for_each_hero() {
+    let c = content();
+    assert!(c.relics.len() >= 210, "{}", c.relics.len());
+    for hero in ["bogatyr", "vorozheya", "volhv", "volkolak", "znaharka", "skomoroh"] {
+        assert_eq!(c.relics.values().filter(|r| r.hero == hero).count(), 15, "{hero}");
+    }
+    assert_eq!(c.relics.values().filter(|r| r.pool == RelicPool::Shop).count(), 10);
+    assert_eq!(c.relics.values().filter(|r| r.pool == RelicPool::Boss).count(), 12);
+}
+
+#[test]
+fn a_boss_leaves_a_trophy_the_party_votes_on() {
+    let c = content();
+    let mut run = party(&c, 3, 3, 0);
+    run.stage = Stage::Trophy { offers: ids(&["likho_eye", "mara_sickle", "leshy_heart"]), picks: vec![None; 3] };
+    run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
+    run.apply(&c, 1, &RunAction::Choose(0)).unwrap();
+    assert_eq!(run.apply(&c, 2, &RunAction::Choose(7)), Err(RunError::BadChoice));
+    // a vote may be changed until the last one is cast
+    run.apply(&c, 1, &RunAction::Choose(1)).unwrap();
+    run.apply(&c, 2, &RunAction::Choose(2)).unwrap();
+    assert!(matches!(run.stage, Stage::Map { .. }));
+    for pl in &run.players {
+        assert!(pl.relics.iter().any(|r| r == "mara_sickle"));
+    }
+}
+
+#[test]
+fn trophies_and_pedlars_wares_are_never_found_on_the_road() {
+    let c = content();
+    for seed in 0..40 {
+        let mut run = Run::new(&c, &["bogatyr".to_string()], seed, 0).unwrap();
+        run.force_stage(&c, NodeKind::Shop);
+        let Stage::Shop { stock, .. } = &run.stage else { panic!() };
+        let shelves: Vec<&Id> = stock[0].relics.iter().flatten().map(|(id, _)| id).collect();
+        assert!(shelves.iter().all(|id| c.relics[*id].pool != RelicPool::Boss));
+        assert_eq!(c.relics[shelves[0]].pool, RelicPool::Shop, "the first shelf is the pedlar's own");
+        run.stage = Stage::Omen { id: "krada".into(), picks: vec![None] };
+        run.apply(&c, 0, &RunAction::Choose(0)).unwrap();
+        let found = run.players[0].relics.last().unwrap();
+        assert_eq!(c.relics[found].pool, RelicPool::Any, "{found}");
+    }
+}

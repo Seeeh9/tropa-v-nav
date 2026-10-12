@@ -493,7 +493,7 @@ fn follow_stage(net: Res<Net>, session: Option<Res<Session>>, state: Res<State<A
         Stage::Reward { .. } => AppState::Reward,
         Stage::Rest { .. } => AppState::Rest,
         Stage::Shop { .. } => AppState::Shop,
-        Stage::Omen { .. } => AppState::Omen,
+        Stage::Omen { .. } | Stage::Trophy { .. } => AppState::Omen,
         Stage::Victory | Stage::Defeat => AppState::RunEnd,
     };
     let now = *state.get();

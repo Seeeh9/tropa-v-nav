@@ -191,6 +191,7 @@ fn hand_slot(i: usize, n: usize) -> Vec2 {
 fn enter(
     mut commands: Commands,
     session: Option<Res<Session>>,
+    net: Option<Res<crate::net::Net>>,
     stage: Single<Entity, With<Stage>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
@@ -203,11 +204,14 @@ fn enter(
         return;
     };
     let layer = || Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() };
+    let act = net.as_ref().and_then(|n| n.node.state.as_ref()).map(|r| r.act.min(3)).unwrap_or(1);
 
     let root = commands
         .spawn((BattleRoot, layer(), Pickable::IGNORE, ChildOf(*stage)))
         .with_children(|p| {
-            p.spawn((layer(), art.node(&assets, "bg/act1_battle", theme::SOOT), Pickable::IGNORE));
+            // each act has its own backdrop; until it is painted, the forest stands in
+            let backdrop = [format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(&assets, s).is_some()).unwrap_or_default();
+            p.spawn((layer(), art.node(&assets, &backdrop, theme::SOOT), Pickable::IGNORE));
             p.spawn((UnitLayer, layer(), Pickable::IGNORE));
 
             // party panel, top-left

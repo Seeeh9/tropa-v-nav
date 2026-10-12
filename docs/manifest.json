@@ -114,9 +114,8 @@
     {
       "id": "bg/act2_battle",
       "size": "1920x1080",
-      "status": "waiting",
-      "chat": "874fc036a1988523",
-      "notes": "generated and visible in the chat; four download attempts produced no file"
+      "status": "done",
+      "chat": "874fc036a1988523"
     },
     {
       "id": "bg/act3_battle",

@@ -41,7 +41,7 @@ pub fn plugin(app: &mut App) {
                 playback,
                 (sync_units, sync_hand, sync_potions, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_bars, update_tooltip),
-                (floaters, dying, style_buttons, shake_screen, turn_timer, send_pings, show_pings),
+                (floaters, fly_ghosts, dying, style_buttons, shake_screen, turn_timer, send_pings, show_pings),
             )
                 .chain()
                 .run_if(in_state(AppState::Battle))
@@ -100,6 +100,37 @@ struct UnitSprite {
 enum Anim {
     Lunge,
     Hit,
+    /// A skill, power or enemy ability: a short gathering gesture.
+    Cast,
+    /// Gained block: a cold flash.
+    Guarded,
+    /// Healed or raised: a warm swell.
+    Healed,
+    /// A buff took hold.
+    Buffed,
+    /// A curse or other debuff took hold: a dark shiver.
+    Cursed,
+}
+
+impl Anim {
+    /// A weightier animation is never cut short by a slighter one that starts the same instant.
+    fn weight(self) -> u8 {
+        match self {
+            Anim::Hit => 5,
+            Anim::Lunge => 4,
+            Anim::Cast => 3,
+            _ => 1,
+        }
+    }
+}
+
+/// A small card (or potion) flying from whoever used it to what it was used on,
+/// so that every player sees every play, not only their own.
+#[derive(Component)]
+struct Ghost {
+    from: Vec2,
+    to: Vec2,
+    t: f32,
 }
 
 #[derive(Component)]
@@ -587,12 +618,39 @@ fn animate_sprites(
 
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
-            let (dur, done) = match anim {
-                Anim::Lunge => (0.30, *t >= 0.30),
-                Anim::Hit => (0.30, *t >= 0.30),
+            let dur = match anim {
+                Anim::Lunge | Anim::Hit => 0.30,
+                Anim::Cast => 0.45,
+                Anim::Guarded | Anim::Cursed => 0.40,
+                Anim::Healed | Anim::Buffed => 0.55,
             };
+            let done = *t >= dur;
             let p = (*t / dur).clamp(0.0, 1.0);
+            let swell = (p * std::f32::consts::PI).sin();
             match anim {
+                Anim::Cast => {
+                    // gather, then release toward the other side
+                    offset.y -= 14.0 * swell;
+                    offset.x += toward * 12.0 * swell;
+                    scale *= 1.0 + 0.05 * swell;
+                }
+                Anim::Guarded => {
+                    scale *= Vec2::new(1.0 + 0.04 * swell, 1.0 - 0.02 * swell);
+                    tint = s.base.mix(&Color::srgb(0.45, 0.65, 1.0), 0.5 * swell);
+                }
+                Anim::Healed => {
+                    offset.y -= 8.0 * swell;
+                    scale *= 1.0 + 0.04 * swell;
+                    tint = s.base.mix(&Color::srgb(0.65, 1.0, 0.55), 0.5 * swell);
+                }
+                Anim::Buffed => {
+                    scale *= 1.0 + 0.07 * swell;
+                    tint = s.base.mix(&Color::srgb(1.0, 0.8, 0.4), 0.5 * swell);
+                }
+                Anim::Cursed => {
+                    offset.x += 6.0 * (p * 38.0).sin() * (1.0 - p);
+                    tint = s.base.mix(&Color::srgb(0.25, 0.4, 0.15), 0.6 * swell);
+                }
                 Anim::Lunge => offset.x += toward * 70.0 * (p * std::f32::consts::PI).sin(),
                 Anim::Hit => {
                     offset.x -= toward * 22.0 * (1.0 - p) * (p * 40.0).cos().abs();
@@ -1180,6 +1238,7 @@ fn cue_effects(
     mut sprites: Query<&mut UnitSprite>,
     mut shake: ResMut<Shake>,
     comfort: Res<Comfort>,
+    db: Res<Db>,
 ) {
     let float = |commands: &mut Commands, unit: UnitRef, text: String, color: Color, size: f32, dx: f32| {
         let Some((foot, sz)) = unit_place(&session.shown, unit) else { return };
@@ -1193,10 +1252,36 @@ fn cue_effects(
     };
     let mut play = |unit: UnitRef, anim: Anim| {
         for mut s in &mut sprites {
-            if s.unit == unit {
+            if s.unit == unit && s.anim.is_none_or(|(now, _)| anim.weight() >= now.weight()) {
                 s.anim = Some((anim, 0.0));
             }
         }
+    };
+    // where a unit's body is, for things that fly between units
+    let body = |unit: UnitRef| unit_place(&session.shown, unit).map(|(foot, sz)| Vec2::new(foot.x, foot.y - sz.y * 0.5));
+    let ghost = |commands: &mut Commands, from: Vec2, to: Vec2, text: String, edge: Color| {
+        commands.spawn((
+            Ghost { from, to, t: 0.0 },
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(from.x - 70.0),
+                top: px(from.y - 45.0),
+                width: px(140),
+                height: px(90),
+                padding: UiRect::all(px(6)),
+                border: UiRect::all(px(3)),
+                border_radius: BorderRadius::all(px(8)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(theme::PEAT),
+            BorderColor::all(edge),
+            UiTransform::IDENTITY,
+            Pickable::IGNORE,
+            children![(theme::text(text, &fonts.title, 15.0, theme::BONE), TextLayout::justify(Justify::Center))],
+            ChildOf(*layer),
+        ));
     };
     for e in &cues.0 {
         match e {
@@ -1220,17 +1305,93 @@ fn cue_effects(
                     float(&mut commands, *dst, format!("-{blocked}"), theme::FROST, 34.0, -70.0);
                 }
             }
-            Event::Block { unit, amount, .. } => float(&mut commands, *unit, format!("+{amount}"), theme::NAV_BLUE.lighter(0.25), 36.0, -70.0),
-            Event::Heal { unit, amount, .. } => float(&mut commands, *unit, format!("+{amount}"), theme::ROTLIGHT, 38.0, 40.0),
+            Event::Block { unit, amount, .. } => {
+                play(*unit, Anim::Guarded);
+                float(&mut commands, *unit, format!("+{amount}"), theme::NAV_BLUE.lighter(0.25), 36.0, -70.0)
+            }
+            Event::Heal { unit, amount, .. } => {
+                play(*unit, Anim::Healed);
+                float(&mut commands, *unit, format!("+{amount}"), theme::ROTLIGHT, 38.0, 40.0)
+            }
             Event::Status { unit, status, delta, .. } if *delta > 0 => {
-                float(&mut commands, *unit, format!("{} +{delta}", l10n.t(&format!("status-{status:?}"))), theme::CANDLE, 24.0, 30.0)
+                play(*unit, if status.debuff() { Anim::Cursed } else { Anim::Buffed });
+                let color = if status.debuff() { theme::ROTLIGHT } else { theme::CANDLE };
+                float(&mut commands, *unit, format!("{} +{delta}", l10n.t(&format!("status-{status:?}"))), color, 24.0, 30.0)
             }
             Event::EnemySkipped { enemy, .. } => float(&mut commands, UnitRef::Enemy(*enemy), "…".into(), theme::BONE, 44.0, 0.0),
-            Event::CardPlayed { player, card, upgraded, .. } if *player != session.me => {
-                float(&mut commands, UnitRef::Hero(*player), l10n.card_name(card, *upgraded), theme::BONE, 26.0, -40.0)
+            // every card, anyone's, is seen leaving its player and arriving where it lands
+            Event::CardPlayed { player, card, upgraded, target } => {
+                let who = UnitRef::Hero(*player);
+                let kind = db.0.cards.get(card).map(|d| d.kind);
+                if kind != Some(CardType::Attack) {
+                    play(who, Anim::Cast);
+                }
+                if let Some(from) = body(who) {
+                    let hero = session.shown.hero(*player).map(|h| h.def.clone()).unwrap_or_default();
+                    // an aimed card flies to its target; a sweeping one to the middle of the other side
+                    let to = target.and_then(|t| body(t)).unwrap_or(Vec2::new(if kind == Some(CardType::Attack) { 1450.0 } else { from.x }, from.y - 150.0));
+                    ghost(&mut commands, from, to, l10n.card_name(card, *upgraded), theme::hero_color(&hero));
+                }
+            }
+            Event::PotionUsed { player, potion, target } => {
+                let who = UnitRef::Hero(*player);
+                play(who, Anim::Cast);
+                if let Some(from) = body(who) {
+                    let to = target.and_then(|t| body(t)).unwrap_or(Vec2::new(from.x, from.y - 150.0));
+                    ghost(&mut commands, from, to, l10n.t(&format!("potion-{potion}")), theme::ROTLIGHT);
+                }
+            }
+            // an enemy's ability is named over its head as it acts
+            Event::EnemyMove { enemy, mv } => {
+                let unit = UnitRef::Enemy(*enemy);
+                let def = session.shown.enemy(*enemy).and_then(|e| db.0.enemies.get(&e.def));
+                if let Some(m) = def.and_then(|d| d.moves.get(*mv)) {
+                    if !matches!(m.intent, IntentKind::Attack | IntentKind::AttackAll) {
+                        play(unit, Anim::Cast);
+                    }
+                    float(&mut commands, unit, l10n.t(&format!("move-{}", m.id)), theme::BONE, 26.0, -60.0);
+                }
+            }
+            Event::RuneFired { player, rune } => {
+                play(UnitRef::Hero(*player), Anim::Buffed);
+                float(&mut commands, UnitRef::Hero(*player), l10n.t(&format!("rune-{rune:?}")), theme::FROST, 22.0, 50.0)
+            }
+            Event::RuneCarved { player, .. } | Event::HerbAdded { player, .. } | Event::MaskChanged { player, .. } | Event::Shifted { player, .. } => play(UnitRef::Hero(*player), Anim::Buffed),
+            Event::Brewed { player, recipe } => {
+                play(UnitRef::Hero(*player), Anim::Cast);
+                let key = format!("recipe-{recipe}");
+                if l10n.has(&key) {
+                    float(&mut commands, UnitRef::Hero(*player), l10n.t(&key), theme::ROTLIGHT, 24.0, 50.0);
+                }
+            }
+            Event::Raised { player, .. } => play(UnitRef::Hero(*player), Anim::Healed),
+            Event::Summoned { enemy, .. } => play(UnitRef::Enemy(*enemy), Anim::Buffed),
+            Event::Phase2 { enemy } => {
+                play(UnitRef::Enemy(*enemy), Anim::Buffed);
+                shake.strength = 12.0;
+                shake.t = 0.0;
             }
             _ => {}
         }
+    }
+}
+
+/// Flies each ghost along a shallow arc and lets it fade into its target.
+fn fly_ghosts(mut commands: Commands, time: Res<Time>, speed: Res<AnimSpeed>, mut q: Query<(Entity, &mut Ghost, &mut Node, &mut UiTransform, &mut BackgroundColor)>) {
+    for (entity, mut g, mut node, mut tf, mut bg) in &mut q {
+        g.t += time.delta_secs() * speed.0 / 0.42;
+        if g.t >= 1.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        // ease out: quick off the hand, settling on arrival
+        let p = 1.0 - (1.0 - g.t).powi(2);
+        let at = g.from.lerp(g.to, p) + Vec2::new(0.0, -90.0 * (p * std::f32::consts::PI).sin());
+        node.left = px(at.x - 70.0);
+        node.top = px(at.y - 45.0);
+        tf.scale = Vec2::splat(1.0 - 0.45 * p);
+        tf.rotation = Rot2::radians(0.25 * (1.0 - p) * if g.to.x >= g.from.x { 1.0 } else { -1.0 });
+        bg.0.set_alpha(1.0 - 0.6 * p * p);
     }
 }
 

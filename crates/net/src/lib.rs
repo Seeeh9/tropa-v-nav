@@ -241,6 +241,14 @@ impl Node {
         }
     }
 
+    /// Host only: the optional turn timer in seconds (`None` is off, the default).
+    pub fn set_turn_timer(&mut self, seconds: Option<u32>) {
+        if self.is_host() && self.lobby.turn_timer != seconds {
+            self.lobby.turn_timer = seconds;
+            self.broadcast_lobby();
+        }
+    }
+
     /// Host only: begin the run. Returns false if the lobby isn't ready.
     pub fn start(&mut self, c: &Content, seed: u64) -> bool {
         if !self.is_host() || !self.lobby.can_start() || self.lobby.started {

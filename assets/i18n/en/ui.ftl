@@ -191,3 +191,12 @@ settings-music = Music
 settings-sfx = Sound effects
 settings-on = on
 settings-off = off
+
+lobby-timer = Turn timer: { $n } s
+lobby-timer-off = Turn timer: off
+ping-0 = Need a shield!
+ping-1 = Hitting this one!
+ping-2 = I'll finish it!
+ping-3 = Holding on!
+ping-4 = Save me!
+battle-tutorial = Drag a card onto an enemy or a hero; a card with no target, up onto the field. Above each enemy is what it will do, and to whom. When your turn is done, press Ready. Hover a unit and press 1-5 to signal the party.

@@ -30,6 +30,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Cues>()
         .init_resource::<HoverTop>()
         .init_resource::<Shake>()
+        .init_resource::<TimerText>()
         .insert_resource(Comfort { less_shake: false, ink: false })
         .init_resource::<TooltipText>()
         .add_systems(OnEnter(AppState::Battle), enter)
@@ -40,7 +41,7 @@ pub fn plugin(app: &mut App) {
                 playback,
                 (sync_units, sync_hand, sync_potions, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_bars, update_tooltip),
-                (floaters, dying, style_buttons, shake_screen),
+                (floaters, dying, style_buttons, shake_screen, turn_timer, send_pings, show_pings),
             )
                 .chain()
                 .run_if(in_state(AppState::Battle))
@@ -121,6 +122,7 @@ enum Label {
     Ready,
     Error,
     Tooltip,
+    Timer,
 }
 
 #[derive(Component)]
@@ -216,6 +218,7 @@ fn enter(
     mut commands: Commands,
     session: Option<Res<Session>>,
     net: Option<Res<crate::net::Net>>,
+    profile: Res<crate::profile::Profile>,
     stage: Single<Entity, With<Stage>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
@@ -270,6 +273,27 @@ fn enter(
                 }
             });
 
+            p.spawn((
+                Label::Timer,
+                theme::text("", &fonts.num, 30.0, theme::CANDLE),
+                Node { position_type: PositionType::Absolute, right: px(24), top: px(56), ..default() },
+            ));
+            // the very first fight explains itself, briefly
+            if profile.runs == 0 {
+                p.spawn((
+                    theme::panel(Node {
+                        position_type: PositionType::Absolute,
+                        left: px(560),
+                        top: px(16),
+                        width: px(800),
+                        padding: UiRect::all(px(14)),
+                        border: UiRect::all(px(2)),
+                        ..default()
+                    }),
+                    Pickable::IGNORE,
+                    children![theme::text(l10n.t("battle-tutorial"), &fonts.body, 20.0, theme::BONE)],
+                ));
+            }
             p.spawn((
                 Label::Round,
                 theme::text("", &fonts.title, 26.0, theme::BONE),
@@ -641,7 +665,7 @@ fn statuses_line(l10n: &L10n, map: &Statuses) -> String {
     map.iter().map(|(k, v)| format!("{} {}", l10n.t(&format!("status-{k:?}")), v)).collect::<Vec<_>>().join(" · ")
 }
 
-fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<TooltipText>, mut labels: Query<(&Label, &mut Text)>) {
+fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<TooltipText>, clock: Res<TimerText>, mut labels: Query<(&Label, &mut Text)>) {
     let (shown, truth) = (&session.shown, &session.truth);
     for (label, mut text) in &mut labels {
         let s = match *label {
@@ -743,6 +767,7 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
             }),
             Label::Error => Some(session.error.as_ref().map(|e| e.0.clone()).unwrap_or_default()),
             Label::Tooltip => Some(tip.0.clone()),
+            Label::Timer => Some(clock.0.clone()),
         };
         if let Some(s) = s {
             if text.0 != s {
@@ -1210,6 +1235,78 @@ fn floaters(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut 
             node.top = px(top - speed * dt);
         }
         color.0.set_alpha(((1.0 - p) * 2.2).min(1.0));
+    }
+}
+
+/// Text of the turn clock, empty when the timer is off.
+#[derive(Resource, Default)]
+struct TimerText(String);
+
+/// The optional turn timer: when it runs out, this player is marked ready.
+fn turn_timer(
+    session: Res<Session>,
+    net: Option<Res<crate::net::Net>>,
+    time: Res<Time>,
+    mut clock: ResMut<TimerText>,
+    mut outbox: ResMut<Outbox>,
+    mut state: Local<(u32, f32)>,
+) {
+    let limit = net.as_ref().and_then(|n| n.node.lobby.turn_timer);
+    let Some(limit) = limit else {
+        if !clock.0.is_empty() {
+            clock.0.clear();
+        }
+        return;
+    };
+    // the clock restarts with every round
+    if state.0 != session.truth.round {
+        *state = (session.truth.round, 0.0);
+    }
+    let h = session.my_hero();
+    if session.truth.phase != Phase::Heroes || h.ready || h.downed {
+        clock.0.clear();
+        return;
+    }
+    if session.idle() {
+        state.1 += time.delta_secs();
+    }
+    let left = (limit as f32 - state.1).ceil().max(0.0) as i32;
+    let text = left.to_string();
+    if clock.0 != text {
+        clock.0 = text;
+    }
+    if left == 0 && outbox.0.is_empty() {
+        outbox.0.push(CombatAction::Ready(true));
+        state.1 = -5.0;
+    }
+}
+
+/// Quick signals without chat: hover a unit and press 1-5.
+fn send_pings(keys: Res<ButtonInput<KeyCode>>, units: Query<(&UnitWidget, &Hovered)>, mut net: Option<ResMut<crate::net::Net>>) {
+    let Some(net) = net.as_mut() else { return };
+    let kind = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5].iter().position(|k| keys.just_pressed(*k));
+    let (Some(kind), Some((w, _))) = (kind, units.iter().find(|(_, h)| h.get())) else { return };
+    net.node.ping(kind as u8, w.unit);
+}
+
+fn show_pings(
+    mut commands: Commands,
+    mut status: ResMut<crate::net::NetStatus>,
+    session: Res<Session>,
+    layer: Single<Entity, With<FloatLayer>>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+) {
+    for (from, kind, at) in status.pings.drain(..) {
+        let Some((foot, size)) = unit_place(&session.shown, at) else { continue };
+        let color = session.shown.hero(from).map(|h| theme::hero_color(&h.def).lighter(0.25)).unwrap_or(theme::BONE);
+        commands.spawn((
+            Floater { ttl: 2.2, life: 2.2 },
+            theme::text(l10n.t(&format!("ping-{kind}")), &fonts.title, 26.0, color),
+            TextShadow::default(),
+            Node { position_type: PositionType::Absolute, left: px(foot.x - 90.0), top: px(foot.y - size.y - 30.0), ..default() },
+            ChildOf(*layer),
+        ));
     }
 }
 

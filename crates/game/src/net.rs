@@ -62,6 +62,8 @@ pub struct NetStatus {
     pub dirty: bool,
     /// The run changed; map, reward and rest screens should redraw.
     pub run_dirty: bool,
+    /// Pings not yet shown: `(player slot, kind, unit)`.
+    pub pings: Vec<(u8, u8, nav_core::UnitRef)>,
 }
 
 enum SteamEv {
@@ -475,7 +477,7 @@ fn notes(
                     None => status.error = Some(text),
                 }
             }
-            Note::Ping { .. } => {}
+            Note::Ping { from, kind, at } => status.pings.push((from, kind, at)),
         }
     }
 }

@@ -311,6 +311,30 @@ fn draw_lobby(
                 step(row, "+", (circle < max).then(|| circle + 1));
             }
         });
+        // turn timer: off by default; the host may set 60, 90 or 120 seconds
+        if lobby.players.len() > 1 {
+            let timer = lobby.turn_timer;
+            let label = match timer {
+                Some(s) => l10n.n("lobby-timer", s as i32),
+                None => l10n.t("lobby-timer-off"),
+            };
+            if is_host {
+                p.spawn((
+                    menu_button(label, &fonts),
+                    observe(move |_: On<Activate>, mut net: ResMut<Net>| {
+                        let next = match timer {
+                            None => Some(60),
+                            Some(60) => Some(90),
+                            Some(90) => Some(120),
+                            _ => None,
+                        };
+                        net.node.set_turn_timer(next);
+                    }),
+                ));
+            } else {
+                p.spawn(theme::text(label, &fonts.body, 22.0, theme::DIM));
+            }
+        }
         if is_host && !lobby.can_start() {
             p.spawn(theme::text(l10n.t("lobby-waiting"), &fonts.body, 22.0, theme::DIM));
         }

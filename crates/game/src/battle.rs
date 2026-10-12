@@ -1158,9 +1158,13 @@ fn layout_hand(
         if let Some(def) = db.0.cards.get(&card.def) {
             let view = def.view(card.upgraded, h.form);
             let cost = if view.x_cost { 0 } else { view.cost };
-            let ok = !view.has(Keyword::Unplayable) && cost <= h.energy && !h.downed;
+            // held in the mire or asleep, coiled (no attacks), or this card frozen by Mara
+            let held = h.flags.contains_key("mired") || h.flags.contains_key("asleep");
+            let coiled = view.kind == CardType::Attack && h.flags.contains_key("coiled");
+            let frozen = (i as i32) < h.flags.get("frozen").copied().unwrap_or(0);
+            let ok = !view.has(Keyword::Unplayable) && cost <= h.energy && !h.downed && !held && !coiled && !frozen;
             let frame = card_frame(def);
-            let want = if ok { frame } else { frame.mix(&theme::SOOT, 0.45) };
+            let want = if frozen { frame.mix(&theme::FROST, 0.55) } else if ok { frame } else { frame.mix(&theme::SOOT, 0.45) };
             if bg.0 != want {
                 bg.0 = want;
             }

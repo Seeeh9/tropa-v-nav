@@ -173,3 +173,6 @@ shop-leave = Leave
 error-SoldOut = Already sold
 error-NoRoom = No room for a potion
 error-NoSuchPotion = No such potion
+
+trait-immortal = Deathless while the needle is whole
+trait-last-breath = Last Breath: { $n }

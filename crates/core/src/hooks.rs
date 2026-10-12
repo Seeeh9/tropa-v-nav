@@ -64,6 +64,49 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 }
             }
         }
+        // Koschei, every turn: he knits back together while deathless; once the needle is
+        // broken he drains the weakest hero and his last breath counts down to the party's end
+        "koschei_turn" => {
+            let UnitRef::Enemy(uid) = ctx.src else { return };
+            let Some(idx) = ex.s.enemies.iter().position(|e| e.uid == uid) else { return };
+            if ex.s.enemies[idx].flags.contains_key("immortal") {
+                let heal = ex.s.enemies[idx].max_hp / 10;
+                ex.heal(ctx.src, heal);
+                return;
+            }
+            let weakest = ex.s.standing_heroes().min_by_key(|h| h.hp).map(|h| h.slot);
+            if let Some(slot) = weakest {
+                ex.hurt(Some(ctx.src), UnitRef::Hero(slot), 10, false);
+                ex.heal(ctx.src, 10);
+            }
+            let left = ex.s.enemies[idx].flags.get("last_breath").copied().unwrap_or(0) - 1;
+            ex.s.enemies[idx].flags.insert("last_breath".into(), left);
+            if left <= 0 {
+                let all: Vec<u8> = ex.s.standing_heroes().map(|h| h.slot).collect();
+                for slot in all {
+                    let hp = ex.s.heroes[slot as usize].hp + ex.s.heroes[slot as usize].block;
+                    ex.hurt(Some(ctx.src), UnitRef::Hero(slot), hp, false);
+                }
+            }
+        }
+        // the egg is cracked: the needle falls into a random hero's hand and Koschei rises
+        "drop_needle" => {
+            let heroes: Vec<u8> = ex.s.standing_heroes().map(|h| h.slot).collect();
+            if let Some(slot) = ex.s.rng.pick(&heroes).copied() {
+                ex.add_card(slot, "koschei_needle", Pile::Hand);
+            }
+            for e in ex.s.enemies.iter_mut().filter(|e| e.alive && e.flags.contains_key("immortal")) {
+                e.flags.insert("risen".into(), 1);
+            }
+        }
+        // the needle snaps: Koschei is mortal, at two fifths of his life, and breathing his last
+        "break_needle" => {
+            for e in ex.s.enemies.iter_mut().filter(|e| e.alive && e.flags.contains_key("immortal")) {
+                e.flags.remove("immortal");
+                e.flags.insert("last_breath".into(), 5);
+                e.hp = (e.max_hp * 2 / 5).max(1);
+            }
+        }
         _ => debug_assert!(false, "unknown hook `{name}`"),
     }
 }

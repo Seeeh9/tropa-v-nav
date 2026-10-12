@@ -173,3 +173,6 @@ shop-leave = Уйти
 error-SoldOut = Уже продано
 error-NoRoom = Нет места для снадобья
 error-NoSuchPotion = Такого снадобья нет
+
+trait-immortal = Бессмертен, пока цела игла
+trait-last-breath = Последний вздох: { $n }

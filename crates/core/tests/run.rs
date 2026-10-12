@@ -272,7 +272,7 @@ fn every_hero_can_be_driven_through_a_whole_run() {
             assert!(run.floors_cleared > 0, "{hero} never cleared a floor");
             assert!(run.oberegi() >= run.floors_cleared);
             if run.stage == Stage::Victory {
-                assert_eq!((run.act, run.bosses_slain), (3, 3));
+                assert_eq!((run.act, run.bosses_slain), (4, 4));
             }
         }
     }

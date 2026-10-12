@@ -1,0 +1,9 @@
+// Карты, которые появляются только по ходу боя.
+[
+    (
+        // Кощеева игла: выпадает из разбитого яйца. Сломать её — сделать Кощея смертным.
+        id: "koschei_needle", kind: Skill, rarity: Special, cost: 3,
+        keywords: [Retain, Exhaust],
+        effects: [Hook("break_needle")],
+    ),
+]

@@ -397,6 +397,12 @@ pub struct EnemyDef {
     /// Runs when the enemy dies.
     #[serde(default)]
     pub on_death: Vec<Effect>,
+    /// Named traits the rules check for: `immortal`, `dodge`, `flying`.
+    #[serde(default)]
+    pub flags: Vec<Id>,
+    /// Block it already has when it appears.
+    #[serde(default)]
+    pub start_block: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

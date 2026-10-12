@@ -791,3 +791,112 @@ fn bot_finishes_fights_and_replays_identically() {
     let (f, _) = bot_fight(&c, &four, &["kikimora", "grey_wolf", "grey_wolf"], 5);
     assert_ne!(f.phase, Phase::Heroes, "a four-player fight must end");
 }
+
+// ---- Koschei ----
+
+fn koschei_fight(deck: &[&str]) -> (Content, Combat) {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", deck)], &ids(&["koschei", "death_oak"]), 7);
+    s.heroes[0].energy = 99;
+    (c, s)
+}
+
+/// Puts a free test card straight into the hero's hand.
+fn give(s: &mut Combat, uid: u32, def: &str) {
+    s.heroes[0].hand.push(Card { uid, def: def.into(), upgraded: false, free: true });
+}
+
+#[test]
+fn koschei_cannot_die_while_the_needle_is_whole() {
+    let (c, mut s) = koschei_fight(&["t_hit"; 5]);
+    let k = foe(&s, 0);
+    s.enemies[0].hp = 12;
+    play(&c, &mut s, 0, "t_hit", Some(k));
+    play(&c, &mut s, 0, "t_hit", Some(k));
+    assert_eq!((s.enemies[0].hp, s.enemies[0].alive), (1, true));
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].hp, 1 + 60, "he knits back a tenth of his life each turn");
+    assert_eq!(s.phase, Phase::Heroes);
+}
+
+#[test]
+fn the_chain_of_death_comes_one_link_at_a_time() {
+    let (c, mut s) = koschei_fight(&[]);
+    let names = |s: &Combat| -> Vec<String> { s.living_enemies().map(|e| e.def.clone()).collect() };
+    assert_eq!(names(&s), ["koschei", "death_oak"]);
+    for (n, (link, next)) in [("death_oak", "death_chest"), ("death_chest", "death_hare")].into_iter().enumerate() {
+        let idx = s.enemies.iter().position(|e| e.def == link && e.alive).unwrap();
+        s.enemies[idx].hp = 1;
+        s.enemies[idx].block = 0;
+        let t = foe(&s, idx);
+        give(&mut s, 9000 + n as u32, "t_hit");
+        play(&c, &mut s, 0, "t_hit", Some(t));
+        assert!(names(&s).contains(&next.to_string()), "{link} gives way to {next}");
+    }
+    // the hare: the first blow of the round misses
+    let hare = s.enemies.iter().position(|e| e.def == "death_hare").unwrap();
+    let t = foe(&s, hare);
+    give(&mut s, 9100, "t_hit");
+    give(&mut s, 9101, "t_hit");
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[hare].hp, 60);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[hare].hp, 50);
+}
+
+#[test]
+fn the_duck_is_only_hit_by_sweeping_blows() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit", "t_hit_all"])], &ids(&["death_duck"]), 7);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 60);
+    play(&c, &mut s, 0, "t_hit_all", None);
+    assert_eq!(s.enemies[0].hp, 56);
+}
+
+#[test]
+fn the_egg_keeps_its_shell_and_drops_the_needle() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit"; 5])], &ids(&["koschei", "death_egg"]), 7);
+    let egg = foe(&s, 1);
+    assert_eq!(s.enemies[1].block, 30);
+    play(&c, &mut s, 0, "t_hit", Some(egg));
+    play(&c, &mut s, 0, "t_hit", Some(egg));
+    assert_eq!(s.enemies[1].block, 10);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[1].block, 30, "the shell is whole again");
+    for _ in 0..4 {
+        play(&c, &mut s, 0, "t_hit", Some(egg));
+    }
+    assert!(!s.enemies[1].alive);
+    assert!(s.heroes[0].hand.iter().any(|x| x.def == "koschei_needle"));
+}
+
+#[test]
+fn breaking_the_needle_starts_the_last_breath() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["koschei_needle"])], &ids(&["koschei"]), 7);
+    s.heroes[0].hp = 500;
+    s.heroes[0].max_hp = 500;
+    play(&c, &mut s, 0, "koschei_needle", None);
+    assert_eq!(s.enemies[0].hp, 240, "mortal, at two fifths of his life");
+    assert!(!s.enemies[0].flags.contains_key("immortal"));
+    // five turns of breath, then everyone falls
+    for turn in 1..=5 {
+        assert_eq!(s.phase, Phase::Heroes, "turn {turn}");
+        end_round(&c, &mut s);
+    }
+    assert_eq!(s.phase, Phase::Lost);
+}
+
+#[test]
+fn a_mortal_koschei_can_be_killed() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["koschei_needle", "t_hit"])], &ids(&["koschei"]), 7);
+    let k = foe(&s, 0);
+    play(&c, &mut s, 0, "koschei_needle", None);
+    s.enemies[0].hp = 5;
+    play(&c, &mut s, 0, "t_hit", Some(k));
+    assert_eq!(s.phase, Phase::Won);
+}

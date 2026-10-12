@@ -646,7 +646,24 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
                     parts.join("\n")
                 }
             }),
-            Label::Status(UnitRef::Enemy(i)) => shown.enemy(i).map(|e| statuses_line(&l10n, &e.statuses)),
+            Label::Status(UnitRef::Enemy(i)) => shown.enemy(i).map(|e| {
+                let mut s = statuses_line(&l10n, &e.statuses);
+                // the real state carries the traits and the countdown
+                if let Some(real) = truth.enemy(i) {
+                    let mut notes = Vec::new();
+                    if real.flags.contains_key("immortal") {
+                        notes.push(l10n.t("trait-immortal"));
+                    }
+                    if let Some(n) = real.flags.get("last_breath") {
+                        notes.push(l10n.n("trait-last-breath", *n));
+                    }
+                    if !notes.is_empty() {
+                        s = if s.is_empty() { notes.join(" · ") } else { format!("{}
+{s}", notes.join(" · ")) };
+                    }
+                }
+                s
+            }),
             Label::Intent(uid) => shown.enemy(uid).map(|e| {
                 let Some(intent) = &e.intent else { return String::new() };
                 let Some(mv) = db.0.enemies.get(&e.def).and_then(|d| d.moves.get(intent.mv)) else { return String::new() };

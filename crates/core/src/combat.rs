@@ -169,14 +169,14 @@ impl<'a> Exec<'a> {
             def: def.clone(),
             hp,
             max_hp: hp,
-            block: 0,
+            block: d.start_block,
             statuses: BTreeMap::new(),
             alive: true,
             fled: false,
             step: 0,
             intent: None,
             stolen: BTreeMap::new(),
-            flags: BTreeMap::new(),
+            flags: d.flags.iter().map(|f| (f.clone(), 1)).collect(),
         });
         Some(uid)
     }
@@ -345,9 +345,20 @@ impl<'a> Exec<'a> {
                 if !e.alive {
                     return false;
                 }
+                // the hare: the first attack against it each round finds only air
+                let d = if attack && e.flags.contains_key("dodge") && !e.flags.contains_key("turn_dodged") {
+                    e.flags.insert("turn_dodged".into(), 1);
+                    0
+                } else {
+                    d
+                };
                 let blocked = d.min(e.block);
                 e.block -= blocked;
-                let lost = (d - blocked).min(e.hp);
+                let mut lost = (d - blocked).min(e.hp);
+                // Koschei cannot die while the needle is whole
+                if e.flags.contains_key("immortal") {
+                    lost = lost.min(e.hp - 1).max(0);
+                }
                 e.hp -= lost;
                 let dead = e.hp <= 0;
                 let (hp, block) = (e.hp, e.block);
@@ -844,6 +855,10 @@ impl<'a> Exec<'a> {
                     ctx.fatal = false;
                     for _ in 0..times {
                         for u in self.targets(ctx, *t) {
+                            // the duck is on the wing: only blows that sweep everyone, and runes, reach it
+                            if *t == Tgt::Target && matches!(u, UnitRef::Enemy(id) if self.s.enemy(id).is_some_and(|e| e.flags.contains_key("flying"))) {
+                                continue;
+                            }
                             if self.strike(Some(ctx.src), u, n, ctx.attack) {
                                 ctx.fatal = true;
                             }
@@ -1195,6 +1210,7 @@ impl<'a> Exec<'a> {
             if !self.s.enemies[idx].alive {
                 continue;
             }
+            self.s.enemies[idx].flags.retain(|k, _| !k.starts_with("turn_"));
             let Some(d) = self.c.enemies.get(&self.s.enemies[idx].def) else { continue };
             let step = self.s.enemies[idx].step;
             let mv = if step < d.opening.len() {

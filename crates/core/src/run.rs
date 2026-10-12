@@ -329,6 +329,10 @@ impl Run {
     /// Nodes the party may step to next: `(node index on that floor, kind)`.
     /// Empty when the only way on is the boss.
     pub fn choices(&self) -> Vec<(u8, NodeKind)> {
+        // the last stretch has no map: only Koschei waits
+        if self.map.floors.is_empty() {
+            return vec![(0, NodeKind::Boss)];
+        }
         match self.at {
             None => self.map.floors[0].iter().enumerate().map(|(i, n)| (i as u8, n.kind)).collect(),
             Some((floor, node)) => {
@@ -380,6 +384,7 @@ impl Run {
                     let at = self.at;
                     let map = &self.map;
                     match at {
+                        _ if map.floors.is_empty() => 1,
                         None => map.floors[0].len(),
                         Some((f, n)) if (f as usize + 1) < map.floors.len() => map.floors[f as usize][n as usize].next.len(),
                         Some(_) => 1,
@@ -632,14 +637,15 @@ impl Run {
         self.combat = None;
         if boss_done {
             ev.push(RunEvent::ActCleared { act: self.act });
-            if self.act >= 3 {
+            // act 4 is the island of Buyan: Koschei himself
+            if self.act >= 4 {
                 self.stage = Stage::Victory;
                 ev.push(RunEvent::Ended { won: true });
                 return;
             }
             self.act += 1;
             self.at = None;
-            self.map = generate_map(&mut self.rng, Circle(self.circle));
+            self.map = if self.act >= 4 { Map { floors: vec![] } } else { generate_map(&mut self.rng, Circle(self.circle)) };
         }
         self.stage = Stage::Map { votes: vec![None; self.players.len()] };
     }
@@ -651,7 +657,7 @@ impl Run {
             None => 0,
             Some((f, _)) => f + 1,
         };
-        if kind != NodeKind::Boss {
+        if kind != NodeKind::Boss && !self.map.floors.is_empty() {
             self.at = Some((floor, node));
         }
         ev.push(RunEvent::Moved { floor, node, kind });

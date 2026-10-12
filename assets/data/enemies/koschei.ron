@@ -1,0 +1,49 @@
+// Финал: Кощей Бессмертный (раздел 7). Его нельзя убить уроном, пока цела игла.
+// Цепь смерти выходит по одному звену: дуб → сундук → заяц → утка → яйцо → игла.
+// Упрощено против документа: Кощей бьёт случайного героя, а не того, кто больше всех
+// ранил цепь; иглу нельзя передать союзнику; укороченной цепи для одиночки нет.
+[
+    (
+        id: "koschei", hp: (600, 600), flags: ["immortal"],
+        moves: [
+            (id: "bone_sceptre", intent: Attack, targeted: true, effects: [Damage(N(14), Target), Hook("koschei_turn")]),
+            (id: "dead_wind", intent: AttackAll, effects: [Damage(N(8), AllFoes), Hook("koschei_turn")]),
+            (id: "call_guard", intent: Summon, effects: [Summon("koschei_guard", 1), Hook("koschei_turn")]),
+        ],
+        pattern: [0, 1, 0, 2, 1],
+    ),
+    (
+        id: "death_oak", hp: (150, 150),
+        moves: [(id: "roots", intent: AttackAll, effects: [Damage(N(5), AllFoes)])],
+        pattern: [0],
+        on_death: [Summon("death_chest", 1)],
+    ),
+    (
+        id: "death_chest", hp: (100, 100),
+        moves: [(id: "iron_bands", intent: Defend, effects: [Block(N(20), Me)])],
+        pattern: [0],
+        on_death: [Summon("death_hare", 1)],
+    ),
+    (
+        // первая атака по нему за ход промахивается
+        id: "death_hare", hp: (60, 60), flags: ["dodge"],
+        moves: [(id: "dart", intent: Unknown, effects: [])],
+        pattern: [0],
+        on_death: [Summon("death_duck", 1)],
+    ),
+    (
+        // летает: достают только атаки «по всем» и резы
+        id: "death_duck", hp: (60, 60), flags: ["flying"],
+        moves: [(id: "wingbeat", intent: Unknown, effects: [])],
+        pattern: [0],
+        on_death: [Summon("death_egg", 1)],
+    ),
+    (
+        // 1 HP и 30 щита, который возвращается каждый ход: пробить нужно за один раунд
+        id: "death_egg", hp: (1, 1), start_block: 30,
+        moves: [(id: "shell", intent: Defend, effects: [Block(N(30), Me)])],
+        opening: [0],
+        pattern: [0],
+        on_death: [Hook("drop_needle")],
+    ),
+]

@@ -170,8 +170,13 @@ fn start_battle_music(mut commands: Commands, art: Res<Art>, assets: Res<AssetSe
         _ => format!("battle_act{act}"),
     };
     // all layers start together and stay in step; only their volume moves
+    // a generated track never shares the stage with stand-in layers: they were not written together.
+    // Until its own stems are in place it simply plays whole, as layer one
+    let generated = |index: u8| art.find(&format!("music/{track}_l{index}"), "ogg", "flow").filter(|p| p.ends_with("-flow.ogg"));
+    let real = generated(1).is_some();
     for index in 1..=3u8 {
-        let Some(path) = music_file(&art, &format!("{track}_l{index}")) else { continue };
+        let path = if real { generated(index) } else { music_file(&art, &format!("{track}_l{index}")) };
+        let Some(path) = path else { continue };
         commands.spawn((
             MusicLayer { index, target: if index == 1 { 1.0 } else { 0.0 }, level: 0.0 },
             AudioPlayer::<AudioSource>::new(assets.load(path)),

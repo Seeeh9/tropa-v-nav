@@ -8,6 +8,8 @@
 //!   TROPA_SHRINE=<0..2>         pretend the shrine stands at this level (in memory only; never saved by a screenshot run)
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
 //!   TROPA_SEED=<n>              fixed seed for that run
+//!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
+//!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release)
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 
 use crate::session::Db;
@@ -16,7 +18,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Menu), open_screen).add_systems(Update, shot);
+    app.add_systems(OnEnter(AppState::Menu), open_screen).add_systems(Update, shot).add_systems(First, robot);
 }
 
 fn env<T: std::str::FromStr>(name: &str) -> Option<T> {
@@ -86,5 +88,69 @@ fn shot(mut commands: Commands, time: Res<Time>, mut taken: Local<Option<f32>>, 
             exit.write(AppExit::Success);
         }
         _ => {}
+    }
+}
+
+/// One step of a mouse script.
+enum Step {
+    Wait(f32),
+    Move(Vec2),
+    Down,
+    Up,
+}
+
+/// Plays `TROPA_ROBOT` into the window's own event stream, so hovering, dragging and clicking
+/// run through exactly the code a real mouse reaches. The player's cursor is never touched.
+fn robot(
+    time: Res<Time>,
+    window: Single<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
+    mut events: MessageWriter<bevy::window::WindowEvent>,
+    mut script: Local<Option<Vec<Step>>>,
+    mut at: Local<(usize, f32, Vec2, Vec2)>,
+) {
+    use bevy::input::mouse::MouseButtonInput;
+    use bevy::input::ButtonState;
+    use bevy::window::{CursorMoved, WindowEvent};
+    let steps = script.get_or_insert_with(|| {
+        let text = std::env::var("TROPA_ROBOT").unwrap_or_default();
+        text.split(';')
+            .filter_map(|part| {
+                let words: Vec<&str> = part.split_whitespace().collect();
+                match words.as_slice() {
+                    ["w", t] => t.parse().ok().map(Step::Wait),
+                    ["m", x, y] => Some(Step::Move(Vec2::new(x.parse().ok()?, y.parse().ok()?))),
+                    ["d"] => Some(Step::Down),
+                    ["u"] => Some(Step::Up),
+                    _ => None,
+                }
+            })
+            .collect()
+    });
+    let (entity, win) = *window;
+    // stage pixels to window pixels: the stage is scaled to fit the window
+    let k = (win.width() / crate::STAGE_W).min(win.height() / crate::STAGE_H);
+    let (index, elapsed, pos, from) = &mut *at;
+    let Some(step) = steps.get(*index) else { return };
+    *elapsed += time.delta_secs();
+    let next = match step {
+        Step::Wait(t) => *elapsed >= *t,
+        Step::Move(to) => {
+            // a glide of a third of a second: a drag needs to be seen moving
+            let p = (*elapsed / 0.35).min(1.0);
+            let now = from.lerp(*to, p);
+            events.write(WindowEvent::CursorMoved(CursorMoved { window: entity, position: now * k, delta: Some((now - *pos) * k) }));
+            *pos = now;
+            p >= 1.0
+        }
+        Step::Down | Step::Up => {
+            let state = if matches!(step, Step::Down) { ButtonState::Pressed } else { ButtonState::Released };
+            events.write(WindowEvent::MouseButtonInput(MouseButtonInput { button: MouseButton::Left, state, window: entity }));
+            true
+        }
+    };
+    if next {
+        *index += 1;
+        *elapsed = 0.0;
+        *from = *pos;
     }
 }

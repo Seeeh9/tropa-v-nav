@@ -72,6 +72,13 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
             if ex.s.enemies[idx].flags.contains_key("immortal") {
                 let heal = ex.s.enemies[idx].max_hp / 10;
                 ex.heal(ctx.src, heal);
+                // his patience wears thin: every second turn he hits harder, so a party
+                // that only shelters behind its shields cannot wait him out forever
+                let wrath = ex.s.enemies[idx].flags.get("wrath").copied().unwrap_or(0) + 1;
+                ex.s.enemies[idx].flags.insert("wrath".into(), wrath);
+                if wrath % 2 == 0 {
+                    ex.add_status(ctx.src, StatusKind::Strength, 1);
+                }
                 return;
             }
             let weakest = ex.s.standing_heroes().min_by_key(|h| h.hp).map(|h| h.slot);
@@ -105,6 +112,17 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 e.flags.remove("immortal");
                 e.flags.insert("last_breath".into(), 5);
                 e.hp = (e.max_hp * 2 / 5).max(1);
+            }
+        }
+        // the duck tires and settles for a round, then takes wing again
+        "duck_land" | "duck_fly" => {
+            let UnitRef::Enemy(uid) = ctx.src else { return };
+            if let Some(e) = ex.s.enemies.iter_mut().find(|e| e.uid == uid) {
+                if name == "duck_land" {
+                    e.flags.remove("flying");
+                } else {
+                    e.flags.insert("flying".into(), 1);
+                }
             }
         }
         _ => debug_assert!(false, "unknown hook `{name}`"),

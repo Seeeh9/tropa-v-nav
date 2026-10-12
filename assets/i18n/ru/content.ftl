@@ -445,3 +445,5 @@ relic-clan_banner = Родовой стяг
 relic-clan_banner-desc = В начале боя все союзники получают Силу 1 на ход и 2 щита.
 relic-shared_bread = Общий каравай
 relic-shared_bread-desc = В первом раунде боя все союзники лечат 4 HP.
+move-settle = Садится
+move-settle-desc = До её следующего хода утку можно достать любым ударом.

@@ -445,3 +445,5 @@ relic-clan_banner = Clan Banner
 relic-clan_banner-desc = All allies gain Strength 1 this turn and 2 Block at the start of combat.
 relic-shared_bread = Shared Loaf
 relic-shared_bread-desc = All allies heal 4 HP in the first round of combat.
+move-settle = Settles
+move-settle-desc = Until its next turn the duck can be hit by any blow.

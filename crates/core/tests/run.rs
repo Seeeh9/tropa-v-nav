@@ -463,3 +463,34 @@ fn report_where_solo_runs_die() {
     floors.sort();
     println!("median floors cleared at death: {}", floors.get(floors.len() / 2).copied().unwrap_or(0));
 }
+
+/// Not a pass/fail check: finds fights the autopilot can neither win nor lose.
+#[test]
+#[ignore]
+fn report_endless_fights() {
+    let c = content();
+    let mut seen: std::collections::BTreeMap<String, u32> = Default::default();
+    for (i, hero) in SIX.iter().enumerate() {
+        for seed in 0..60u64 {
+            let mut run = Run::new(&c, &[hero.to_string()], seed + i as u64 * 1000, 0).unwrap();
+            for _ in 0..200_000 {
+                if matches!(run.stage, Stage::Victory | Stage::Defeat) {
+                    break;
+                }
+                if let Some(k) = run.combat.as_ref().filter(|k| k.round > 150) {
+                    let mut names: Vec<String> = k.living_enemies().map(|e| format!("{}({}hp,{}blk)", e.def, e.hp, e.block)).collect();
+                    names.sort();
+                    let h = &k.heroes[0];
+                    *seen.entry(format!("{hero} hp {}/{} vs {}", h.hp, h.max_hp, names.join(" "))).or_insert(0) += 1;
+                    break;
+                }
+                let Some(a) = run_bot(&c, &run, 0) else { break };
+                run.apply(&c, 0, &a).unwrap();
+            }
+        }
+    }
+    for (k, n) in &seen {
+        println!("{n:>3}  {k}");
+    }
+    println!("{} endless fights", seen.values().sum::<u32>());
+}

@@ -27,6 +27,8 @@ struct Tally {
     runs: u32,
     wins: u32,
     floors: u64,
+    /// Runs cut short because a fight passed 300 rounds with no end in sight.
+    stalled: u32,
     /// Runs that ended in each act (1..=4), lost.
     died_in: [u32; 5],
     cards: BTreeMap<Id, CardStat>,
@@ -39,6 +41,10 @@ fn play(c: &Content, heroes: &[Id], seed: u64, circle: u8, tally: &mut Tally) {
     let mut dice = Rng::new(seed ^ 0x5EED_CAFE);
     for _ in 0..400_000 {
         if matches!(run.stage, Stage::Victory | Stage::Defeat) {
+            break;
+        }
+        if run.combat.as_ref().is_some_and(|k| k.round > 300) {
+            tally.stalled += 1;
             break;
         }
         let mut moved = false;
@@ -92,13 +98,14 @@ fn play(c: &Content, heroes: &[Id], seed: u64, circle: u8, tally: &mut Tally) {
 fn report(label: &str, t: &Tally) {
     let pct = |a: u32, b: u32| if b == 0 { 0.0 } else { 100.0 * a as f32 / b as f32 };
     println!(
-        "{label:<34} win {:>5.1}%   floors {:>4.1}   died in act 1/2/3/final: {}/{}/{}/{}",
+        "{label:<34} win {:>5.1}%   floors {:>4.1}   died in act 1/2/3/final: {}/{}/{}/{}   stalled {}",
         pct(t.wins, t.runs),
         t.floors as f32 / t.runs.max(1) as f32,
         t.died_in[1],
         t.died_in[2],
         t.died_in[3],
-        t.died_in[4]
+        t.died_in[4],
+        t.stalled
     );
 }
 

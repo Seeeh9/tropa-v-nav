@@ -900,3 +900,33 @@ fn a_mortal_koschei_can_be_killed() {
     play(&c, &mut s, 0, "t_hit", Some(k));
     assert_eq!(s.phase, Phase::Won);
 }
+
+#[test]
+fn the_duck_settles_every_third_turn() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit"; 5])], &ids(&["death_duck"]), 7);
+    let t = foe(&s, 0);
+    end_round(&c, &mut s);
+    end_round(&c, &mut s);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 60, "still on the wing");
+    end_round(&c, &mut s);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 50, "settled: any blow lands");
+    end_round(&c, &mut s);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 50, "and away again");
+}
+
+#[test]
+fn a_deathless_koschei_grows_angrier() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &[])], &ids(&["koschei"]), 7);
+    s.heroes[0].hp = 9000;
+    s.heroes[0].max_hp = 9000;
+    let k = foe(&s, 0);
+    for _ in 0..6 {
+        end_round(&c, &mut s);
+    }
+    assert_eq!(s.status(k, StatusKind::Strength), 3);
+}

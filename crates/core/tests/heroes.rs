@@ -316,3 +316,58 @@ fn death_dance_counts_the_whole_partys_cards() {
     play(&c, &mut s, 0, "sk_death_dance", Some(t));
     assert_eq!(s.enemies[0].hp, 180 - 6);
 }
+
+#[test]
+fn every_hero_has_eighty_cards_five_of_them_for_company() {
+    let c = content();
+    for hero in ["bogatyr", "vorozheya", "volhv", "volkolak", "znaharka", "skomoroh"] {
+        let mine: Vec<&CardDef> = c.cards.values().filter(|d| d.hero == hero).collect();
+        assert_eq!(mine.len(), 80, "{hero}");
+        assert!(mine.iter().filter(|d| d.keywords.contains(&Keyword::Coop)).count() >= 5, "{hero}");
+        let free = mine.iter().filter(|d| d.cost == 0 && !d.x_cost && d.rarity != Rarity::Starter).count();
+        assert!(free <= 8, "{hero} has {free} free cards");
+    }
+}
+
+/// Every hero card, plain and upgraded, in both of the werewolf's forms, can be played
+/// on the kind of target it asks for without the rules refusing it.
+#[test]
+fn every_hero_card_can_be_played() {
+    let c = content();
+    for def in c.cards.values().filter(|d| !d.hero.is_empty()) {
+        for upgraded in [false, true] {
+            for beast in [false, true] {
+                if beast && def.hero != "volkolak" {
+                    continue;
+                }
+                let party = [hero(&def.hero, &[]), hero("t_plain", &[])];
+                let (mut s, _) = start(&c, &party, &ids(&["dummy", "dummy"]), 11);
+                if beast {
+                    s.heroes[0].form = Form::Beast;
+                }
+                s.heroes[0].energy = 9;
+                s.heroes[0].hand.push(Card { uid: 9000, def: def.id.clone(), upgraded, free: false });
+                let view = def.view(upgraded, s.heroes[0].form);
+                if view.has(Keyword::Unplayable) {
+                    continue;
+                }
+                let target = match view.target {
+                    CardTarget::None => None,
+                    CardTarget::Enemy => Some(UnitRef::Enemy(s.enemies[0].uid)),
+                    CardTarget::Ally | CardTarget::AnyHero => Some(UnitRef::Hero(1)),
+                    CardTarget::Downed => {
+                        s.heroes[1].downed = true;
+                        s.heroes[1].hp = 0;
+                        Some(UnitRef::Hero(1))
+                    }
+                };
+                let res = apply(&c, &mut s, 0, &CombatAction::Play { card: 9000, target });
+                assert!(res.is_ok(), "{} (upgraded {upgraded}, beast {beast}): {res:?}", def.id);
+                // and the round can still be closed afterwards
+                if s.phase == Phase::Heroes {
+                    end_round(&c, &mut s);
+                }
+            }
+        }
+    }
+}

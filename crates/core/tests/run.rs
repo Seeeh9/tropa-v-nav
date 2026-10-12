@@ -554,7 +554,7 @@ fn a_sacrifice_is_paid_by_one_and_shared_by_all() {
     assert!(matches!(run.stage, Stage::Map { .. }));
     for (p, pl) in run.players.iter().enumerate() {
         assert_eq!(pl.max_hp, hp[p] + 5);
-        assert_eq!(pl.deck.iter().any(|(id, _)| id == "toska"), p == 2, "only the one who rocked the cradle carries the grief");
+        assert_eq!(pl.deck.iter().any(|(id, _)| id == "grief"), p == 2, "only the one who rocked the cradle carries the grief");
     }
 }
 
@@ -649,4 +649,25 @@ fn trophies_and_pedlars_wares_are_never_found_on_the_road() {
         let found = run.players[0].relics.last().unwrap();
         assert_eq!(c.relics[found].pool, RelicPool::Any, "{found}");
     }
+}
+
+#[test]
+fn the_card_pool_matches_the_design_document() {
+    let c = content();
+    let real: Vec<&CardDef> = c.cards.values().filter(|d| !d.id.starts_with("t_")).collect();
+    let count = |f: &dyn Fn(&CardDef) -> bool| real.iter().filter(|d| f(d)).count();
+    assert_eq!(count(&|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special), 30, "neutral");
+    assert_eq!(count(&|d| d.kind == CardType::Curse), 12, "curses");
+    assert_eq!(count(&|d| d.kind == CardType::Status), 8, "statuses");
+    assert_eq!(count(&|d| !d.hero.is_empty()), 480, "hero cards");
+}
+
+#[test]
+fn the_pedlar_now_has_wares_for_any_hero() {
+    let c = content();
+    let mut run = Run::new(&c, &["znaharka".to_string()], 3, 0).unwrap();
+    run.force_stage(&c, NodeKind::Shop);
+    let Stage::Shop { stock, .. } = &run.stage else { panic!() };
+    let neutral = stock[0].cards.iter().flatten().filter(|(id, _)| c.cards[id].hero.is_empty()).count();
+    assert_eq!(neutral, 2);
 }

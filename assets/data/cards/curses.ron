@@ -17,6 +17,39 @@
         keywords: [Unplayable, Ethereal],
         in_hand_end: [LoseHp(N(3), Me), Hook("pass_fever")],
     ),
+    // ---- ещё девять проклятий: знамения ----
+    (id: "morok", kind: Curse, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [AddCard(card: "web", pile: Draw, to: Me)]),
+    (id: "rotten_tooth", kind: Curse, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [Apply(Vulnerable, N(1), Me)]),
+    // Горе: можно сыграть за 1 — только чтобы избавиться до конца боя
+    (id: "grief", kind: Curse, rarity: Special, cost: 1, keywords: [Exhaust]),
+    (id: "shame", kind: Curse, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [Apply(Weak, N(1), Me)]),
+    // Камень на шее: не сбрасывается, занимает место в руке весь бой
+    (id: "millstone", kind: Curse, rarity: Special, keywords: [Unplayable, Retain]),
+    (id: "blood_debt", kind: Curse, rarity: Special, keywords: [Unplayable, Ethereal],
+        in_hand_end: [LoseHp(N(4), Me)]),
+    (id: "evil_dream", kind: Curse, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [Flag("energy_less", 1)]),
+    (id: "bad_omen", kind: Curse, rarity: Special, keywords: [Unplayable, Ethereal],
+        in_hand_end: [Apply(Strength, N(1), AllFoes)]),
+    (id: "orphanhood", kind: Curse, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [Flag("draw_less", 1)]),
+
+    // ---- ещё шесть статус-карт: их подбрасывают враги ----
+    (id: "burn", kind: Status, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [LoseHp(N(2), Me)]),
+    (id: "corpse_poison", kind: Status, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [LoseHp(N(1), Me), Apply(Weak, N(1), Me)]),
+    (id: "ice_shard", kind: Status, rarity: Special, keywords: [Unplayable, Ethereal],
+        in_hand_end: [Flag("draw_less", 1)]),
+    (id: "ash", kind: Status, rarity: Special, keywords: [Unplayable, Ethereal]),
+    (id: "dread", kind: Status, rarity: Special, keywords: [Unplayable, Ethereal],
+        in_hand_end: [Apply(Vulnerable, N(1), Me)]),
+    // Заноза: вытащить можно, но больно
+    (id: "splinter", kind: Status, rarity: Special, cost: 0, keywords: [Exhaust],
+        effects: [LoseHp(N(1), Me)]),
     (
         // Паутина (Кикимора): мёртвая карта в руке
         id: "web", kind: Status, rarity: Special,

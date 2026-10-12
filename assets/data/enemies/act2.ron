@@ -68,7 +68,7 @@
         id: "vurdalak_elder", hp: (160, 160),
         moves: [
             (id: "raise_dead", intent: Summon, effects: [Hook("raise_dead")]),
-            (id: "rend", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
+            (id: "rend", intent: Attack, targeted: true, effects: [Damage(N(16), Target), AddCard(card: "corpse_poison", pile: Discard, to: Target)]),
             (id: "drain_all", intent: AttackAll, effects: [Damage(N(8), AllFoes), Heal(N(8), Me)]),
         ],
         pattern: [1, 2, 0],
@@ -77,7 +77,7 @@
         // «Полдень» 3→0: удар 30 по всем. Оглушённая, она пропускает ход, и удар не случается
         id: "poludnitsa", hp: (140, 140),
         moves: [
-            (id: "sickle", intent: Attack, targeted: true, effects: [Damage(N(14), Target)]),
+            (id: "sickle", intent: Attack, targeted: true, effects: [Damage(N(14), Target), AddCard(card: "burn", pile: Discard, to: Target)]),
             (id: "noon", intent: AttackAll, effects: [Damage(N(30), AllFoes)]),
         ],
         pattern: [0, 0, 0, 1],

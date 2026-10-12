@@ -1264,3 +1264,16 @@ fn a_lone_hero_faces_a_shorter_chain() {
     let enc = c.encounters.values().find(|e| e.id == "a4_koschei").unwrap();
     assert_eq!(enc.solo, ids(&["koschei", "death_oak_chest"]));
 }
+
+#[test]
+fn curses_that_spoil_the_next_turn() {
+    let (c, mut s) = solo(&["t_block"; 12], &["dummy"]);
+    s.heroes[0].hand.push(Card { uid: 9001, def: "evil_dream".into(), upgraded: false, free: false });
+    s.heroes[0].hand.push(Card { uid: 9002, def: "ice_shard".into(), upgraded: false, free: false });
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].energy, 2);
+    // the dream is back in the deck and may be drawn again; the shard melted for good
+    let h = &s.heroes[0];
+    assert!(!h.hand.iter().chain(&h.draw).chain(&h.discard).any(|x| x.def == "ice_shard"));
+    assert_eq!(h.hand.len(), 4);
+}

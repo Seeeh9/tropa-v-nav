@@ -4,7 +4,7 @@
         // половина урона проходит сквозь щит
         id: "nav_soul", hp: (50, 50), flags: ["piercing"],
         moves: [
-            (id: "pass_through", intent: Attack, targeted: true, effects: [Damage(N(12), Target)]),
+            (id: "pass_through", intent: Attack, targeted: true, effects: [Damage(N(12), Target), AddCard(card: "dread", pile: Discard, to: Target)]),
             (id: "moan", intent: Debuff, effects: [Apply(Weak, N(1), AllFoes)]),
         ],
         pattern: [0, 0, 1],
@@ -13,7 +13,7 @@
         // встаёт один раз с 50% HP (по документу — если не добита «Огнём»; огня как вида урона ещё нет)
         id: "kostomakha", hp: (55, 55), flags: ["rises"],
         moves: [
-            (id: "bone_blow", intent: Attack, targeted: true, effects: [Damage(N(13), Target)]),
+            (id: "bone_blow", intent: Attack, targeted: true, effects: [Damage(N(13), Target), AddCard(card: "splinter", pile: Discard, to: Target)]),
             (id: "rattle", intent: Defend, effects: [Block(N(12), Me)]),
         ],
         pattern: [0, 0, 1],
@@ -91,7 +91,7 @@
         id: "volot_giant", hp: (220, 220),
         moves: [
             (id: "earthquake", intent: AttackAll, effects: [Damage(N(12), AllFoes), Hook("quake")]),
-            (id: "stomp", intent: Attack, targeted: true, effects: [Damage(N(28), Target)]),
+            (id: "stomp", intent: Attack, targeted: true, effects: [Damage(N(28), Target), AddCard(card: "ash", pile: Draw, to: Target)]),
             (id: "boulder", intent: Defend, effects: [Block(N(18), Me)]),
         ],
         pattern: [0, 2, 1],
@@ -110,7 +110,7 @@
         id: "mara", hp: (480, 480),
         moves: [
             (id: "winter_comes", intent: Special, effects: [Hook("winter"), Hook("freeze")]),
-            (id: "ice_scythe", intent: Attack, targeted: true, effects: [Damage(N(26), Target), Hook("winter")]),
+            (id: "ice_scythe", intent: Attack, targeted: true, effects: [Damage(N(26), Target), AddCard(card: "ice_shard", pile: Draw, to: Target), Hook("winter")]),
             (id: "blizzard", intent: AttackAll, effects: [Damage(N(14), AllFoes), Hook("winter")]),
             (id: "frost_breath", intent: Special, effects: [Hook("freeze"), Block(N(20), Me), Hook("winter")]),
         ],

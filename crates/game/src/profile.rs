@@ -81,6 +81,38 @@ impl Profile {
     }
 }
 
+impl Profile {
+    fn run_path(&self) -> Option<PathBuf> {
+        self.path.as_ref().map(|p| p.with_extension("run.ron"))
+    }
+
+    /// Keeps the solo run in progress, so closing the game doesn't end it.
+    pub fn save_run(&self, run: &nav_core::Run) {
+        let Some(path) = self.run_path() else { return };
+        let Ok(text) = ron::to_string(run) else { return };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = path.with_extension("ron.tmp");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+
+    pub fn load_run(&self) -> Option<nav_core::Run> {
+        let text = std::fs::read_to_string(self.run_path()?).ok()?;
+        let run: nav_core::Run = ron::from_str(&text).ok()?;
+        // a finished run is not something to continue
+        (!matches!(run.stage, nav_core::Stage::Victory | nav_core::Stage::Defeat)).then_some(run)
+    }
+
+    pub fn clear_run(&self) {
+        if let Some(path) = self.run_path() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 fn profile_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("TropaVNav").join("profiles"))
 }

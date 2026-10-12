@@ -264,3 +264,31 @@ fn messages_round_trip_through_bytes() {
     assert_eq!(n, 5);
     assert_eq!(back.hash64(), state.hash64());
 }
+
+#[test]
+fn a_saved_solo_run_resumes_where_it_stopped() {
+    let c = content();
+    let mut hub = party(&c, 1, 5);
+    into_combat(&c, &mut hub);
+    assert!(step(&c, &mut hub));
+    let saved = hub.nodes[0].state.clone().unwrap();
+    // through text, as the save file does it
+    let text = ron::to_string(&saved).unwrap();
+    let loaded: Run = ron::from_str(&text).unwrap();
+    assert_eq!(loaded.hash64(), saved.hash64());
+
+    let mut node = Node::resume(1, "host", "bogatyr".into(), loaded);
+    assert!(node.is_host());
+    assert_eq!(node.my_slot(), Some(0));
+    assert!(node.take_notes().contains(&Note::Resynced));
+    for _ in 0..20_000 {
+        let state = node.state.as_ref().unwrap();
+        if matches!(state.stage, Stage::Victory | Stage::Defeat) {
+            return;
+        }
+        let action = run_bot(&c, state, 0).expect("a resumed run can go on");
+        node.submit(&c, action);
+        assert!(!node.take_notes().iter().any(|n| matches!(n, Note::Refused(_))));
+    }
+    panic!("the resumed run never ended");
+}

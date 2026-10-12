@@ -135,6 +135,19 @@ impl Node {
         node
     }
 
+    /// Reopens a saved solo run as its host.
+    pub fn resume(me: Peer, name: &str, hero: Id, run: Run) -> Node {
+        let mut node = Node::host(me, name);
+        node.lobby.players[0].hero = Some(hero);
+        node.lobby.players[0].ready = true;
+        node.lobby.circle = run.circle;
+        node.lobby.started = true;
+        node.last_mark = mark(&run);
+        node.state = Some(run);
+        node.notes.push(Note::Resynced);
+        node
+    }
+
     /// Joins the lobby hosted by `host`.
     pub fn join(me: Peer, name: &str, host: Peer) -> Node {
         let mut node = Node::blank(me, name);

@@ -79,6 +79,22 @@ fn enter_menu(
         Node { position_type: PositionType::Absolute, left: px(24), bottom: px(20), ..default() },
         ChildOf(*stage),
     ));
+    // a solo run left unfinished can be picked up again
+    if let Some(run) = profile.load_run() {
+        let label = l10n.tf("menu-continue", &[("hero", l10n.t(&format!("hero-{}", run.players[0].hero)).into()), ("act", (run.act as i32).into())]);
+        commands.spawn((
+            DespawnOnExit(AppState::Menu),
+            menu_button(label, &fonts),
+            observe(|_: On<Activate>, mut commands: Commands, profile: Res<crate::profile::Profile>, steam: Option<Res<crate::steam::Steam>>, l10n: Res<L10n>| {
+                if let Some(run) = profile.load_run() {
+                    let name = steam.map(|s| s.client.friends().name()).unwrap_or_else(|| l10n.t("lobby-wanderer"));
+                    // the stage router opens whichever screen the run was left on
+                    crate::net::resume_solo(&mut commands, &name, run);
+                }
+            }),
+            ChildOf(*stage),
+        ));
+    }
     commands.spawn((
         screen(AppState::Menu, *stage),
         children![

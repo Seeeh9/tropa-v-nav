@@ -188,6 +188,13 @@ pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str
     commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false, booked: false });
 }
 
+/// Picks up a saved solo run where it was left.
+pub fn resume_solo(commands: &mut Commands, name: &str, run: nav_core::Run) {
+    let hero = run.players.first().map(|p| p.hero.clone()).unwrap_or_default();
+    let node = Node::resume(1, name, hero, run);
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals: vec![], timer: 0.0, bot_me: false, booked: false });
+}
+
 /// Like [`start_offline`], but picks a hero for the host too and sets out at once.
 #[cfg(feature = "dev")]
 pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, hero: Option<String>, bot_me: bool, force: Option<nav_core::NodeKind>) {
@@ -412,8 +419,25 @@ fn autopilot(db: Res<Db>, time: Res<Time>, mut net: ResMut<Net>, mut wait: Local
 }
 
 /// Turns protocol notes into what the screens need.
-fn notes(mut commands: Commands, mut net: ResMut<Net>, mut session: Option<ResMut<Session>>, mut status: ResMut<NetStatus>, l10n: Res<crate::l10n::L10n>) {
-    for note in net.node.take_notes() {
+fn notes(
+    mut commands: Commands,
+    mut net: ResMut<Net>,
+    mut session: Option<ResMut<Session>>,
+    mut status: ResMut<NetStatus>,
+    l10n: Res<crate::l10n::L10n>,
+    profile: Res<crate::profile::Profile>,
+) {
+    let notes = net.node.take_notes();
+    // a lone player's run is kept on disk as it goes; the autopilot's dev runs are not
+    let solo = net.lobby.is_none() && net.locals.is_empty() && !net.bot_me;
+    if solo && notes.iter().any(|n| matches!(n, Note::Applied { .. } | Note::Started)) {
+        match net.node.state.as_ref() {
+            Some(run) if matches!(run.stage, Stage::Victory | Stage::Defeat) => profile.clear_run(),
+            Some(run) => profile.save_run(run),
+            None => {}
+        }
+    }
+    for note in notes {
         match note {
             Note::LobbyChanged | Note::HostChanged => status.dirty = true,
             Note::Started => status.run_dirty = true,

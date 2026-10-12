@@ -1,0 +1,511 @@
+//! Static game content: cards, heroes, relics, enemies. Loaded from RON.
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::Path;
+
+pub type Id = String;
+
+macro_rules! data_enum {
+    ($(#[$m:meta])* $name:ident { $($v:ident),* $(,)? }) => {
+        $(#[$m])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        pub enum $name { $($v),* }
+    };
+}
+
+data_enum!(CardType { Attack, Skill, Power, Herb, Curse, Status });
+data_enum!(Rarity { Starter, Common, Uncommon, Rare, Special });
+data_enum!(
+    /// `Coop` cards only show up in rewards with 2+ players.
+    Keyword { Exhaust, Retain, Ethereal, Unplayable, Coop }
+);
+data_enum!(
+    /// What the player has to point a card at.
+    CardTarget { None, Enemy, Ally, AnyHero, Downed }
+);
+data_enum!(
+    /// Who an effect lands on, relative to its source.
+    Tgt { Me, Target, AllFoes, RandomFoe, AllFriends, OtherFriends }
+);
+data_enum!(Pile { Hand, Draw, Discard });
+data_enum!(Form { Human, Beast });
+data_enum!(MaskKind { Bear, Goat, Mara });
+data_enum!(RuneKind { Thunder, Frost, Mist, Flame, Zhiva });
+data_enum!(Mechanic { Valor, Curse, Runes, Moon, Brew, Masks });
+data_enum!(EncounterKind { Normal, Elite, Boss });
+data_enum!(IntentKind { Attack, AttackAll, Defend, Buff, Debuff, Summon, Unknown, Special });
+
+data_enum!(StatusKind {
+    Strength,
+    TempStrength,
+    Fortitude,
+    Vulnerable,
+    Weak,
+    Rot,
+    Hex,
+    Bleed,
+    Fear,
+    Thorns,
+    HuntMark,
+    Valor,
+    Stun,
+    Mist,
+});
+
+impl StatusKind {
+    /// Counted in rounds and ticked down when the round closes.
+    pub fn timed(self) -> bool {
+        matches!(self, StatusKind::Vulnerable | StatusKind::Weak)
+    }
+    /// Gone when the round closes.
+    pub fn round_only(self) -> bool {
+        matches!(self, StatusKind::TempStrength | StatusKind::HuntMark)
+    }
+    pub fn debuff(self) -> bool {
+        use StatusKind::*;
+        matches!(self, Vulnerable | Weak | Rot | Hex | Bleed | Fear | HuntMark | Stun)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Amount {
+    N(i32),
+    /// Energy spent on an X-cost card, times the multiplier.
+    X(i32),
+    /// Stacks of a status on a unit, times the multiplier.
+    Stat(StatusKind, Tgt, i32),
+    /// Stacks swallowed by the last `Consume`, times the multiplier.
+    Consumed(i32),
+    /// Cards played by all heroes this round, times the multiplier.
+    PlayedThisRound(i32),
+    /// Runes of a kind across all heroes, times the multiplier.
+    Runes(RuneKind, i32),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Cond {
+    Has(StatusKind, Tgt, i32),
+    /// An ally already played a card of this type this round.
+    Link(CardType),
+    /// The last damage effect killed its target.
+    Fatal,
+    Form(Form),
+    Mask(MaskKind),
+    Coop,
+    Not(Box<Cond>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Effect {
+    Damage(Amount, Tgt),
+    /// Damage repeated `.1` times.
+    Hits(Amount, i32, Tgt),
+    Block(Amount, Tgt),
+    Apply(StatusKind, Amount, Tgt),
+    Remove(StatusKind, Tgt),
+    Draw(Amount),
+    Energy(Amount, Tgt),
+    Heal(Amount, Tgt),
+    LoseHp(Amount, Tgt),
+    /// Raise a downed hero with this percent of max HP.
+    Revive(i32, Tgt),
+    AddCard { card: Id, pile: Pile, to: Tgt, #[serde(default = "one")] count: i32 },
+    /// Block for a friend plus redirection of the overflow to the source.
+    Guard(Amount, Tgt),
+    /// Every enemy intent now points at the source.
+    Taunt,
+    /// Strip all stacks of a status and remember how many there were.
+    Consume(StatusKind, Tgt),
+    /// Strip every debuff.
+    Cleanse(Tgt),
+    If(Cond, Vec<Effect>, #[serde(default)] Vec<Effect>),
+    Repeat(Amount, Vec<Effect>),
+    Rune(RuneKind, Tgt),
+    Invoke,
+    Shift,
+    Mask(MaskKind),
+    Summon(Id, #[serde(default = "one")] i32),
+    StealGold(i32),
+    Flee,
+    /// Escape hatch into named Rust code for one-off mechanics.
+    Hook(String),
+}
+
+fn one() -> i32 {
+    1
+}
+
+data_enum!(Trigger {
+    CombatStart,
+    TurnStart,
+    TurnEnd,
+    CardPlayed,
+    AttackPlayed,
+    AllyHpLoss,
+    Kill,
+    Shifted,
+    MaskChanged,
+    AllyRaised,
+});
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Passive {
+    pub on: Trigger,
+    pub effects: Vec<Effect>,
+}
+
+/// Overrides layered on a card: its upgrade, or the Beast side of a werewolf card.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CardPatch {
+    pub cost: Option<i32>,
+    pub kind: Option<CardType>,
+    pub target: Option<CardTarget>,
+    pub effects: Option<Vec<Effect>>,
+    pub passives: Option<Vec<Passive>>,
+    pub keywords: Option<Vec<Keyword>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CardDef {
+    pub id: Id,
+    /// Owning hero id, or empty for neutral, curse and status cards.
+    #[serde(default)]
+    pub hero: Id,
+    pub kind: CardType,
+    #[serde(default = "starter")]
+    pub rarity: Rarity,
+    #[serde(default)]
+    pub cost: i32,
+    #[serde(default)]
+    pub x_cost: bool,
+    #[serde(default = "no_target")]
+    pub target: CardTarget,
+    #[serde(default)]
+    pub effects: Vec<Effect>,
+    /// Attached to the hero for the rest of combat when a Power is played.
+    #[serde(default)]
+    pub passives: Vec<Passive>,
+    #[serde(default)]
+    pub keywords: Vec<Keyword>,
+    /// Runs at end of turn while the card sits in hand (curses).
+    #[serde(default)]
+    pub in_hand_end: Vec<Effect>,
+    #[serde(default)]
+    pub up: Option<CardPatch>,
+    #[serde(default)]
+    pub beast: Option<CardPatch>,
+    #[serde(default)]
+    pub beast_up: Option<CardPatch>,
+}
+
+fn starter() -> Rarity {
+    Rarity::Starter
+}
+fn no_target() -> CardTarget {
+    CardTarget::None
+}
+
+/// A card as it plays right now, with upgrade and form applied.
+#[derive(Clone, Debug)]
+pub struct CardView {
+    pub cost: i32,
+    pub x_cost: bool,
+    pub kind: CardType,
+    pub target: CardTarget,
+    pub effects: Vec<Effect>,
+    pub passives: Vec<Passive>,
+    pub keywords: Vec<Keyword>,
+}
+
+impl CardView {
+    pub fn has(&self, k: Keyword) -> bool {
+        self.keywords.contains(&k)
+    }
+}
+
+impl CardDef {
+    pub fn view(&self, upgraded: bool, form: Form) -> CardView {
+        let mut v = CardView {
+            cost: self.cost,
+            x_cost: self.x_cost,
+            kind: self.kind,
+            target: self.target,
+            effects: self.effects.clone(),
+            passives: self.passives.clone(),
+            keywords: self.keywords.clone(),
+        };
+        let mut layer = |p: &Option<CardPatch>| {
+            let Some(p) = p else { return };
+            if let Some(c) = p.cost {
+                v.cost = c;
+            }
+            if let Some(k) = p.kind {
+                v.kind = k;
+            }
+            if let Some(t) = p.target {
+                v.target = t;
+            }
+            if let Some(e) = &p.effects {
+                v.effects = e.clone();
+            }
+            if let Some(e) = &p.passives {
+                v.passives = e.clone();
+            }
+            if let Some(k) = &p.keywords {
+                v.keywords = k.clone();
+            }
+        };
+        let beast = form == Form::Beast && self.beast.is_some();
+        if upgraded {
+            layer(&self.up);
+        }
+        if beast {
+            layer(&self.beast);
+            if upgraded {
+                layer(&self.beast_up);
+            }
+        }
+        v
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct HeroDef {
+    pub id: Id,
+    pub max_hp: i32,
+    pub mechanic: Mechanic,
+    pub deck: Vec<Id>,
+    pub relic: Id,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RelicDef {
+    pub id: Id,
+    #[serde(default = "common")]
+    pub rarity: Rarity,
+    #[serde(default)]
+    pub hero: Id,
+    #[serde(default)]
+    pub passives: Vec<Passive>,
+}
+
+fn common() -> Rarity {
+    Rarity::Common
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MoveDef {
+    pub id: Id,
+    pub intent: IntentKind,
+    /// Aimed at one hero, picked when the intent is shown.
+    #[serde(default)]
+    pub targeted: bool,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EnemyDef {
+    pub id: Id,
+    /// Inclusive HP range for one player.
+    pub hp: (i32, i32),
+    pub moves: Vec<MoveDef>,
+    /// Played once, before the cycle starts.
+    #[serde(default)]
+    pub opening: Vec<usize>,
+    /// Indices into `moves`, repeated forever.
+    pub pattern: Vec<usize>,
+    /// Runs when the enemy dies.
+    #[serde(default)]
+    pub on_death: Vec<Effect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EncounterDef {
+    pub id: Id,
+    pub act: u8,
+    pub kind: EncounterKind,
+    pub enemies: Vec<Id>,
+    /// Joins with 3 players (doc: +0-1), rolled 50/50.
+    #[serde(default)]
+    pub extra3: Vec<Id>,
+    /// Joins with 4 players.
+    #[serde(default)]
+    pub extra4: Vec<Id>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Content {
+    pub cards: BTreeMap<Id, CardDef>,
+    pub heroes: BTreeMap<Id, HeroDef>,
+    pub relics: BTreeMap<Id, RelicDef>,
+    pub enemies: BTreeMap<Id, EnemyDef>,
+    pub encounters: BTreeMap<Id, EncounterDef>,
+}
+
+#[derive(Debug)]
+pub struct LoadError(pub String);
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for LoadError {}
+
+fn parse<T: serde::de::DeserializeOwned>(src: &str, what: &str) -> Result<Vec<T>, LoadError> {
+    ron::Options::default()
+        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+        .from_str(src)
+        .map_err(|e| LoadError(format!("{what}: {e}")))
+}
+
+/// Enemy HP multiplier in permille by player count (design doc, section 2).
+pub fn hp_scale(players: usize) -> i32 {
+    match players {
+        0 | 1 => 1000,
+        2 => 1800,
+        3 => 2500,
+        _ => 3200,
+    }
+}
+
+impl Content {
+    pub fn add_cards(&mut self, src: &str) -> Result<(), LoadError> {
+        for c in parse::<CardDef>(src, "cards")? {
+            self.cards.insert(c.id.clone(), c);
+        }
+        Ok(())
+    }
+    pub fn add_heroes(&mut self, src: &str) -> Result<(), LoadError> {
+        for c in parse::<HeroDef>(src, "heroes")? {
+            self.heroes.insert(c.id.clone(), c);
+        }
+        Ok(())
+    }
+    pub fn add_relics(&mut self, src: &str) -> Result<(), LoadError> {
+        for c in parse::<RelicDef>(src, "relics")? {
+            self.relics.insert(c.id.clone(), c);
+        }
+        Ok(())
+    }
+    pub fn add_enemies(&mut self, src: &str) -> Result<(), LoadError> {
+        for c in parse::<EnemyDef>(src, "enemies")? {
+            self.enemies.insert(c.id.clone(), c);
+        }
+        Ok(())
+    }
+    pub fn add_encounters(&mut self, src: &str) -> Result<(), LoadError> {
+        for c in parse::<EncounterDef>(src, "encounters")? {
+            self.encounters.insert(c.id.clone(), c);
+        }
+        Ok(())
+    }
+
+    /// Loads every `.ron` under `dir/{cards,heroes,relics,enemies,encounters}`.
+    pub fn load_dir(dir: &Path) -> Result<Content, LoadError> {
+        let mut c = Content::default();
+        let each = |sub: &str, f: &mut dyn FnMut(&str) -> Result<(), LoadError>| {
+            let p = dir.join(sub);
+            let Ok(rd) = std::fs::read_dir(&p) else { return Ok(()) };
+            let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+            files.sort();
+            for file in files {
+                if file.extension().and_then(|e| e.to_str()) != Some("ron") {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&file)
+                    .map_err(|e| LoadError(format!("{}: {e}", file.display())))?;
+                f(&src).map_err(|e| LoadError(format!("{}: {}", file.display(), e.0)))?;
+            }
+            Ok(())
+        };
+        each("cards", &mut |s| c.add_cards(s))?;
+        each("heroes", &mut |s| c.add_heroes(s))?;
+        each("relics", &mut |s| c.add_relics(s))?;
+        each("enemies", &mut |s| c.add_enemies(s))?;
+        each("encounters", &mut |s| c.add_encounters(s))?;
+        c.validate()?;
+        Ok(c)
+    }
+
+    /// Catches dangling ids at load time instead of mid-combat.
+    pub fn validate(&self) -> Result<(), LoadError> {
+        let mut bad = Vec::new();
+        fn walk(effects: &[Effect], f: &mut dyn FnMut(&Effect)) {
+            for e in effects {
+                f(e);
+                match e {
+                    Effect::If(_, a, b) => {
+                        walk(a, f);
+                        walk(b, f);
+                    }
+                    Effect::Repeat(_, a) => walk(a, f),
+                    _ => {}
+                }
+            }
+        }
+        let check = |bad: &mut Vec<String>, owner: &str, effects: &[Effect]| {
+            walk(effects, &mut |e| match e {
+                Effect::AddCard { card, .. } if !self.cards.contains_key(card) => {
+                    bad.push(format!("{owner}: unknown card `{card}`"))
+                }
+                Effect::Summon(id, _) if !self.enemies.contains_key(id) => {
+                    bad.push(format!("{owner}: unknown enemy `{id}`"))
+                }
+                _ => {}
+            });
+        };
+        for c in self.cards.values() {
+            check(&mut bad, &c.id, &c.effects);
+            check(&mut bad, &c.id, &c.in_hand_end);
+            for p in [&c.up, &c.beast, &c.beast_up].into_iter().flatten() {
+                if let Some(e) = &p.effects {
+                    check(&mut bad, &c.id, e);
+                }
+            }
+        }
+        for r in self.relics.values() {
+            for p in &r.passives {
+                check(&mut bad, &r.id, &p.effects);
+            }
+        }
+        for e in self.enemies.values() {
+            check(&mut bad, &e.id, &e.on_death);
+            for m in &e.moves {
+                check(&mut bad, &e.id, &m.effects);
+            }
+            for &i in e.opening.iter().chain(&e.pattern) {
+                if i >= e.moves.len() {
+                    bad.push(format!("{}: pattern index {i} out of range", e.id));
+                }
+            }
+            if e.pattern.is_empty() {
+                bad.push(format!("{}: empty pattern", e.id));
+            }
+        }
+        for h in self.heroes.values() {
+            for c in &h.deck {
+                if !self.cards.contains_key(c) {
+                    bad.push(format!("{}: unknown deck card `{c}`", h.id));
+                }
+            }
+            if !self.relics.contains_key(&h.relic) {
+                bad.push(format!("{}: unknown relic `{}`", h.id, h.relic));
+            }
+        }
+        for enc in self.encounters.values() {
+            for e in enc.enemies.iter().chain(&enc.extra3).chain(&enc.extra4) {
+                if !self.enemies.contains_key(e) {
+                    bad.push(format!("{}: unknown enemy `{e}`", enc.id));
+                }
+            }
+        }
+        if bad.is_empty() {
+            Ok(())
+        } else {
+            Err(LoadError(bad.join("\n")))
+        }
+    }
+}

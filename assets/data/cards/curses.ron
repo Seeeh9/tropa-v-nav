@@ -1,0 +1,19 @@
+// Проклятия и статус-карты.
+[
+    (
+        // Метка Нави: 2 урона себе в конце хода, если она в руке
+        id: "nav_mark", kind: Curse, rarity: Special,
+        keywords: [Unplayable],
+        in_hand_end: [LoseHp(N(2), Me)],
+    ),
+    (
+        // Паутина (Кикимора): мёртвая карта в руке
+        id: "web", kind: Status, rarity: Special,
+        keywords: [Unplayable],
+    ),
+    (
+        // Тина (Тиняк): стоит 1, ничего не делает
+        id: "mire", kind: Status, rarity: Special, cost: 1,
+        keywords: [Exhaust],
+    ),
+]

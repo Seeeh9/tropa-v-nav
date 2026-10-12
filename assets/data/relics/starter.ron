@@ -1,0 +1,7 @@
+[
+    (
+        // Отцовский оберег: в начале боя Богатырь получает 6 щита, каждый союзник — 3
+        id: "father_amulet", rarity: Starter, hero: "bogatyr",
+        passives: [(on: CombatStart, effects: [Block(N(6), Me), Block(N(3), OtherFriends)])],
+    ),
+]

@@ -1,0 +1,793 @@
+mod common;
+use common::*;
+use nav_core::*;
+use StatusKind as S;
+
+const ME: UnitRef = UnitRef::Hero(0);
+
+/// Restarts with new seeds until the first enemy aims at `slot`.
+fn aimed_at(c: &Content, heroes: &[HeroSetup], enemies: &[&str], slot: u8) -> Combat {
+    for seed in 0..200 {
+        let (s, _) = start(c, heroes, &ids(enemies), seed);
+        if s.enemies[0].intent.as_ref().and_then(|i| i.target) == Some(slot) {
+            return s;
+        }
+    }
+    panic!("no seed aims at slot {slot}");
+}
+
+// ---- rng ----
+
+#[test]
+fn rng_is_deterministic_and_in_range() {
+    let (mut a, mut b) = (Rng::new(42), Rng::new(42));
+    for _ in 0..1000 {
+        let x = a.range(3, 9);
+        assert_eq!(x, b.range(3, 9));
+        assert!((3..=9).contains(&x));
+    }
+    assert_ne!(Rng::new(1).next_u32(), Rng::new(2).next_u32());
+    let mut v: Vec<u32> = (0..20).collect();
+    Rng::new(5).shuffle(&mut v);
+    let mut sorted = v.clone();
+    sorted.sort();
+    assert_eq!(sorted, (0..20).collect::<Vec<_>>());
+    assert_ne!(v, sorted);
+}
+
+// ---- content ----
+
+#[test]
+fn content_loads_and_validates() {
+    let c = content();
+    let b = &c.heroes["bogatyr"];
+    assert_eq!(b.max_hp, 85);
+    assert_eq!(b.deck.len(), 10);
+    assert_eq!(c.cards["bogatyr_strike"].view(false, Form::Human).effects, vec![Effect::Damage(Amount::N(6), Tgt::Target)]);
+    assert_eq!(c.cards["bogatyr_defend"].view(false, Form::Human).effects, vec![Effect::Block(Amount::N(5), Tgt::Me)]);
+}
+
+#[test]
+fn dangling_ids_are_rejected() {
+    let mut c = Content::default();
+    c.add_cards(r#"[(id: "bad", kind: Skill, effects: [AddCard(card: "ghost", pile: Hand, to: Me)])]"#).unwrap();
+    assert!(c.validate().is_err());
+}
+
+// ---- damage, block, hp ----
+
+#[test]
+fn damage_hits_hp() {
+    let (c, mut s) = solo(&["t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 90);
+}
+
+#[test]
+fn multi_hit_and_aoe() {
+    let (c, mut s) = solo(&["t_multi", "t_hit_all"], &["dummy", "dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_multi", Some(t));
+    assert_eq!(s.enemies[0].hp, 94);
+    play(&c, &mut s, 0, "t_hit_all", None);
+    assert_eq!((s.enemies[0].hp, s.enemies[1].hp), (90, 96));
+}
+
+#[test]
+fn block_absorbs_then_resets_next_round() {
+    let (c, mut s) = solo(&["t_block"], &["hitter"]);
+    play(&c, &mut s, 0, "t_block", None);
+    assert_eq!(s.heroes[0].block, 5);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 45);
+    assert_eq!(s.heroes[0].block, 0);
+    assert_eq!(s.round, 2);
+}
+
+#[test]
+fn enemy_block_lasts_until_its_next_turn() {
+    let (c, mut s) = solo(&["t_hit"], &["armored"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].block, 20);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!((s.enemies[0].hp, s.enemies[0].block), (100, 10));
+}
+
+#[test]
+fn heal_is_capped_and_lose_hp_ignores_block() {
+    let (c, mut s) = solo(&["t_block", "t_pain", "t_heal"], &["dummy"]);
+    play(&c, &mut s, 0, "t_block", None);
+    play(&c, &mut s, 0, "t_pain", None);
+    assert_eq!((s.heroes[0].hp, s.heroes[0].block), (46, 5));
+    play(&c, &mut s, 0, "t_heal", None);
+    assert_eq!(s.heroes[0].hp, 50);
+}
+
+// ---- statuses ----
+
+#[test]
+fn strength_adds_to_attacks() {
+    let (c, mut s) = solo(&["t_str", "t_hit", "t_multi"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_str", None);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 88);
+    play(&c, &mut s, 0, "t_multi", Some(t));
+    assert_eq!(s.enemies[0].hp, 76);
+}
+
+#[test]
+fn weak_cuts_damage_by_a_quarter_and_expires() {
+    let (c, mut s) = solo(&["t_weak_me", "t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_weak_me", None);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 93);
+    end_round(&c, &mut s);
+    assert_eq!(s.status(ME, S::Weak), 0);
+}
+
+#[test]
+fn weak_enemy_hits_softer() {
+    let (c, mut s) = solo(&["t_weak"], &["hitter"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_weak", Some(t));
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 43);
+    assert_eq!(s.status(t, S::Weak), 1);
+}
+
+#[test]
+fn vulnerable_takes_half_more() {
+    let (c, mut s) = solo(&["t_vuln", "t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_vuln", Some(t));
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 85);
+}
+
+#[test]
+fn rot_ticks_then_shrinks() {
+    let (c, mut s) = solo(&["t_rot"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_rot", Some(t));
+    end_round(&c, &mut s);
+    assert_eq!((s.enemies[0].hp, s.status(t, S::Rot)), (97, 2));
+    end_round(&c, &mut s);
+    assert_eq!((s.enemies[0].hp, s.status(t, S::Rot)), (95, 1));
+    end_round(&c, &mut s);
+    assert_eq!((s.enemies[0].hp, s.status(t, S::Rot)), (94, 0));
+}
+
+#[test]
+fn rot_on_a_hero_ticks_at_end_of_their_turn() {
+    let (c, mut s) = solo(&["t_hit"], &["spore", "dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.status(ME, S::Rot), 3);
+    end_round(&c, &mut s);
+    assert_eq!((s.heroes[0].hp, s.status(ME, S::Rot)), (47, 2));
+}
+
+#[test]
+fn hex_boosts_the_next_x_hits() {
+    let (c, mut s) = solo(&["t_hex", "t_hit", "t_hit", "t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hex", Some(t));
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 74);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 64);
+}
+
+#[test]
+fn bleed_hurts_the_attacker() {
+    let (c, mut s) = solo(&["t_bleed"], &["hitter"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_bleed", Some(t));
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].hp, 96);
+    assert_eq!(s.heroes[0].hp, 40);
+}
+
+#[test]
+fn fear_caps_at_75_and_sometimes_skips() {
+    let c = content();
+    let mut skipped = 0;
+    for seed in 0..40 {
+        let (mut s, _) = start(&c, &[hero("t_plain", &["t_fear", "t_fear"])], &ids(&["hitter"]), seed);
+        let t = foe(&s, 0);
+        play(&c, &mut s, 0, "t_fear", Some(t));
+        play(&c, &mut s, 0, "t_fear", Some(t));
+        assert_eq!(s.status(t, S::Fear), 75);
+        end_round(&c, &mut s);
+        if s.heroes[0].hp == 50 {
+            skipped += 1;
+            assert_eq!(s.status(t, S::Fear), 0, "fear is spent when it triggers");
+        }
+    }
+    assert!((20..=38).contains(&skipped), "skipped {skipped}/40 at 75%");
+}
+
+#[test]
+fn stun_skips_one_turn() {
+    let (c, mut s) = solo(&["t_stun"], &["hitter"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_stun", Some(t));
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 50);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 40);
+}
+
+#[test]
+fn thorns_bite_back() {
+    let (c, mut s) = solo(&["t_thorns"], &["hitter"]);
+    play(&c, &mut s, 0, "t_thorns", None);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].hp, 97);
+}
+
+#[test]
+fn fortitude_adds_to_card_block() {
+    let (c, mut s) = solo(&["t_fort", "t_block"], &["dummy"]);
+    play(&c, &mut s, 0, "t_fort", None);
+    play(&c, &mut s, 0, "t_block", None);
+    assert_eq!(s.heroes[0].block, 7);
+}
+
+#[test]
+fn hunt_mark_lasts_one_round() {
+    let (c, mut s) = solo(&["t_mark", "t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_mark", Some(t));
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 86);
+    end_round(&c, &mut s);
+    assert_eq!(s.status(t, S::HuntMark), 0);
+}
+
+#[test]
+fn cleanse_strips_debuffs_only() {
+    let (c, mut s) = solo(&["t_weak_me", "t_str", "t_cleanse"], &["dummy"]);
+    play(&c, &mut s, 0, "t_weak_me", None);
+    play(&c, &mut s, 0, "t_str", None);
+    play(&c, &mut s, 0, "t_cleanse", None);
+    assert_eq!((s.status(ME, S::Weak), s.status(ME, S::Strength)), (0, 2));
+}
+
+// ---- deck ----
+
+#[test]
+fn opening_hand_energy_and_reshuffle() {
+    let (c, mut s) = solo(&["t_block"; 7], &["dummy"]);
+    assert_eq!((s.heroes[0].hand.len(), s.heroes[0].draw.len(), s.heroes[0].energy), (5, 2, 3));
+    end_round(&c, &mut s);
+    let h = &s.heroes[0];
+    assert_eq!((h.hand.len(), h.draw.len(), h.discard.len()), (5, 2, 0));
+}
+
+#[test]
+fn hand_is_capped_at_ten() {
+    let (c, mut s) = solo(&["t_draw9"; 12], &["dummy"]);
+    play(&c, &mut s, 0, "t_draw9", None);
+    assert_eq!((s.heroes[0].hand.len(), s.heroes[0].draw.len()), (10, 1));
+}
+
+#[test]
+fn draw_stops_on_an_empty_deck() {
+    let (c, mut s) = solo(&["t_draw", "t_block"], &["dummy"]);
+    play(&c, &mut s, 0, "t_draw", None);
+    assert_eq!(s.heroes[0].hand.len(), 1);
+}
+
+#[test]
+fn add_card_to_hand() {
+    let (c, mut s) = solo(&["t_gift"], &["dummy"]);
+    play(&c, &mut s, 0, "t_gift", None);
+    assert_eq!(s.heroes[0].hand.iter().filter(|x| x.def == "t_hit").count(), 2);
+}
+
+// ---- keywords ----
+
+#[test]
+fn exhaust_leaves_the_deck() {
+    let (c, mut s) = solo(&["t_exhaust"], &["dummy"]);
+    play(&c, &mut s, 0, "t_exhaust", None);
+    assert_eq!((s.heroes[0].exhaust.len(), s.heroes[0].discard.len()), (1, 0));
+}
+
+#[test]
+fn retain_stays_and_ethereal_burns() {
+    let (c, mut s) = solo(&["t_retain", "t_ether", "t_cost2"], &["dummy"]);
+    let kept = s.heroes[0].hand.iter().find(|x| x.def == "t_retain").unwrap().uid;
+    end_round(&c, &mut s);
+    let h = &s.heroes[0];
+    assert!(h.hand.iter().any(|x| x.uid == kept));
+    assert_eq!(h.exhaust.len(), 1);
+    assert_eq!(h.exhaust[0].def, "t_ether");
+    assert!(h.hand.iter().any(|x| x.def == "t_cost2"));
+}
+
+#[test]
+fn unplayable_and_unaffordable_leave_state_untouched() {
+    let (c, mut s) = solo(&["web", "t_cost2", "t_cost2"], &["dummy"]);
+    let before = s.hash64();
+    assert_eq!(try_play(&c, &mut s, 0, "web", None), Err(ActionError::Unplayable));
+    assert_eq!(s.hash64(), before);
+    play(&c, &mut s, 0, "t_cost2", None);
+    let before = s.hash64();
+    assert_eq!(try_play(&c, &mut s, 0, "t_cost2", None), Err(ActionError::NotEnoughEnergy));
+    assert_eq!(s.hash64(), before);
+}
+
+#[test]
+fn bad_targets_are_refused() {
+    let (c, mut s) = solo(&["t_hit", "t_revive"], &["dummy"]);
+    assert_eq!(try_play(&c, &mut s, 0, "t_hit", None), Err(ActionError::BadTarget));
+    assert_eq!(try_play(&c, &mut s, 0, "t_hit", Some(ME)), Err(ActionError::BadTarget));
+    assert_eq!(try_play(&c, &mut s, 0, "t_hit", Some(UnitRef::Enemy(9999))), Err(ActionError::BadTarget));
+    assert_eq!(try_play(&c, &mut s, 0, "t_revive", Some(ME)), Err(ActionError::BadTarget));
+}
+
+#[test]
+fn upgrade_changes_cost_and_numbers() {
+    let c = content();
+    let mut h = hero("t_plain", &[]);
+    h.deck = vec![("t_up".into(), true)];
+    let (mut s, _) = start(&c, &[h], &ids(&["dummy"]), 1);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_up", Some(t));
+    assert_eq!((s.enemies[0].hp, s.heroes[0].energy), (91, 3));
+}
+
+#[test]
+fn link_needs_an_ally_card_of_that_type() {
+    let (c, mut s) = duo(&["t_link", "t_link", "t_block"], &["t_block"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_block", None);
+    play(&c, &mut s, 0, "t_link", Some(t));
+    assert_eq!(s.enemies[0].hp, 175, "own skill doesn't count");
+    play(&c, &mut s, 1, "t_block", None);
+    play(&c, &mut s, 0, "t_link", Some(t));
+    assert_eq!(s.enemies[0].hp, 165);
+}
+
+#[test]
+fn consume_eats_the_curse_for_a_bonus() {
+    let (c, mut s) = solo(&["t_rot", "t_consume"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_rot", Some(t));
+    play(&c, &mut s, 0, "t_consume", Some(t));
+    assert_eq!((s.enemies[0].hp, s.status(t, S::Rot)), (91, 0));
+}
+
+#[test]
+fn x_cost_spends_everything() {
+    let (c, mut s) = solo(&["t_x"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_x", Some(t));
+    assert_eq!((s.enemies[0].hp, s.heroes[0].energy), (91, 0));
+}
+
+#[test]
+fn fatal_bonus_only_on_a_kill() {
+    let (c, mut s) = solo(&["t_pain", "t_pain", "t_fatal", "t_fatal"], &["weakling", "dummy"]);
+    let (weak, tank) = (foe(&s, 0), foe(&s, 1));
+    play(&c, &mut s, 0, "t_pain", None);
+    play(&c, &mut s, 0, "t_pain", None);
+    play(&c, &mut s, 0, "t_fatal", Some(tank));
+    assert_eq!(s.heroes[0].hp, 42);
+    play(&c, &mut s, 0, "t_fatal", Some(weak));
+    assert_eq!(s.heroes[0].hp, 50);
+    assert!(!s.enemies[0].alive);
+}
+
+#[test]
+fn coop_condition_and_played_counter() {
+    let (c, mut s) = solo(&["t_coop", "t_played"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_coop", None);
+    assert_eq!(s.heroes[0].block, 2);
+    play(&c, &mut s, 0, "t_played", Some(t));
+    assert_eq!(s.enemies[0].hp, 97);
+    let (c, mut s) = duo(&["t_coop"], &[], &["dummy"]);
+    play(&c, &mut s, 0, "t_coop", None);
+    assert_eq!(s.heroes[0].block, 9);
+}
+
+#[test]
+fn power_sticks_for_the_fight() {
+    let (c, mut s) = solo(&["t_power"], &["dummy"]);
+    play(&c, &mut s, 0, "t_power", None);
+    let h = &s.heroes[0];
+    assert_eq!(h.hand.len() + h.discard.len() + h.exhaust.len() + h.draw.len(), 0);
+    end_round(&c, &mut s);
+    assert_eq!(s.status(ME, S::Strength), 1);
+    end_round(&c, &mut s);
+    assert_eq!(s.status(ME, S::Strength), 2);
+}
+
+#[test]
+fn ally_energy_and_solo_fallback() {
+    let (c, mut s) = duo(&["t_energy"], &[], &["dummy"]);
+    assert_eq!(try_play(&c, &mut s, 0, "t_energy", Some(ME)), Err(ActionError::BadTarget));
+    play(&c, &mut s, 0, "t_energy", Some(UnitRef::Hero(1)));
+    assert_eq!(s.heroes[1].energy, 5);
+    let (c, mut s) = solo(&["t_energy"], &["dummy"]);
+    play(&c, &mut s, 0, "t_energy", None);
+    assert_eq!(s.heroes[0].energy, 3);
+}
+
+// ---- Bogatyr ----
+
+#[test]
+fn father_amulet_shields_the_party() {
+    let c = content();
+    let (s, _) = start(&c, &[HeroSetup::fresh(&c, "bogatyr").unwrap(), hero("t_plain", &[])], &ids(&["dummy"]), 3);
+    assert_eq!((s.heroes[0].block, s.heroes[1].block), (6, 3));
+}
+
+#[test]
+fn valor_one_per_five_absorbed() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("bogatyr", &["bogatyr_defend"])], &ids(&["hitter"]), 3);
+    play(&c, &mut s, 0, "bogatyr_defend", None);
+    end_round(&c, &mut s);
+    assert_eq!((s.heroes[0].hp, s.status(ME, S::Valor)), (45, 2));
+}
+
+#[test]
+fn guard_redirects_overflow_to_the_bogatyr() {
+    let c = content();
+    let party = [hero("bogatyr", &["bogatyr_guard"]), hero("t_plain", &[])];
+    let mut s = aimed_at(&c, &party, &["hitter"], 1);
+    play(&c, &mut s, 0, "bogatyr_guard", Some(UnitRef::Hero(1)));
+    assert_eq!((s.heroes[1].block, s.heroes[1].guard_by), (7, Some(0)));
+    end_round(&c, &mut s);
+    assert_eq!((s.heroes[0].hp, s.heroes[1].hp), (47, 50));
+    assert_eq!(s.heroes[1].guard_by, None);
+    assert_eq!(s.heroes[0].valor_rem, 3);
+}
+
+#[test]
+fn guard_on_self_is_plain_block() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("bogatyr", &["bogatyr_guard"])], &ids(&["dummy"]), 3);
+    play(&c, &mut s, 0, "bogatyr_guard", Some(ME));
+    assert_eq!((s.heroes[0].block, s.heroes[0].guard_by), (7, None));
+}
+
+#[test]
+fn challenge_pulls_every_attack() {
+    let c = content();
+    let party = [hero("bogatyr", &["bogatyr_challenge"]), hero("t_plain", &[])];
+    let mut s = aimed_at(&c, &party, &["hitter"], 1);
+    play(&c, &mut s, 0, "bogatyr_challenge", None);
+    assert_eq!(s.enemies[0].intent.as_ref().unwrap().target, Some(0));
+    end_round(&c, &mut s);
+    assert_eq!((s.heroes[0].hp, s.heroes[1].hp), (50, 50));
+}
+
+#[test]
+fn svyatogor_spends_valor() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("bogatyr", &["bogatyr_sweep", "bogatyr_svyatogor"])], &ids(&["dummy"]), 3);
+    s.heroes[0].energy = 10;
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "bogatyr_sweep", Some(t));
+    assert_eq!((s.enemies[0].hp, s.status(ME, S::Valor)), (88, 2));
+    play(&c, &mut s, 0, "bogatyr_svyatogor", Some(t));
+    assert_eq!((s.enemies[0].hp, s.status(ME, S::Valor)), (84, 0));
+}
+
+#[test]
+fn ancestor_mail_and_heavy_burden() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("bogatyr", &["bogatyr_ancestor_mail"])], &ids(&["hitter"]), 3);
+    play(&c, &mut s, 0, "bogatyr_ancestor_mail", None);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 43);
+
+    let party = [hero("bogatyr", &["bogatyr_heavy_burden"]), hero("t_plain", &["t_pain"])];
+    let (mut s, _) = start(&c, &party, &ids(&["dummy"]), 3);
+    play(&c, &mut s, 0, "bogatyr_heavy_burden", None);
+    play(&c, &mut s, 1, "t_pain", None);
+    assert_eq!(s.status(ME, S::Valor), 2);
+}
+
+// ---- runes ----
+
+#[test]
+fn runes_fire_at_end_of_turn_and_on_invoke() {
+    let (c, mut s) = solo(&["t_rune_thunder", "t_invoke"], &["dummy"]);
+    play(&c, &mut s, 0, "t_rune_thunder", None);
+    play(&c, &mut s, 0, "t_invoke", None);
+    assert_eq!(s.enemies[0].hp, 94);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].hp, 88);
+    assert_eq!(s.heroes[0].runes, vec![RuneKind::Thunder], "runes stay carved");
+}
+
+#[test]
+fn rune_kinds() {
+    let (c, mut s) = solo(&["t_rune_flame", "t_rune_zhiva", "t_rune_mist", "t_pain"], &["hitter", "dummy"]);
+    for card in ["t_pain", "t_rune_flame", "t_rune_zhiva", "t_rune_mist"] {
+        play(&c, &mut s, 0, card, None);
+    }
+    end_round(&c, &mut s);
+    assert_eq!((s.enemies[0].hp, s.enemies[1].hp), (97, 97));
+    // 50 - 4 pain + 2 zhiva - half of 10 through the mist
+    assert_eq!(s.heroes[0].hp, 43);
+}
+
+#[test]
+fn ally_holds_at_most_three_runes_and_they_count() {
+    let (c, mut s) = duo(&["t_rune_frost"; 4], &["t_rune_thunder", "t_rune_thunder", "t_runes_dmg"], &["dummy"]);
+    for _ in 0..4 {
+        play(&c, &mut s, 0, "t_rune_frost", Some(UnitRef::Hero(1)));
+    }
+    assert_eq!(s.heroes[1].runes.len(), 3);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 1, "t_rune_thunder", None);
+    play(&c, &mut s, 1, "t_rune_thunder", None);
+    play(&c, &mut s, 1, "t_runes_dmg", Some(t));
+    assert_eq!(s.enemies[0].hp, 170);
+}
+
+// ---- werewolf ----
+
+#[test]
+fn beast_form_flips_cards_and_bans_own_block() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_moon", &["t_shift", "t_claw", "t_claw", "t_block"])], &ids(&["dummy"]), 3);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_claw", Some(t));
+    assert_eq!(s.enemies[0].hp, 94);
+    play(&c, &mut s, 0, "t_shift", None);
+    assert_eq!(s.heroes[0].form, Form::Beast);
+    play(&c, &mut s, 0, "t_claw", Some(t));
+    assert_eq!((s.enemies[0].hp, s.status(t, S::Bleed)), (81, 2));
+    play(&c, &mut s, 0, "t_block", None);
+    assert_eq!(s.heroes[0].block, 0);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 48, "hunger");
+}
+
+#[test]
+fn five_attacks_fill_the_moon() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_moon", &["t_claw"; 5])], &ids(&["dummy"]), 3);
+    let t = foe(&s, 0);
+    for i in 0..5 {
+        assert_eq!(s.heroes[0].form, Form::Human, "attack {i}");
+        play(&c, &mut s, 0, "t_claw", Some(t));
+    }
+    assert_eq!((s.heroes[0].form, s.heroes[0].moon), (Form::Beast, 0));
+}
+
+// ---- masks ----
+
+#[test]
+fn masks() {
+    let (c, mut s) = solo(&["t_bear", "t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_bear", None);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.enemies[0].hp, 87);
+
+    let (c, mut s) = duo(&["t_goat", "t_block"], &[], &["dummy"]);
+    play(&c, &mut s, 0, "t_goat", None);
+    play(&c, &mut s, 0, "t_block", None);
+    assert_eq!((s.heroes[0].block, s.heroes[1].block), (5, 4));
+
+    let (c, mut s) = solo(&["t_mara", "t_hit"], &["dummy"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_mara", None);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.status(t, S::Fear), 25);
+}
+
+// ---- falling and rising ----
+
+#[test]
+fn everyone_down_loses_the_run() {
+    let (c, mut s) = solo(&["t_suicide"], &["dummy"]);
+    let ev = play(&c, &mut s, 0, "t_suicide", None);
+    assert_eq!(s.phase, Phase::Lost);
+    assert!(ev.contains(&Event::Ended { won: false }));
+    assert_eq!(apply(&c, &mut s, 0, &CombatAction::Ready(true)), Err(ActionError::NotHeroPhase));
+}
+
+#[test]
+fn raise_costs_two_energy_and_a_card() {
+    let c = content();
+    let party = [hero("t_plain", &["t_block", "t_block"]), hero("t_plain", &[])];
+    let mut s = aimed_at(&c, &party, &["brute"], 1);
+    end_round(&c, &mut s);
+    assert!(s.heroes[1].downed);
+    assert_eq!(s.round, 2, "the round closes without the fallen hero");
+    assert_eq!(apply(&c, &mut s, 1, &CombatAction::Ready(true)), Err(ActionError::Downed));
+    let card = s.heroes[0].hand[0].uid;
+    apply(&c, &mut s, 0, &CombatAction::Raise { ally: 1, discard: card }).unwrap();
+    let ally = &s.heroes[1];
+    assert_eq!((ally.downed, ally.hp, ally.falls, ally.new_curses), (false, 12, 1, 0));
+    assert_eq!((s.heroes[0].energy, s.heroes[0].hand.len()), (1, 1));
+    assert_eq!(apply(&c, &mut s, 0, &CombatAction::Raise { ally: 1, discard: 0 }).is_err(), true);
+}
+
+#[test]
+fn second_fall_brings_the_nav_mark() {
+    let c = content();
+    let mut h = hero("t_plain", &["t_suicide"]);
+    h.falls = 1;
+    let (mut s, _) = start(&c, &[h, hero("t_plain", &[])], &ids(&["dummy"]), 3);
+    play(&c, &mut s, 0, "t_suicide", None);
+    let h = &s.heroes[0];
+    assert_eq!((h.falls, h.new_curses), (2, 1));
+    assert!(h.discard.iter().any(|x| x.def == NAV_MARK));
+}
+
+#[test]
+fn downed_at_victory_stands_at_one_hp_marked() {
+    let (c, mut s) = duo(&["t_hit"], &["t_suicide"], &["weakling"]);
+    play(&c, &mut s, 1, "t_suicide", None);
+    s.enemies[0].hp = 10;
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.phase, Phase::Won);
+    let h = &s.heroes[1];
+    assert_eq!((h.downed, h.hp, h.new_curses), (false, 1, 1));
+}
+
+#[test]
+fn revive_card_and_nav_mark_in_hand() {
+    let (c, mut s) = duo(&["t_revive"], &["t_suicide"], &["dummy"]);
+    play(&c, &mut s, 1, "t_suicide", None);
+    play(&c, &mut s, 0, "t_revive", Some(UnitRef::Hero(1)));
+    assert_eq!((s.heroes[1].downed, s.heroes[1].hp), (false, 25));
+
+    let (c, mut s) = solo(&[NAV_MARK], &["dummy"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 48);
+}
+
+// ---- enemies ----
+
+#[test]
+fn enemy_hp_scales_with_party_size() {
+    let c = content();
+    for (n, hp) in [(1, 100), (2, 180), (3, 250), (4, 320)] {
+        let party: Vec<HeroSetup> = (0..n).map(|_| hero("t_plain", &[])).collect();
+        let (s, _) = start(&c, &party, &ids(&["dummy"]), 1);
+        assert_eq!(s.enemies[0].max_hp, hp);
+    }
+}
+
+#[test]
+fn opening_then_pattern() {
+    let (c, mut s) = solo(&[], &["opener"]);
+    assert_eq!(s.enemies[0].intent.as_ref().unwrap().mv, 0);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].intent.as_ref().unwrap().mv, 1);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].intent.as_ref().unwrap().mv, 1);
+    assert_eq!(s.status(foe(&s, 0), S::Strength), 1);
+}
+
+#[test]
+fn summon_adds_enemies_that_act_next_round() {
+    let (c, mut s) = solo(&[], &["summoner"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies.len(), 3);
+    assert!(s.enemies[1].intent.is_some());
+}
+
+#[test]
+fn thief_steals_then_flees_or_drops_the_gold() {
+    let (c, mut s) = solo(&[], &["thief"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].gold_lost, 15);
+    end_round(&c, &mut s);
+    assert_eq!(s.phase, Phase::Won);
+    assert!(s.enemies[0].fled);
+    assert_eq!(s.heroes[0].gold_lost, 15);
+
+    let (c, mut s) = solo(&["t_hit", "t_hit"], &["thief"]);
+    end_round(&c, &mut s);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!((s.phase, s.heroes[0].gold_lost), (Phase::Won, 0));
+}
+
+#[test]
+fn wolves_bite_and_howl() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &[])], &ids(&["grey_wolf", "grey_wolf"]), 3);
+    assert!((13..=15).contains(&s.enemies[0].max_hp));
+    end_round(&c, &mut s);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 50 - 24);
+    end_round(&c, &mut s);
+    assert_eq!(s.status(foe(&s, 0), S::Strength), 2, "both wolves howled");
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 50 - 24 - 16);
+}
+
+#[test]
+fn kikimora_tangles_then_chokes() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &[])], &ids(&["kikimora"]), 3);
+    end_round(&c, &mut s);
+    let h = &s.heroes[0];
+    assert!(h.hand.iter().chain(&h.discard).chain(&h.draw).any(|x| x.def == "web"));
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 42);
+}
+
+// ---- turn structure ----
+
+#[test]
+fn round_closes_only_when_everyone_is_ready() {
+    let (c, mut s) = duo(&[], &[], &["dummy"]);
+    ready(&c, &mut s, 0);
+    assert_eq!(s.round, 1);
+    apply(&c, &mut s, 0, &CombatAction::Ready(false)).unwrap();
+    ready(&c, &mut s, 1);
+    assert_eq!(s.round, 1);
+    ready(&c, &mut s, 0);
+    assert_eq!(s.round, 2);
+    assert!(s.heroes.iter().all(|h| !h.ready));
+}
+
+#[test]
+fn reduce_is_pure() {
+    let (c, s) = solo(&["t_hit"], &["dummy"]);
+    let before = s.hash64();
+    let card = s.heroes[0].hand[0].uid;
+    let (next, _) = reduce(&c, &s, 0, &CombatAction::Play { card, target: Some(foe(&s, 0)) }).unwrap();
+    assert_eq!(s.hash64(), before);
+    assert_ne!(next.hash64(), before);
+}
+
+fn bot_fight(c: &Content, party: &[HeroSetup], enemies: &[&str], seed: u64) -> (Combat, Vec<u64>) {
+    let (mut s, _) = start(c, party, &ids(enemies), seed);
+    let mut hashes = Vec::new();
+    for _ in 0..2000 {
+        if s.phase != Phase::Heroes {
+            break;
+        }
+        for p in 0..s.heroes.len() as u8 {
+            if s.phase != Phase::Heroes || s.heroes[p as usize].downed || s.heroes[p as usize].ready {
+                continue;
+            }
+            let a = bot::choose(c, &s, p);
+            apply(c, &mut s, p, &a).unwrap_or_else(|e| panic!("bot made an illegal move {a:?}: {e:?}"));
+            hashes.push(s.hash64());
+        }
+    }
+    (s, hashes)
+}
+
+#[test]
+fn bot_finishes_fights_and_replays_identically() {
+    let c = content();
+    let solo = [HeroSetup::fresh(&c, "bogatyr").unwrap()];
+    let (a, ha) = bot_fight(&c, &solo, &["grey_wolf", "grey_wolf"], 11);
+    let (_, hb) = bot_fight(&c, &solo, &["grey_wolf", "grey_wolf"], 11);
+    assert_eq!(a.phase, Phase::Won);
+    assert_eq!(ha, hb, "same seed and actions must give the same state");
+    let (_, hc) = bot_fight(&c, &solo, &["grey_wolf", "grey_wolf"], 12);
+    assert_ne!(ha, hc);
+
+    let (k, _) = bot_fight(&c, &solo, &["kikimora"], 5);
+    assert_eq!(k.phase, Phase::Won);
+
+    let four: Vec<HeroSetup> = (0..4).map(|_| HeroSetup::fresh(&c, "bogatyr").unwrap()).collect();
+    let (f, _) = bot_fight(&c, &four, &["kikimora", "grey_wolf", "grey_wolf"], 5);
+    assert_ne!(f.phase, Phase::Heroes, "a four-player fight must end");
+}

@@ -1,0 +1,55 @@
+// Богатырь: Заслон и Удаль. Числа — раздел 3 дизайн-документа.
+[
+    (
+        id: "bogatyr_strike", hero: "bogatyr", kind: Attack, cost: 1, target: Enemy,
+        effects: [Damage(N(6), Target)],
+        up: (effects: [Damage(N(9), Target)]),
+    ),
+    (
+        id: "bogatyr_defend", hero: "bogatyr", kind: Skill, cost: 1,
+        effects: [Block(N(5), Me)],
+        up: (effects: [Block(N(8), Me)]),
+    ),
+    (
+        // Заслон: на себя — просто щит, так что в одиночку карта не мертва
+        id: "bogatyr_guard", hero: "bogatyr", kind: Skill, cost: 1, target: AnyHero,
+        effects: [Guard(N(7), Target)],
+        up: (effects: [Guard(N(10), Target)]),
+    ),
+    (
+        id: "bogatyr_sweep", hero: "bogatyr", kind: Attack, cost: 2, target: Enemy,
+        effects: [Damage(N(12), Target), Apply(Valor, N(2), Me)],
+        up: (effects: [Damage(N(16), Target), Apply(Valor, N(3), Me)]),
+    ),
+    (
+        id: "bogatyr_shield_wall", hero: "bogatyr", kind: Skill, rarity: Common, cost: 2,
+        effects: [Block(N(8), AllFriends)],
+        up: (effects: [Block(N(11), AllFriends)]),
+    ),
+    (
+        id: "bogatyr_challenge", hero: "bogatyr", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Taunt, Block(N(10), Me)],
+        up: (effects: [Taunt, Block(N(14), Me)]),
+    ),
+    (
+        id: "bogatyr_svyatogor", hero: "bogatyr", kind: Attack, rarity: Rare, cost: 2, target: Enemy,
+        effects: [Damage(Stat(Valor, Me, 2), Target), Remove(Valor, Me)],
+        up: (effects: [Damage(Stat(Valor, Me, 3), Target), Remove(Valor, Me)]),
+    ),
+    (
+        id: "bogatyr_ancestor_mail", hero: "bogatyr", kind: Power, rarity: Uncommon, cost: 2,
+        passives: [(on: TurnEnd, effects: [Block(N(3), AllFriends)])],
+        up: (passives: [(on: TurnEnd, effects: [Block(N(4), AllFriends)])]),
+    ),
+    (
+        id: "bogatyr_heavy_burden", hero: "bogatyr", kind: Power, rarity: Uncommon, cost: 1,
+        passives: [(on: AllyHpLoss, effects: [Apply(Valor, N(2), Me)])],
+        up: (passives: [(on: AllyHpLoss, effects: [Apply(Valor, N(3), Me)])]),
+    ),
+    (
+        id: "bogatyr_raise_spear", hero: "bogatyr", kind: Skill, rarity: Uncommon, cost: 1, target: Downed,
+        keywords: [Coop],
+        effects: [Revive(25, Target)],
+        up: (cost: 0),
+    ),
+]

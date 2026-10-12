@@ -1,0 +1,5 @@
+[
+    (id: "a1_wolves", act: 1, kind: Normal, enemies: ["grey_wolf", "grey_wolf"], extra3: ["grey_wolf"], extra4: ["grey_wolf"]),
+    (id: "a1_kikimora", act: 1, kind: Normal, enemies: ["kikimora"], extra3: ["grey_wolf"], extra4: ["grey_wolf"]),
+    (id: "a1_kikimora_wolf", act: 1, kind: Normal, enemies: ["kikimora", "grey_wolf"], extra4: ["grey_wolf"]),
+]

@@ -1,0 +1,10 @@
+[
+    (
+        id: "bogatyr", max_hp: 85, mechanic: Valor, relic: "father_amulet",
+        deck: [
+            "bogatyr_strike", "bogatyr_strike", "bogatyr_strike", "bogatyr_strike",
+            "bogatyr_defend", "bogatyr_defend", "bogatyr_defend", "bogatyr_defend",
+            "bogatyr_guard", "bogatyr_sweep",
+        ],
+    ),
+]

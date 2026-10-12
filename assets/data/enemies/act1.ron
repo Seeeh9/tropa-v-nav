@@ -1,0 +1,19 @@
+// Акт 1. Чёрный лес. HP — для одного игрока.
+[
+    (
+        id: "grey_wolf", hp: (13, 15),
+        moves: [
+            (id: "bite", intent: Attack, targeted: true, effects: [Damage(N(6), Target)]),
+            (id: "howl", intent: Buff, effects: [Apply(Strength, N(1), AllFriends)]),
+        ],
+        pattern: [0, 0, 1],
+    ),
+    (
+        id: "kikimora", hp: (30, 30),
+        moves: [
+            (id: "tangle", intent: Debuff, targeted: true, effects: [AddCard(card: "web", pile: Discard, to: Target)]),
+            (id: "choke", intent: Attack, targeted: true, effects: [Damage(N(8), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+]

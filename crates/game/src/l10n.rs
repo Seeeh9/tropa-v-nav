@@ -1,0 +1,255 @@
+//! Fluent-backed strings (ru/en) and card text generated from effect data,
+//! so the words on a card can never drift from what it does.
+
+use bevy::prelude::*;
+use fluent_bundle::concurrent::FluentBundle;
+use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
+use nav_core::*;
+use std::path::Path;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lang {
+    Ru,
+    En,
+}
+
+impl Lang {
+    pub fn code(self) -> &'static str {
+        match self {
+            Lang::Ru => "ru",
+            Lang::En => "en",
+        }
+    }
+    pub fn other(self) -> Lang {
+        match self {
+            Lang::Ru => Lang::En,
+            Lang::En => Lang::Ru,
+        }
+    }
+}
+
+#[derive(Resource)]
+pub struct L10n {
+    pub lang: Lang,
+    bundle: FluentBundle<FluentResource>,
+}
+
+impl L10n {
+    pub fn load(assets: &Path, lang: Lang) -> L10n {
+        let id: unic_langid::LanguageIdentifier = lang.code().parse().expect("valid language id");
+        let mut bundle = FluentBundle::new_concurrent(vec![id]);
+        // no bidi isolation marks: they render as boxes in our fonts
+        bundle.set_use_isolating(false);
+        let dir = assets.join("i18n").join(lang.code());
+        let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+        files.sort();
+        for file in files {
+            let Ok(src) = std::fs::read_to_string(&file) else { continue };
+            let res = match FluentResource::try_new(src) {
+                Ok(r) => r,
+                Err((r, errs)) => {
+                    warn!("{}: {} fluent syntax errors", file.display(), errs.len());
+                    r
+                }
+            };
+            if let Err(errs) = bundle.add_resource(res) {
+                warn!("{}: {} duplicate keys", file.display(), errs.len());
+            }
+        }
+        L10n { lang, bundle }
+    }
+
+    pub fn has(&self, key: &str) -> bool {
+        self.bundle.has_message(key)
+    }
+
+    pub fn t(&self, key: &str) -> String {
+        self.tf(key, &[])
+    }
+
+    /// Looks up `key` with arguments. A missing key comes back as the key itself, visibly.
+    pub fn tf(&self, key: &str, args: &[(&str, FluentValue)]) -> String {
+        let Some(pattern) = self.bundle.get_message(key).and_then(|m| m.value()) else {
+            return key.to_string();
+        };
+        let mut fa = FluentArgs::new();
+        for (k, v) in args {
+            fa.set(*k, v.clone());
+        }
+        let mut errs = vec![];
+        self.bundle.format_pattern(pattern, Some(&fa), &mut errs).into_owned()
+    }
+
+    pub fn n(&self, key: &str, n: i32) -> String {
+        self.tf(key, &[("n", FluentValue::from(n))])
+    }
+
+    pub fn card_name(&self, id: &str, upgraded: bool) -> String {
+        let name = self.t(&format!("card-{id}"));
+        if upgraded {
+            format!("{name}+")
+        } else {
+            name
+        }
+    }
+
+    fn amount(&self, a: &Amount) -> String {
+        let scaled = |m: i32, what: String| if m == 1 { what } else { format!("{m}×{what}") };
+        match a {
+            Amount::N(n) => n.to_string(),
+            Amount::X(m) => scaled(*m, "X".into()),
+            Amount::Stat(st, _, m) => scaled(*m, self.t(&format!("status-{st:?}"))),
+            Amount::Consumed(m) => scaled(*m, self.t("amount-consumed")),
+            Amount::PlayedThisRound(m) => scaled(*m, self.t("amount-played")),
+            Amount::Runes(kind, m) => scaled(*m, self.t(&format!("amount-rune-{kind:?}"))),
+        }
+    }
+
+    fn cond(&self, c: &Cond) -> String {
+        match c {
+            Cond::Has(st, who, n) => self.tf(
+                &format!("cond-has-{who:?}"),
+                &[("s", self.t(&format!("status-{st:?}")).into()), ("n", (*n).into())],
+            ),
+            Cond::Link(kind) => self.tf("cond-link", &[("t", self.t(&format!("type-{kind:?}")).into())]),
+            Cond::Fatal => self.t("cond-fatal"),
+            Cond::Form(f) => self.t(&format!("cond-form-{f:?}")),
+            Cond::Mask(m) => self.t(&format!("cond-mask-{m:?}")),
+            Cond::Coop => self.t("cond-coop"),
+            Cond::Not(inner) => self.tf("cond-not", &[("c", self.cond(inner).into())]),
+        }
+    }
+
+    /// `fx-<effect>-<target>` with a fallback to `fx-<effect>`.
+    fn fx(&self, name: &str, tgt: Option<Tgt>, args: &[(&str, FluentValue)]) -> String {
+        if let Some(t) = tgt {
+            let key = format!("fx-{name}-{t:?}");
+            if self.has(&key) {
+                return self.tf(&key, args);
+            }
+        }
+        self.tf(&format!("fx-{name}"), args)
+    }
+
+    fn effects(&self, list: &[Effect]) -> String {
+        list.iter().map(|e| self.effect(e)).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ")
+    }
+
+    fn effect(&self, e: &Effect) -> String {
+        let n = |a: &Amount| -> FluentValue {
+            match a {
+                Amount::N(n) => (*n).into(),
+                other => self.amount(other).into(),
+            }
+        };
+        match e {
+            Effect::Damage(a, t) => self.fx("damage", Some(*t), &[("n", n(a))]),
+            Effect::Hits(a, k, t) => self.fx("hits", Some(*t), &[("n", n(a)), ("k", (*k).into())]),
+            Effect::Block(a, t) => self.fx("block", Some(*t), &[("n", n(a))]),
+            Effect::Guard(a, t) => self.fx("guard", Some(*t), &[("n", n(a))]),
+            Effect::Apply(st, a, t) => {
+                self.fx("apply", Some(*t), &[("n", n(a)), ("s", self.t(&format!("status-{st:?}")).into())])
+            }
+            Effect::Remove(st, t) => self.fx("remove", Some(*t), &[("s", self.t(&format!("status-{st:?}")).into())]),
+            Effect::Consume(st, t) => self.fx("consume", Some(*t), &[("s", self.t(&format!("status-{st:?}")).into())]),
+            Effect::Cleanse(t) => self.fx("cleanse", Some(*t), &[]),
+            Effect::Draw(a) => self.fx("draw", None, &[("n", n(a))]),
+            Effect::Energy(a, t) => self.fx("energy", Some(*t), &[("n", n(a))]),
+            Effect::Heal(a, t) => self.fx("heal", Some(*t), &[("n", n(a))]),
+            Effect::LoseHp(a, t) => self.fx("losehp", Some(*t), &[("n", n(a))]),
+            Effect::Revive(pct, _) => self.fx("revive", None, &[("n", (*pct).into())]),
+            Effect::AddCard { card, pile, to, count } => self.fx(
+                &format!("addcard-{pile:?}"),
+                Some(*to),
+                &[("c", self.card_name(card, false).into()), ("n", (*count).into())],
+            ),
+            Effect::Taunt => self.t("fx-taunt"),
+            Effect::If(c, then, otherwise) => {
+                let mut s = self.tf("fx-if", &[("c", self.cond(c).into()), ("then", self.effects(then).into())]);
+                if !otherwise.is_empty() {
+                    s.push(' ');
+                    s.push_str(&self.tf("fx-else", &[("else", self.effects(otherwise).into())]));
+                }
+                s
+            }
+            Effect::Repeat(a, body) => self.tf("fx-repeat", &[("n", n(a)), ("body", self.effects(body).into())]),
+            Effect::Rune(kind, t) => self.fx("rune", Some(*t), &[("r", self.t(&format!("rune-{kind:?}")).into())]),
+            Effect::Invoke => self.t("fx-invoke"),
+            Effect::Shift => self.t("fx-shift"),
+            Effect::Mask(m) => self.tf("fx-mask", &[("m", self.t(&format!("mask-{m:?}")).into())]),
+            Effect::Summon(..) | Effect::StealGold(_) | Effect::Flee => String::new(),
+            Effect::Hook(name) => self.t(&format!("hook-{name}")),
+        }
+    }
+
+    /// Rules text of a card. A hand-written `card-<id>-desc` overrides the generated one.
+    pub fn card_text(&self, id: &str, def: &CardDef, view: &CardView) -> String {
+        let custom = format!("card-{id}-desc");
+        let mut parts = Vec::new();
+        if self.has(&custom) {
+            parts.push(self.t(&custom));
+        } else {
+            let body = self.effects(&view.effects);
+            if !body.is_empty() {
+                parts.push(body);
+            }
+            for p in &view.passives {
+                parts.push(self.tf(&format!("trigger-{:?}", p.on), &[("fx", self.effects(&p.effects).into())]));
+            }
+            if !def.in_hand_end.is_empty() {
+                parts.push(self.tf("trigger-InHand", &[("fx", self.effects(&def.in_hand_end).into())]));
+            }
+        }
+        for k in &view.keywords {
+            if *k != Keyword::Coop {
+                parts.push(format!("{}.", self.t(&format!("kw-{k:?}"))));
+            }
+        }
+        parts.join(" ")
+    }
+
+    /// Keywords and statuses a card mentions, for its hover tooltips.
+    pub fn card_glossary(&self, view: &CardView) -> Vec<(String, String)> {
+        let mut keys: Vec<String> = view.keywords.iter().map(|k| format!("kw-{k:?}")).collect();
+        fn walk(list: &[Effect], keys: &mut Vec<String>) {
+            for e in list {
+                match e {
+                    Effect::Apply(st, ..) | Effect::Consume(st, _) => keys.push(format!("status-{st:?}")),
+                    Effect::Damage(Amount::Stat(st, ..), _) => keys.push(format!("status-{st:?}")),
+                    Effect::Guard(..) => keys.push("kw-Guard".into()),
+                    Effect::Taunt => keys.push("kw-Taunt".into()),
+                    Effect::Invoke => keys.push("kw-Invoke".into()),
+                    Effect::Shift => keys.push("kw-Shift".into()),
+                    Effect::Rune(kind, _) => keys.push(format!("rune-{kind:?}")),
+                    Effect::Mask(m) => keys.push(format!("mask-{m:?}")),
+                    Effect::If(Cond::Link(_), a, b) => {
+                        keys.push("kw-Link".into());
+                        walk(a, keys);
+                        walk(b, keys);
+                    }
+                    Effect::If(_, a, b) => {
+                        walk(a, keys);
+                        walk(b, keys);
+                    }
+                    Effect::Repeat(_, a) => walk(a, keys),
+                    _ => {}
+                }
+            }
+        }
+        walk(&view.effects, &mut keys);
+        for p in &view.passives {
+            walk(&p.effects, &mut keys);
+        }
+        keys.dedup();
+        let mut seen = Vec::new();
+        keys.retain(|k| {
+            let fresh = !seen.contains(k);
+            seen.push(k.clone());
+            fresh
+        });
+        keys.into_iter()
+            .filter(|k| self.has(&format!("{k}-help")))
+            .map(|k| (self.t(&k), self.t(&format!("{k}-help"))))
+            .collect()
+    }
+}

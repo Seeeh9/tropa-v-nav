@@ -1,0 +1,9 @@
+[package]
+name = "nav_net"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+nav_core = { path = "../core" }
+serde.workspace = true
+ron.workspace = true

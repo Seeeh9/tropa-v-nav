@@ -1,0 +1,477 @@
+//! Co-op protocol, independent of any transport.
+//!
+//! The host is the single source of truth. A client sends the action it wants;
+//! the host validates it against its own state, applies it, and broadcasts it
+//! with a running number. Every machine applies the same numbered actions to
+//! the same deterministic rules, so they all hold the same state. Once a round
+//! the host sends a hash; a client that disagrees asks for a full snapshot.
+//!
+//! A [`Node`] is one machine's view. It never touches the network: it takes
+//! incoming messages through [`Node::handle`] and leaves outgoing ones in
+//! [`Node::take_out`]. Steam, or the in-memory [`Hub`], moves them.
+
+use nav_core::*;
+use serde::{Deserialize, Serialize};
+
+pub type Peer = u64;
+pub const MAX_PLAYERS: usize = 4;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LobbyPlayer {
+    pub peer: Peer,
+    pub name: String,
+    pub hero: Option<Id>,
+    pub ready: bool,
+    pub connected: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lobby {
+    /// Slot order: index here is the hero slot in combat.
+    pub players: Vec<LobbyPlayer>,
+    pub host: Peer,
+    /// Circle of Nav, 0..=10.
+    pub circle: u8,
+    /// Optional turn timer in seconds (off by default).
+    pub turn_timer: Option<u32>,
+    pub started: bool,
+}
+
+impl Lobby {
+    pub fn slot_of(&self, peer: Peer) -> Option<u8> {
+        self.players.iter().position(|p| p.peer == peer).map(|i| i as u8)
+    }
+    /// Everyone picked a distinct hero and pressed ready.
+    pub fn can_start(&self) -> bool {
+        !self.players.is_empty() && self.players.iter().all(|p| p.ready && p.hero.is_some())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StartInfo {
+    pub seed: u64,
+    pub party: Vec<HeroSetup>,
+    pub enemies: Vec<Id>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Msg {
+    /// Client -> host on joining or rejoining.
+    Hello { name: String },
+    /// Host -> everyone whenever the lobby changes.
+    Lobby(Lobby),
+    PickHero(Option<Id>),
+    SetReady(bool),
+    /// Host -> everyone: the fight begins from this exact setup.
+    Start(StartInfo),
+    /// Client -> host: "I want to do this". `seq` lets the client match a refusal.
+    Want { seq: u32, action: CombatAction },
+    /// Host -> everyone: action number `n` in the shared log.
+    Did { n: u32, player: u8, action: CombatAction },
+    Refused { seq: u32, error: ActionError },
+    /// Host -> everyone at each new round.
+    Hash { n: u32, hash: u64 },
+    /// Client -> host: my hash differs, or I just rejoined.
+    Resync,
+    /// Host -> one client: the whole state after `n` actions.
+    Snapshot { n: u32, lobby: Lobby, state: Box<Combat> },
+    /// Quick signal without chat, pinned to a unit.
+    Ping { kind: u8, at: UnitRef },
+}
+
+impl Msg {
+    pub fn encode(&self) -> Vec<u8> {
+        ron::to_string(self).expect("messages always serialise").into_bytes()
+    }
+    pub fn decode(bytes: &[u8]) -> Option<Msg> {
+        ron::from_str(std::str::from_utf8(bytes).ok()?).ok()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum To {
+    One(Peer),
+    /// Everyone in the lobby except the sender.
+    All,
+}
+
+/// Things the UI should react to.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Note {
+    LobbyChanged,
+    Started,
+    /// An action was applied; these are its rule events.
+    Applied { player: u8, events: Vec<Event> },
+    Refused(ActionError),
+    /// State was replaced wholesale; redraw without animation.
+    Resynced,
+    Ping { from: u8, kind: u8, at: UnitRef },
+    HostChanged,
+}
+
+pub struct Node {
+    pub me: Peer,
+    pub name: String,
+    pub lobby: Lobby,
+    pub state: Option<Combat>,
+    /// Actions applied so far.
+    pub n: u32,
+    seq: u32,
+    /// Wants sent to the host and not yet answered, resent if the host changes.
+    pending: Vec<(u32, CombatAction)>,
+    last_hashed_round: u32,
+    out: Vec<(To, Msg)>,
+    notes: Vec<Note>,
+}
+
+impl Node {
+    /// Opens a lobby as its host.
+    pub fn host(me: Peer, name: &str) -> Node {
+        let mut node = Node::blank(me, name);
+        node.lobby.host = me;
+        node.lobby.players.push(LobbyPlayer { peer: me, name: name.into(), hero: None, ready: false, connected: true });
+        node
+    }
+
+    /// Joins the lobby hosted by `host`.
+    pub fn join(me: Peer, name: &str, host: Peer) -> Node {
+        let mut node = Node::blank(me, name);
+        node.lobby.host = host;
+        node.out.push((To::One(host), Msg::Hello { name: name.into() }));
+        node
+    }
+
+    fn blank(me: Peer, name: &str) -> Node {
+        Node {
+            me,
+            name: name.into(),
+            lobby: Lobby::default(),
+            state: None,
+            n: 0,
+            seq: 0,
+            pending: Vec::new(),
+            last_hashed_round: 0,
+            out: Vec::new(),
+            notes: Vec::new(),
+        }
+    }
+
+    pub fn is_host(&self) -> bool {
+        self.lobby.host == self.me
+    }
+    pub fn my_slot(&self) -> Option<u8> {
+        self.lobby.slot_of(self.me)
+    }
+    pub fn take_out(&mut self) -> Vec<(To, Msg)> {
+        std::mem::take(&mut self.out)
+    }
+    pub fn take_notes(&mut self) -> Vec<Note> {
+        std::mem::take(&mut self.notes)
+    }
+
+    fn broadcast_lobby(&mut self) {
+        self.out.push((To::All, Msg::Lobby(self.lobby.clone())));
+        self.notes.push(Note::LobbyChanged);
+    }
+
+    // ---- lobby, local side ----
+
+    pub fn pick_hero(&mut self, hero: Option<Id>) {
+        if self.is_host() {
+            self.host_pick(self.me, hero);
+        } else {
+            self.out.push((To::One(self.lobby.host), Msg::PickHero(hero)));
+        }
+    }
+
+    pub fn set_ready(&mut self, ready: bool) {
+        if self.is_host() {
+            self.host_ready(self.me, ready);
+        } else {
+            self.out.push((To::One(self.lobby.host), Msg::SetReady(ready)));
+        }
+    }
+
+    fn host_pick(&mut self, peer: Peer, hero: Option<Id>) {
+        if self.lobby.started {
+            return;
+        }
+        // heroes are unique in a party: the colour is the player's identity
+        let taken = hero.as_ref().is_some_and(|h| self.lobby.players.iter().any(|p| p.peer != peer && p.hero.as_ref() == Some(h)));
+        if taken {
+            return;
+        }
+        if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == peer) {
+            p.hero = hero;
+            p.ready = false;
+            self.broadcast_lobby();
+        }
+    }
+
+    fn host_ready(&mut self, peer: Peer, ready: bool) {
+        if self.lobby.started {
+            return;
+        }
+        if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == peer) {
+            p.ready = ready && p.hero.is_some();
+            self.broadcast_lobby();
+        }
+    }
+
+    /// Host only: begin the fight. Returns false if the lobby isn't ready.
+    pub fn start(&mut self, c: &Content, seed: u64, enemies: Vec<Id>) -> bool {
+        if !self.is_host() || !self.lobby.can_start() || self.lobby.started {
+            return false;
+        }
+        let party: Option<Vec<HeroSetup>> = self.lobby.players.iter().map(|p| HeroSetup::fresh(c, p.hero.as_deref()?)).collect();
+        let Some(party) = party else { return false };
+        self.lobby.started = true;
+        let info = StartInfo { seed, party, enemies };
+        self.out.push((To::All, Msg::Lobby(self.lobby.clone())));
+        self.out.push((To::All, Msg::Start(info.clone())));
+        self.begin(c, &info);
+        true
+    }
+
+    fn begin(&mut self, c: &Content, info: &StartInfo) {
+        let (state, _) = nav_core::start(c, &info.party, &info.enemies, info.seed);
+        self.last_hashed_round = state.round;
+        self.state = Some(state);
+        self.n = 0;
+        self.pending.clear();
+        self.lobby.started = true;
+        self.notes.push(Note::Started);
+    }
+
+    // ---- actions ----
+
+    /// The local player wants to act.
+    pub fn submit(&mut self, c: &Content, action: CombatAction) {
+        let Some(slot) = self.my_slot() else { return };
+        if self.is_host() {
+            if let Err(e) = self.host_apply(c, slot, action) {
+                self.notes.push(Note::Refused(e));
+            }
+        } else {
+            self.seq += 1;
+            self.pending.push((self.seq, action.clone()));
+            self.out.push((To::One(self.lobby.host), Msg::Want { seq: self.seq, action }));
+        }
+    }
+
+    /// Host: validate, apply, broadcast.
+    fn host_apply(&mut self, c: &Content, slot: u8, action: CombatAction) -> Result<(), ActionError> {
+        let state = self.state.as_mut().ok_or(ActionError::NotHeroPhase)?;
+        let events = nav_core::apply(c, state, slot, &action)?;
+        self.n += 1;
+        self.out.push((To::All, Msg::Did { n: self.n, player: slot, action }));
+        self.notes.push(Note::Applied { player: slot, events });
+        let state = self.state.as_ref().unwrap();
+        if state.round != self.last_hashed_round {
+            self.last_hashed_round = state.round;
+            self.out.push((To::All, Msg::Hash { n: self.n, hash: state.hash64() }));
+        }
+        Ok(())
+    }
+
+    /// Host: play one autopilot move for a disconnected player, if any is due.
+    /// Call it on a timer; returns whether a move was made.
+    pub fn autopilot(&mut self, c: &Content) -> bool {
+        if !self.is_host() {
+            return false;
+        }
+        let Some(state) = &self.state else { return false };
+        if state.phase != Phase::Heroes {
+            return false;
+        }
+        let slot = self.lobby.players.iter().enumerate().find_map(|(i, p)| {
+            let h = state.hero(i as u8)?;
+            (!p.connected && !h.downed && !h.ready).then_some(i as u8)
+        });
+        let Some(slot) = slot else { return false };
+        let action = bot::choose(c, state, slot);
+        self.host_apply(c, slot, action).is_ok()
+    }
+
+    pub fn ping(&mut self, kind: u8, at: UnitRef) {
+        if let Some(from) = self.my_slot() {
+            self.out.push((To::All, Msg::Ping { kind, at }));
+            self.notes.push(Note::Ping { from, kind, at });
+        }
+    }
+
+    // ---- membership ----
+
+    /// The transport saw this peer leave the lobby.
+    pub fn peer_left(&mut self, peer: Peer) {
+        if self.lobby.started {
+            if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == peer) {
+                p.connected = false;
+            }
+        } else {
+            self.lobby.players.retain(|p| p.peer != peer);
+        }
+        if self.is_host() {
+            self.broadcast_lobby();
+        } else {
+            self.notes.push(Note::LobbyChanged);
+        }
+    }
+
+    /// The transport says the lobby has a new owner (the old host left).
+    pub fn host_changed(&mut self, new_host: Peer) {
+        if self.lobby.host == new_host {
+            return;
+        }
+        self.lobby.host = new_host;
+        self.notes.push(Note::HostChanged);
+        if self.is_host() {
+            // everyone holds the full state, so the new host simply carries on
+            self.broadcast_lobby();
+            if let Some(state) = &self.state {
+                self.out.push((To::All, Msg::Hash { n: self.n, hash: state.hash64() }));
+            }
+        } else {
+            // whatever the old host never answered goes to the new one
+            for (seq, action) in self.pending.clone() {
+                self.out.push((To::One(new_host), Msg::Want { seq, action }));
+            }
+        }
+    }
+
+    // ---- incoming ----
+
+    pub fn handle(&mut self, c: &Content, from: Peer, msg: Msg) {
+        let host = self.is_host();
+        match msg {
+            Msg::Hello { name } if host => {
+                if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == from) {
+                    // a returning player takes the wheel back from the autopilot
+                    p.connected = true;
+                    p.name = name;
+                } else if !self.lobby.started && self.lobby.players.len() < MAX_PLAYERS {
+                    self.lobby.players.push(LobbyPlayer { peer: from, name, hero: None, ready: false, connected: true });
+                } else {
+                    return;
+                }
+                self.broadcast_lobby();
+                if let Some(state) = &self.state {
+                    self.out.push((To::One(from), Msg::Snapshot { n: self.n, lobby: self.lobby.clone(), state: Box::new(state.clone()) }));
+                }
+            }
+            Msg::PickHero(hero) if host => self.host_pick(from, hero),
+            Msg::SetReady(ready) if host => self.host_ready(from, ready),
+            Msg::Want { seq, action } if host => {
+                let Some(slot) = self.lobby.slot_of(from) else { return };
+                if let Err(error) = self.host_apply(c, slot, action) {
+                    self.out.push((To::One(from), Msg::Refused { seq, error }));
+                }
+            }
+            Msg::Resync if host => {
+                if let Some(state) = &self.state {
+                    self.out.push((To::One(from), Msg::Snapshot { n: self.n, lobby: self.lobby.clone(), state: Box::new(state.clone()) }));
+                }
+            }
+            Msg::Ping { kind, at } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::Ping { from: slot, kind, at });
+                }
+            }
+
+            // everything below is only believed when it comes from the host
+            _ if from != self.lobby.host => {}
+            Msg::Lobby(lobby) => {
+                self.lobby = lobby;
+                self.notes.push(Note::LobbyChanged);
+            }
+            Msg::Start(info) => self.begin(c, &info),
+            Msg::Did { n, player, action } => {
+                if n != self.n + 1 {
+                    // a gap or a repeat: our log no longer lines up with the host's
+                    if n > self.n {
+                        self.out.push((To::One(self.lobby.host), Msg::Resync));
+                    }
+                    return;
+                }
+                let Some(state) = self.state.as_mut() else { return };
+                match nav_core::apply(c, state, player, &action) {
+                    Ok(events) => {
+                        self.n = n;
+                        if Some(player) == self.lobby.slot_of(self.me) {
+                            // confirmed in order, so the oldest pending want is this one
+                            if let Some(i) = self.pending.iter().position(|(_, a)| *a == action) {
+                                self.pending.remove(i);
+                            }
+                        }
+                        self.notes.push(Note::Applied { player, events });
+                    }
+                    // the host accepted what our state refuses: we have drifted
+                    Err(_) => self.out.push((To::One(self.lobby.host), Msg::Resync)),
+                }
+            }
+            Msg::Refused { seq, error } => {
+                self.pending.retain(|(s, _)| *s != seq);
+                self.notes.push(Note::Refused(error));
+            }
+            Msg::Hash { n, hash } => {
+                if n == self.n && self.state.as_ref().is_some_and(|s| s.hash64() != hash) {
+                    self.out.push((To::One(self.lobby.host), Msg::Resync));
+                }
+            }
+            Msg::Snapshot { n, lobby, state } => {
+                self.lobby = lobby;
+                self.state = Some(*state);
+                self.n = n;
+                self.pending.clear();
+                self.notes.push(Note::Resynced);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// In-memory transport: several nodes in one process, for tests and for the
+/// dev build's "four clients in one window" mode.
+#[derive(Default)]
+pub struct Hub {
+    pub nodes: Vec<Node>,
+    /// Peers whose messages are currently dropped in both directions.
+    pub offline: Vec<Peer>,
+}
+
+impl Hub {
+    pub fn node(&mut self, peer: Peer) -> &mut Node {
+        self.nodes.iter_mut().find(|n| n.me == peer).expect("known peer")
+    }
+
+    /// Delivers messages until every outbox is empty.
+    pub fn pump(&mut self, c: &Content) {
+        for _ in 0..10_000 {
+            let mut mail: Vec<(Peer, Peer, Msg)> = Vec::new();
+            let peers: Vec<Peer> = self.nodes.iter().map(|n| n.me).collect();
+            for node in &mut self.nodes {
+                let from = node.me;
+                for (to, msg) in node.take_out() {
+                    match to {
+                        To::One(p) => mail.push((from, p, msg)),
+                        To::All => mail.extend(peers.iter().filter(|p| **p != from).map(|p| (from, *p, msg.clone()))),
+                    }
+                }
+            }
+            if mail.is_empty() {
+                return;
+            }
+            for (from, to, msg) in mail {
+                if self.offline.contains(&from) || self.offline.contains(&to) {
+                    continue;
+                }
+                // through bytes, exactly as the real transport does it
+                let Some(msg) = Msg::decode(&msg.encode()) else { panic!("message does not round-trip") };
+                if let Some(node) = self.nodes.iter_mut().find(|n| n.me == to) {
+                    node.handle(c, from, msg);
+                }
+            }
+        }
+        panic!("message storm: nodes never went quiet");
+    }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "tropa"
+edition.workspace = true
+version.workspace = true
+
+[features]
+# Local loopback multiplayer and debug panels. Never ship with this on.
+dev = []
+
+[dependencies]
+nav_core = { path = "../core" }
+bevy = { version = "0.20", default-features = false, features = ["2d", "ui", "audio", "png"] }
+steamworks = "0.13"
+serde.workspace = true
+ron.workspace = true
+fluent-bundle = "0.16"
+unic-langid = "0.9"

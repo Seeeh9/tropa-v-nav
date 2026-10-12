@@ -215,37 +215,41 @@ impl<'a> Exec<'a> {
         if n <= 0 || !self.exists(u) {
             return;
         }
-        match u {
-            UnitRef::Hero(i) => self.hero(i).block += n,
+        let total = match u {
+            UnitRef::Hero(i) => {
+                self.hero(i).block += n;
+                self.hero(i).block
+            }
             UnitRef::Enemy(i) => {
                 let idx = self.enemy_idx(i).unwrap();
                 self.s.enemies[idx].block += n;
+                self.s.enemies[idx].block
             }
-        }
-        self.ev.push(Event::Block { unit: u, amount: n });
+        };
+        self.ev.push(Event::Block { unit: u, amount: n, total });
     }
 
     pub(crate) fn heal(&mut self, u: UnitRef, n: i32) {
         if n <= 0 || !self.exists(u) {
             return;
         }
-        let healed = match u {
+        let (healed, hp) = match u {
             UnitRef::Hero(i) => {
                 let h = self.hero(i);
                 let v = n.min(h.max_hp - h.hp);
                 h.hp += v;
-                v
+                (v, h.hp)
             }
             UnitRef::Enemy(i) => {
                 let idx = self.enemy_idx(i).unwrap();
                 let e = &mut self.s.enemies[idx];
                 let v = n.min(e.max_hp - e.hp);
                 e.hp += v;
-                v
+                (v, e.hp)
             }
         };
         if healed > 0 {
-            self.ev.push(Event::Heal { unit: u, amount: healed });
+            self.ev.push(Event::Heal { unit: u, amount: healed, hp });
         }
     }
 
@@ -313,7 +317,8 @@ impl<'a> Exec<'a> {
                         let h = self.hero(i);
                         let blocked = d.min(h.block);
                         h.block -= blocked;
-                        self.ev.push(Event::Damage { src, dst, blocked, lost: 0, attack });
+                        let (hp, block) = (h.hp, h.block);
+                        self.ev.push(Event::Damage { src, dst, blocked, lost: 0, attack, hp, block });
                         let over = d - blocked;
                         if over > 0 {
                             self.ev.push(Event::Redirected { from: i, to: g, amount: over });
@@ -334,7 +339,8 @@ impl<'a> Exec<'a> {
                 let lost = (d - blocked).min(e.hp);
                 e.hp -= lost;
                 let dead = e.hp <= 0;
-                self.ev.push(Event::Damage { src, dst, blocked, lost, attack });
+                let (hp, block) = (e.hp, e.block);
+                self.ev.push(Event::Damage { src, dst, blocked, lost, attack, hp, block });
                 if dead {
                     self.kill(idx, src);
                     killed = true;
@@ -365,7 +371,8 @@ impl<'a> Exec<'a> {
             valor = h.valor_rem / 5;
             h.valor_rem %= 5;
         }
-        self.ev.push(Event::Damage { src, dst: UnitRef::Hero(i), blocked, lost, attack });
+        let (hp, block) = (h.hp, h.block);
+        self.ev.push(Event::Damage { src, dst: UnitRef::Hero(i), blocked, lost, attack, hp, block });
         if valor > 0 && !fell {
             self.add_status(UnitRef::Hero(i), S::Valor, valor);
         }
@@ -391,7 +398,8 @@ impl<'a> Exec<'a> {
                 let lost = n.min(h.hp);
                 h.hp -= lost;
                 let fell = h.hp <= 0;
-                self.ev.push(Event::Damage { src: None, dst: u, blocked: 0, lost, attack: false });
+                let (hp, block) = (h.hp, h.block);
+                self.ev.push(Event::Damage { src: None, dst: u, blocked: 0, lost, attack: false, hp, block });
                 if lost > 0 {
                     for other in self.standing() {
                         if other != i {
@@ -409,7 +417,8 @@ impl<'a> Exec<'a> {
                 let lost = n.min(e.hp);
                 e.hp -= lost;
                 let dead = e.hp <= 0;
-                self.ev.push(Event::Damage { src: None, dst: u, blocked: 0, lost, attack: false });
+                let (hp, block) = (e.hp, e.block);
+                self.ev.push(Event::Damage { src: None, dst: u, blocked: 0, lost, attack: false, hp, block });
                 if dead {
                     self.kill(idx, None);
                 }

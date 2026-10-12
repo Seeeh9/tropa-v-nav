@@ -256,3 +256,15 @@ omen-bone_mill = Костяная мельница
 omen-bone_mill-text = Она мелет без ветра и без воды. Мука идёт белая, мелкая, тёплая. Мельник предлагает смолоть и ваше — то, что вам больше не нужно.
 omen-bone_mill-grind = Отдать в помол
 omen-bone_mill-rest = Погреться у жерновов
+
+menu-village = Последний острог
+village-title = Последний острог
+village-oberegi = Обереги: { $n }
+village-row = уровень { $level } из { $max }  ·  построить: { $price }
+village-done = отстроено
+building-smithy = Кузня
+building-smithy-desc = В забегах появляются необычные, а затем и редкие реликвии.
+building-hut = Изба знахарки
+building-hut-desc = В забегах появляется по десять новых снадобий за уровень.
+building-tavern = Корчма
+building-tavern-desc = В забегах появляется по шесть новых знамений за уровень.

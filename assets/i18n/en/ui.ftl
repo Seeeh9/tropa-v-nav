@@ -256,3 +256,15 @@ omen-bone_mill = The Bone Mill
 omen-bone_mill-text = It grinds with no wind and no water. The flour comes white, fine and warm. The miller offers to grind yours too: whatever you no longer need.
 omen-bone_mill-grind = Give it to the stones
 omen-bone_mill-rest = Warm yourself by the stones
+
+menu-village = The Last Stockade
+village-title = The Last Stockade
+village-oberegi = Wards: { $n }
+village-row = level { $level } of { $max }  ·  build: { $price }
+village-done = built
+building-smithy = Smithy
+building-smithy-desc = Uncommon, then rare relics begin to turn up in runs.
+building-hut = Herbalist's Hut
+building-hut-desc = Ten new potions turn up in runs per level.
+building-tavern = Tavern
+building-tavern-desc = Six new omens turn up in runs per level.

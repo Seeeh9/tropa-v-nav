@@ -36,6 +36,8 @@ pub struct Profile {
     pub hero_xp: BTreeMap<String, u32>,
     pub runs: u32,
     pub wins: u32,
+    /// Village buildings by id and the level each has reached.
+    pub buildings: BTreeMap<String, u8>,
     pub settings: Settings,
     #[serde(skip)]
     path: Option<PathBuf>,
@@ -67,6 +69,34 @@ impl Profile {
                 warn!("profile not saved: {e}");
             }
         }
+    }
+
+    pub fn building(&self, id: &str) -> u8 {
+        self.buildings.get(id).copied().unwrap_or(0)
+    }
+
+    /// Smithy, herbalist's hut and tavern levels: the pools a run hosted by this player draws on.
+    pub fn village(&self) -> (u8, u8, u8) {
+        (self.building("smithy").min(2), self.building("hut").min(2), self.building("tavern").min(2))
+    }
+
+    /// Price of the next level of a building, or `None` when it is finished.
+    pub fn next_price(&self, id: &str) -> Option<u32> {
+        let (_, max) = BUILDINGS.iter().find(|(b, _)| *b == id)?;
+        let level = self.building(id);
+        (level < *max).then(|| 60 + 70 * level as u32)
+    }
+
+    /// Spends village currency on the next level. Returns whether it was built.
+    pub fn build(&mut self, id: &str) -> bool {
+        let Some(price) = self.next_price(id) else { return false };
+        if self.oberegi < price {
+            return false;
+        }
+        self.oberegi -= price;
+        *self.buildings.entry(id.to_string()).or_insert(0) += 1;
+        self.save();
+        true
     }
 
     /// Hero level 1..=10 from experience; each level takes a little more.
@@ -133,6 +163,10 @@ impl Profile {
     }
 }
 
+/// Village buildings and how many levels each has. Only the ones that already change a run
+/// are for sale; the palisade, shrine, graveyard and guest hall of the design wait for their content.
+pub const BUILDINGS: &[(&str, u8)] = &[("smithy", 2), ("hut", 2), ("tavern", 2)];
+
 fn profile_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("TropaVNav").join("profiles"))
 }
@@ -149,6 +183,20 @@ mod tests {
         assert_eq!(p.record_run("bogatyr", 150, true, 0), None, "an old circle opens nothing new");
         assert_eq!(p.record_run("volhv", 150, true, 1), Some(2));
         assert_eq!((p.oberegi, p.runs, p.wins, p.circle_unlocked), (500, 4, 3, 2));
+    }
+
+    #[test]
+    fn buildings_cost_more_each_level_and_stop_when_finished() {
+        let mut p = Profile::default();
+        p.oberegi = 200;
+        assert_eq!(p.next_price("smithy"), Some(60));
+        assert!(p.build("smithy"));
+        assert_eq!((p.oberegi, p.building("smithy"), p.next_price("smithy")), (140, 1, Some(130)));
+        assert!(p.build("smithy"));
+        assert_eq!((p.oberegi, p.next_price("smithy")), (10, None));
+        assert!(!p.build("smithy"), "a finished building takes no more");
+        assert!(!p.build("hut"), "not enough currency");
+        assert_eq!(p.village(), (2, 0, 0));
     }
 
     #[test]

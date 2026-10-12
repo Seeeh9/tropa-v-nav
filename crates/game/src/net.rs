@@ -182,7 +182,7 @@ pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str
     // each bot takes a hero and readies up; the host's own seat is left for the player
     let heroes: Vec<String> = db.heroes.keys().cloned().collect();
     for (i, bot) in locals.iter_mut().enumerate() {
-        bot.pick_hero(heroes.get(i + 1).cloned());
+        bot.pick_hero(heroes.get(i + 1).cloned(), 10);
     }
     route(db, &mut node, &mut locals);
     for bot in &mut locals {
@@ -206,10 +206,10 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
     let mut locals: Vec<Node> = (0..bots).map(|i| Node::join(2 + i as u64, &format!("bot {}", i + 1), 1)).collect();
     route(db, &mut node, &mut locals);
     let mine = hero.unwrap_or_else(|| db.heroes.keys().next().cloned().unwrap_or_default());
-    node.pick_hero(Some(mine.clone()));
+    node.pick_hero(Some(mine.clone()), 10);
     let rest: Vec<String> = db.heroes.keys().filter(|h| **h != mine).cloned().collect();
     for (i, bot) in locals.iter_mut().enumerate() {
-        bot.pick_hero(rest.get(i).cloned());
+        bot.pick_hero(rest.get(i).cloned(), 10);
     }
     route(db, &mut node, &mut locals);
     node.set_ready(true);
@@ -217,7 +217,8 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
         bot.set_ready(true);
     }
     route(db, &mut node, &mut locals);
-    node.start(db, seed);
+    // dev shortcut: everything unlocked
+    node.start(db, seed, (2, 2, 2));
     route(db, &mut node, &mut locals);
     // every in-process node gets the same forced stage, so they stay in step
     if let Some(kind) = force {

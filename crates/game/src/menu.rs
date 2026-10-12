@@ -14,6 +14,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), enter_menu)
         .add_systems(OnEnter(AppState::NoSteam), enter_no_steam)
         .add_systems(OnEnter(AppState::Settings), enter_settings)
+        .add_systems(OnEnter(AppState::Village), enter_village)
         .add_systems(Update, crate::battle::style_buttons.run_if(not(in_state(AppState::Battle))));
 }
 
@@ -115,6 +116,10 @@ fn enter_menu(
                 observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Coop)),
             ),
             (
+                menu_button(l10n.t("menu-village"), &fonts),
+                observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Village)),
+            ),
+            (
                 menu_button(l10n.t("menu-settings"), &fonts),
                 observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Settings)),
             ),
@@ -180,6 +185,54 @@ fn enter_settings(mut commands: Commands, stage: Single<Entity, With<Stage>>, fo
                     next.set(AppState::Settings);
                 }),
             ));
+        }
+        p.spawn((
+            menu_button(l10n.t("coop-back"), &fonts),
+            observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu)),
+        ));
+    });
+}
+
+fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, profile: Res<crate::profile::Profile>, art: Res<Art>, assets: Res<AssetServer>) {
+    use crate::profile::{Profile, BUILDINGS};
+    commands.spawn((
+        DespawnOnExit(AppState::Village),
+        Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
+        art.node(&assets, "bg/village", theme::SOOT),
+        Pickable::IGNORE,
+        ChildOf(*stage),
+    ));
+    commands.spawn(screen(AppState::Village, *stage)).with_children(|p| {
+        p.spawn(theme::text(l10n.t("village-title"), &fonts.title, 64.0, theme::BONE));
+        p.spawn(theme::text(l10n.n("village-oberegi", profile.oberegi as i32), &fonts.num, 34.0, theme::CANDLE));
+        for (id, max) in BUILDINGS {
+            let level = profile.building(id);
+            let price = profile.next_price(id);
+            let can = price.is_some_and(|c| profile.oberegi >= c);
+            let state = match price {
+                Some(c) => l10n.tf("village-row", &[("level", (level as i32).into()), ("max", (*max as i32).into()), ("price", (c as i32).into())]),
+                None => l10n.t("village-done"),
+            };
+            let label = format!("{}  ·  {}\n{}", l10n.t(&format!("building-{id}")), state, l10n.t(&format!("building-{id}-desc")));
+            let base = if can { theme::PEAT } else { theme::SOOT };
+            let mut row = p.spawn((
+                Button,
+                Hovered::default(),
+                Btn(base),
+                Node { width: px(980), padding: UiRect::axes(px(18), px(8)), border: UiRect::all(px(2)), ..default() },
+                BackgroundColor(base.with_alpha(0.92)),
+                BorderColor::all(if can { theme::CANDLE } else { Color::srgb(0.32, 0.26, 0.20) }),
+                children![theme::text(label, &fonts.body, 19.0, if price.is_none() { theme::ROTLIGHT } else if can { theme::BONE } else { theme::DIM })],
+            ));
+            if can {
+                let id = id.to_string();
+                row.observe(move |_: On<Activate>, mut profile: ResMut<Profile>, mut next: ResMut<NextState<AppState>>| {
+                    if profile.build(&id) {
+                        // redraw with the new level and purse
+                        next.set(AppState::Village);
+                    }
+                });
+            }
         }
         p.spawn((
             menu_button(l10n.t("coop-back"), &fonts),

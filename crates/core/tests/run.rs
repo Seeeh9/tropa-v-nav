@@ -494,3 +494,48 @@ fn report_endless_fights() {
     }
     println!("{} endless fights", seen.values().sum::<u32>());
 }
+
+#[test]
+fn a_bare_village_offers_only_the_common_shelf() {
+    let c = content();
+    let bare = Unlocks { relic_tier: 0, potion_tier: 0, omen_tier: 0, hero_levels: vec![1] };
+    for seed in 0..30 {
+        let mut run = Run::new_with(&c, &["bogatyr".to_string()], seed, 0, bare.clone()).unwrap();
+        run.force_stage(&c, NodeKind::Shop);
+        let Stage::Shop { stock, .. } = &run.stage else { panic!() };
+        for (id, _) in stock[0].cards.iter().flatten() {
+            let d = &c.cards[id];
+            assert!(d.hero.is_empty() || d.rarity == Rarity::Common, "{id} is {:?} at hero level 1", d.rarity);
+        }
+        for (id, _) in stock[0].relics.iter().flatten() {
+            assert_eq!(c.relics[id].rarity, Rarity::Common, "{id}");
+        }
+        let first_ten: Vec<&Id> = c.potions.keys().take(10).collect();
+        for (id, _) in stock[0].potions.iter().flatten() {
+            assert!(first_ten.contains(&id), "{id} is beyond the first shelf of potions");
+        }
+    }
+}
+
+#[test]
+fn hero_level_opens_the_better_cards() {
+    let c = content();
+    let seen = |level: u32| -> std::collections::BTreeSet<Rarity> {
+        let mut out = std::collections::BTreeSet::new();
+        for seed in 0..40 {
+            let unlocks = Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![level] };
+            let mut run = Run::new_with(&c, &["volhv".to_string()], seed, 0, unlocks).unwrap();
+            run.force_stage(&c, NodeKind::Shop);
+            let Stage::Shop { stock, .. } = &run.stage else { panic!() };
+            for (id, _) in stock[0].cards.iter().flatten() {
+                if c.cards[id].hero == "volhv" {
+                    out.insert(c.cards[id].rarity);
+                }
+            }
+        }
+        out
+    };
+    assert!(!seen(1).contains(&Rarity::Uncommon) && !seen(1).contains(&Rarity::Rare));
+    assert!(seen(2).contains(&Rarity::Uncommon) && !seen(2).contains(&Rarity::Rare));
+    assert!(seen(4).contains(&Rarity::Rare));
+}

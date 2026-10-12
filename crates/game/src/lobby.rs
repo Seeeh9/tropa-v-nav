@@ -250,9 +250,10 @@ fn draw_lobby(
                     )],
                 ));
                 if !taken {
-                    button.observe(move |_: On<Activate>, mut net: ResMut<Net>| {
+                    button.observe(move |_: On<Activate>, mut net: ResMut<Net>, profile: Res<crate::profile::Profile>| {
+                        let level = profile.hero_level(&id);
                         let hero = if picked { None } else { Some(id.clone()) };
-                        net.node.pick_hero(hero);
+                        net.node.pick_hero(hero, level);
                     });
                 }
             }
@@ -277,9 +278,10 @@ fn draw_lobby(
             if is_host {
                 row.spawn((
                     menu_button(l10n.t("lobby-start"), &fonts),
-                    observe(|_: On<Activate>, mut net: ResMut<Net>, db: Res<Db>, time: Res<Time>| {
+                    observe(|_: On<Activate>, mut net: ResMut<Net>, db: Res<Db>, time: Res<Time>, profile: Res<crate::profile::Profile>| {
                         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) ^ time.elapsed().as_nanos() as u64;
-                        net.node.start(&db.0, seed);
+                        // the host's village decides which relics, potions and omens can turn up
+                        net.node.start(&db.0, seed, profile.village());
                     }),
                 ));
             }

@@ -1,6 +1,6 @@
 //! Development-only helpers, compiled in with `--features dev`.
 //!
-//!   TROPA_SCREEN=coop|lobby|run|host  open the party menu, an offline lobby, a run in progress, or a real Steam lobby
+//!   TROPA_SCREEN=coop|village|settings|lobby|run|host  open the party menu, the village, settings, an offline lobby, a run in progress, or a real Steam lobby
 //!   TROPA_BOTS=<0..3>           bot companions for `lobby` and `run`
 //!   TROPA_HERO=<id>             the local hero for `run`
 //!   TROPA_BOT_ME=1              the local seat is played by the autopilot too
@@ -38,6 +38,8 @@ fn open_screen(
     let bots = env::<usize>("TROPA_BOTS").unwrap_or(0).min(3);
     match screen.as_str() {
         "coop" => next.set(AppState::Coop),
+        "village" => next.set(AppState::Village),
+        "settings" => next.set(AppState::Settings),
         "lobby" => {
             crate::net::start_offline(&mut commands, &db.0, "dev", bots);
             next.set(AppState::Lobby);

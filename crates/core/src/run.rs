@@ -84,12 +84,51 @@ pub enum Stage {
     Defeat,
 }
 
+/// What the party's village and hero levels have opened. It widens variety,
+/// never power: nothing here makes a hero stronger at the start of a run.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Unlocks {
+    /// Smithy level 0..=2: common relics, then uncommon, then rare.
+    pub relic_tier: u8,
+    /// Herbalist's hut level 0..=2: ten potions per level.
+    pub potion_tier: u8,
+    /// Tavern level 0..=2: eight omens, then six more per level.
+    pub omen_tier: u8,
+    /// Hero level of each player, in slot order: uncommon cards from 2, rare from 4.
+    pub hero_levels: Vec<u32>,
+}
+
+impl Unlocks {
+    /// Everything open: tests, the simulator and dev shortcuts.
+    pub fn all(players: usize) -> Unlocks {
+        Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![10; players] }
+    }
+
+    fn relic_ok(&self, rarity: Rarity) -> bool {
+        match rarity {
+            Rarity::Rare => self.relic_tier >= 2,
+            Rarity::Uncommon => self.relic_tier >= 1,
+            _ => true,
+        }
+    }
+
+    fn card_ok(&self, player: usize, rarity: Rarity) -> bool {
+        let level = self.hero_levels.get(player).copied().unwrap_or(1);
+        match rarity {
+            Rarity::Rare => level >= 4,
+            Rarity::Uncommon => level >= 2,
+            _ => true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Run {
     pub seed: u64,
     pub rng: Rng,
     /// Circle of Nav, 0..=10.
     pub circle: u8,
+    pub unlocks: Unlocks,
     pub act: u8,
     pub map: Map,
     /// `(floor, node)` the party stands on; `None` before the first step of an act.
@@ -291,7 +330,12 @@ pub fn generate_map(rng: &mut Rng, circle: Circle) -> Map {
 }
 
 impl Run {
+    /// A run with everything unlocked.
     pub fn new(c: &Content, heroes: &[Id], seed: u64, circle: u8) -> Option<Run> {
+        Run::new_with(c, heroes, seed, circle, Unlocks::all(heroes.len()))
+    }
+
+    pub fn new_with(c: &Content, heroes: &[Id], seed: u64, circle: u8, unlocks: Unlocks) -> Option<Run> {
         let mut rng = Rng::new(seed);
         let circle_rules = Circle(circle);
         let mut players = Vec::new();
@@ -309,6 +353,7 @@ impl Run {
             seed,
             rng,
             circle,
+            unlocks,
             act: 1,
             map,
             at: None,
@@ -677,7 +722,8 @@ impl Run {
             NodeKind::Event => {
                 self.floors_cleared += 1;
                 let act = self.act;
-                let pool: Vec<&EventDef> = c.events.values().filter(|e| e.act == 0 || e.act == act).collect();
+                let open = 8 + 6 * self.unlocks.omen_tier as usize;
+                let pool: Vec<&EventDef> = c.events.values().take(open).filter(|e| e.act == 0 || e.act == act).collect();
                 match self.rng.pick(&pool) {
                     Some(e) => self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] },
                     // no omens written yet: the road is simply quiet
@@ -804,6 +850,7 @@ impl Run {
                 .values()
                 .filter(|d| &d.hero == hero && d.rarity == rarity && (coop || !d.keywords.contains(&Keyword::Coop)))
                 .filter(|d| !matches!(d.kind, CardType::Curse | CardType::Status))
+                .filter(|d| self.unlocks.card_ok(p, d.rarity))
                 .collect()
         };
         let (common, uncommon, rare) = (pool(Rarity::Common), pool(Rarity::Uncommon), pool(Rarity::Rare));
@@ -866,7 +913,8 @@ impl Run {
                 RunFx::RandomCard(rarity) => {
                     let hero = self.players[p].hero.clone();
                     let coop = self.players.len() > 1;
-                    let pool: Vec<&CardDef> = c.cards.values().filter(|d| d.hero == hero && d.rarity == *rarity && (coop || !d.keywords.contains(&Keyword::Coop))).collect();
+                    let pool: Vec<&CardDef> =
+                        c.cards.values().filter(|d| d.hero == hero && d.rarity == *rarity && (coop || !d.keywords.contains(&Keyword::Coop)) && self.unlocks.card_ok(p, d.rarity)).collect();
                     if let Some(card) = self.rng.pick(&pool).map(|d| d.id.clone()) {
                         self.players[p].deck.push((card.clone(), false));
                         ev.push(RunEvent::CardGained { player, card });
@@ -903,7 +951,8 @@ impl Run {
         if self.players[p].potions.len() >= POTION_SLOTS {
             return;
         }
-        let pool: Vec<&Id> = c.potions.keys().collect();
+        let open = 10 * (self.unlocks.potion_tier as usize + 1);
+        let pool: Vec<&Id> = c.potions.keys().take(open).collect();
         if let Some(potion) = self.rng.pick(&pool).map(|id| (*id).clone()) {
             self.players[p].potions.push(potion.clone());
             ev.push(RunEvent::PotionGained { player: p as u8, potion });
@@ -924,6 +973,7 @@ impl Run {
             .cards
             .values()
             .filter(|d| d.hero == hero && !matches!(d.rarity, Rarity::Starter | Rarity::Special) && (coop || !d.keywords.contains(&Keyword::Coop)))
+            .filter(|d| self.unlocks.card_ok(p, d.rarity))
             .collect();
         let neutral: Vec<&CardDef> = c.cards.values().filter(|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special).collect();
         for (pool, want) in [(&mine, 5), (&neutral, 2)] {
@@ -942,7 +992,8 @@ impl Run {
             }
         }
         let owned = self.players[p].relics.clone();
-        let relics: Vec<&RelicDef> = c.relics.values().filter(|r| r.rarity != Rarity::Starter && (r.hero.is_empty() || r.hero == hero) && !owned.contains(&r.id)).collect();
+        let relics: Vec<&RelicDef> =
+            c.relics.values().filter(|r| r.rarity != Rarity::Starter && (r.hero.is_empty() || r.hero == hero) && !owned.contains(&r.id) && self.unlocks.relic_ok(r.rarity)).collect();
         for _ in 0..40 {
             if stock.relics.len() == 3.min(relics.len()) {
                 break;
@@ -954,7 +1005,7 @@ impl Run {
                 }
             }
         }
-        let potions: Vec<&Id> = c.potions.keys().collect();
+        let potions: Vec<&Id> = c.potions.keys().take(10 * (self.unlocks.potion_tier as usize + 1)).collect();
         for _ in 0..3.min(potions.len()) {
             if let Some(id) = self.rng.pick(&potions) {
                 let cost = self.rng.range(45, 60);
@@ -971,7 +1022,7 @@ impl Run {
             .relics
             .values()
             .filter(|r| r.rarity != Rarity::Starter && (r.hero.is_empty() || r.hero == pl.hero))
-            .filter(|r| !pl.relics.contains(&r.id))
+            .filter(|r| !pl.relics.contains(&r.id) && self.unlocks.relic_ok(r.rarity))
             .collect();
         self.rng.pick(&pool).map(|r| r.id.clone())
     }

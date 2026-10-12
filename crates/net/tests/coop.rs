@@ -17,14 +17,14 @@ fn party(c: &Content, n: usize, seed: u64) -> Hub {
     }
     hub.pump(c);
     for (i, node) in hub.nodes.iter_mut().enumerate() {
-        node.pick_hero(Some(HEROES[i].into()));
+        node.pick_hero(Some(HEROES[i].into()), 10);
     }
     hub.pump(c);
     for node in &mut hub.nodes {
         node.set_ready(true);
     }
     hub.pump(c);
-    assert!(hub.node(1).start(c, seed), "lobby should be startable");
+    assert!(hub.node(1).start(c, seed, (2, 2, 2)), "lobby should be startable");
     hub.pump(c);
     hub
 }
@@ -112,8 +112,8 @@ fn lobby_fills_and_heroes_are_unique() {
     assert_eq!(hub.node(1).lobby.slot_of(5), None);
     assert_eq!(hub.node(5).my_slot(), None);
 
-    hub.node(1).pick_hero(Some("bogatyr".into()));
-    hub.node(2).pick_hero(Some("bogatyr".into()));
+    hub.node(1).pick_hero(Some("bogatyr".into()), 10);
+    hub.node(2).pick_hero(Some("bogatyr".into()), 10);
     hub.pump(&c);
     let lobby = hub.node(4).lobby.clone();
     assert_eq!(lobby.players[0].hero.as_deref(), Some("bogatyr"));
@@ -122,8 +122,8 @@ fn lobby_fills_and_heroes_are_unique() {
     hub.node(2).set_ready(true);
     hub.pump(&c);
     assert!(!hub.node(1).lobby.players[1].ready, "no ready without a hero");
-    assert!(!hub.node(1).start(&c, 1), "can't start until everyone is ready");
-    assert!(!hub.node(2).start(&c, 1), "only the host starts");
+    assert!(!hub.node(1).start(&c, 1, (2, 2, 2)), "can't start until everyone is ready");
+    assert!(!hub.node(2).start(&c, 1, (2, 2, 2)), "only the host starts");
 }
 
 #[test]

@@ -30,6 +30,8 @@ pub enum AppState {
     NoSteam,
     Menu,
     Settings,
+    /// The last stockade: spend village currency between runs.
+    Village,
     /// Create or join a party.
     Coop,
     /// Seats, heroes, ready.

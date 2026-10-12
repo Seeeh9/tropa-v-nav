@@ -189,6 +189,12 @@ pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str
         bot.set_ready(true);
     }
     route(db, &mut node, &mut locals);
+    // dev shortcut: TROPA_HERO seats the player on a free hero, to look at the lobby with one chosen
+    #[cfg(feature = "dev")]
+    if let Ok(hero) = std::env::var("TROPA_HERO") {
+        node.pick_hero(Some(hero), 1);
+        route(db, &mut node, &mut locals);
+    }
     commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false, booked: false, ephemeral: false });
 }
 
@@ -225,6 +231,15 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
         for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
             if let Some(run) = n.state.as_mut() {
                 run.force_stage(db, kind);
+            }
+        }
+    }
+    // dev shortcut: TROPA_FORCE=trophy opens on a boss's trophy vote
+    if std::env::var("TROPA_FORCE").as_deref() == Ok("trophy") {
+        let offers: Vec<String> = db.relics.values().filter(|r| r.pool == nav_core::RelicPool::Boss).take(3).map(|r| r.id.clone()).collect();
+        for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+            if let Some(run) = n.state.as_mut() {
+                run.stage = Stage::Trophy { offers: offers.clone(), picks: vec![None; run.players.len()] };
             }
         }
     }

@@ -4,7 +4,8 @@
 //!   TROPA_BOTS=<0..3>           bot companions for `lobby` and `run`
 //!   TROPA_HERO=<id>             the local hero for `run`
 //!   TROPA_BOT_ME=1              the local seat is played by the autopilot too
-//!   TROPA_FORCE=shop|omen|rest  open `run` straight at that stage
+//!   TROPA_FORCE=shop|omen|rest|trophy  open `run` straight at that stage
+//!   TROPA_SHRINE=<0..2>         pretend the shrine stands at this level (in memory only; never saved by a screenshot run)
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
@@ -30,12 +31,16 @@ fn open_screen(
     mut status: ResMut<crate::net::NetStatus>,
     mut next: ResMut<NextState<AppState>>,
     mut done: Local<bool>,
+    mut profile: ResMut<crate::profile::Profile>,
 ) {
     let Ok(screen) = std::env::var("TROPA_SCREEN") else { return };
     if *done {
         return;
     }
     *done = true;
+    if let Some(level) = env::<u8>("TROPA_SHRINE") {
+        profile.bypass_change_detection().buildings.insert("shrine".into(), level.min(2));
+    }
     let bots = env::<usize>("TROPA_BOTS").unwrap_or(0).min(3);
     match screen.as_str() {
         "coop" => next.set(AppState::Coop),

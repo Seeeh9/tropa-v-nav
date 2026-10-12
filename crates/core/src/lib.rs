@@ -26,6 +26,7 @@ impl HeroSetup {
             deck: d.deck.iter().map(|id| (id.clone(), false)).collect(),
             relics: vec![d.relic.clone()],
             falls: 0,
+            potions: vec![],
         })
     }
 }

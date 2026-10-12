@@ -1,0 +1,64 @@
+// Знамения. Personal — каждый выбирает сам; Vote — один выбор на отряд, ничья решается жребием.
+// Тексты — в i18n: omen-<id>, omen-<id>-text, omen-<id>-<option>.
+[
+    (
+        id: "well", kind: Personal,
+        options: [
+            (id: "look", fx: [RandomCard(Uncommon), Hp(-6)]),
+            (id: "pass"),
+        ],
+    ),
+    (
+        id: "crossroads_stone", kind: Vote,
+        options: [
+            (id: "left", fx: [Gold(-30)]),
+            (id: "right", fx: [HpPct(-12)]),
+            (id: "straight", fx: [Relic, HpPct(-20)]),
+        ],
+    ),
+    (
+        id: "hungry_village", kind: Personal,
+        options: [
+            (id: "give", price: 40, fx: [Relic]),
+            (id: "steal", fx: [Gold(50), Card("toska")]),
+            (id: "pass"),
+        ],
+    ),
+    (
+        id: "bannik", kind: Personal,
+        options: [
+            (id: "steam", fx: [HpPct(25)]),
+            (id: "pay", price: 30, fx: [UpgradeRandomCard]),
+            (id: "leave"),
+        ],
+    ),
+    (
+        id: "drowned_mill", kind: Personal,
+        options: [
+            (id: "search", fx: [Potion]),
+            (id: "grind", fx: [MaxHp(5), Hp(-8)]),
+        ],
+    ),
+    (
+        id: "hanged_man", kind: Vote,
+        options: [
+            (id: "listen", fx: [UpgradeRandomCard]),
+            (id: "cut_down", fx: [Gold(40)]),
+            (id: "flee"),
+        ],
+    ),
+    (
+        id: "hen_legged_hut", kind: Personal,
+        options: [
+            (id: "enter", fx: [RemoveRandomCard, HpPct(-10)]),
+            (id: "knock", fx: [Potion]),
+        ],
+    ),
+    (
+        id: "rusalka_pool", kind: Personal,
+        options: [
+            (id: "drink", fx: [HpPct(30), Card("toska")]),
+            (id: "leave"),
+        ],
+    ),
+]

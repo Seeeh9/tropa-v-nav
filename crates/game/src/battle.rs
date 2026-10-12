@@ -36,7 +36,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 playback,
-                (sync_units, sync_hand, cue_effects).chain(),
+                (sync_units, sync_hand, sync_potions, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_bars, update_tooltip),
                 (floaters, dying, style_buttons),
             )
@@ -58,6 +58,14 @@ struct BattleRoot;
 struct UnitLayer;
 #[derive(Component)]
 struct HandLayer;
+#[derive(Component)]
+struct PotionBelt;
+/// A potion on the belt: click to drink, drag onto a unit to throw.
+#[derive(Component)]
+struct PotionChip {
+    slot: u8,
+    id: String,
+}
 #[derive(Component)]
 struct FloatLayer;
 #[derive(Component)]
@@ -309,6 +317,11 @@ fn enter(
                 }),
             ));
 
+            p.spawn((
+                PotionBelt,
+                Node { position_type: PositionType::Absolute, left: px(40), top: px(880), flex_direction: FlexDirection::Column, row_gap: px(6), ..default() },
+                Pickable::IGNORE,
+            ));
             p.spawn((HandLayer, layer(), Pickable::IGNORE));
             p.spawn((FloatLayer, layer(), Pickable::IGNORE, GlobalZIndex(50)));
 
@@ -830,6 +843,58 @@ fn sync_hand(
     }
 }
 
+/// Keeps the potion belt in step with the hero's potions.
+fn sync_potions(
+    mut commands: Commands,
+    session: Res<Session>,
+    db: Res<Db>,
+    belt: Single<Entity, With<PotionBelt>>,
+    chips: Query<(Entity, &PotionChip)>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+) {
+    let potions = &session.my_hero().potions;
+    let same = chips.iter().count() == potions.len() && chips.iter().all(|(_, c)| potions.get(c.slot as usize) == Some(&c.id));
+    if same {
+        return;
+    }
+    for (e, _) in &chips {
+        commands.entity(e).despawn();
+    }
+    for (i, id) in potions.iter().enumerate() {
+        let needs_target = db.0.potions.get(id).is_some_and(|d| matches!(d.target, CardTarget::Enemy | CardTarget::Downed));
+        let slot = i as u8;
+        let mut e = commands.spawn((
+            PotionChip { slot, id: id.clone() },
+            Button,
+            Hovered::default(),
+            Btn(theme::SWAMP),
+            Pickable { should_block_lower: false, is_hoverable: true },
+            Node { width: px(200), padding: UiRect::axes(px(10), px(6)), border: UiRect::all(px(2)), justify_content: JustifyContent::Center, ..default() },
+            BackgroundColor(theme::SWAMP),
+            BorderColor::all(theme::ROTLIGHT),
+            UiTransform::IDENTITY,
+            GlobalZIndex(40),
+            children![theme::text(l10n.t(&format!("potion-{id}")), &fonts.body, 17.0, theme::BONE)],
+            ChildOf(*belt),
+        ));
+        // untargeted and ally draughts are drunk on a click; the rest must be thrown at something
+        if !needs_target {
+            e.observe(move |_: On<Activate>, mut outbox: ResMut<Outbox>| outbox.0.push(CombatAction::UsePotion { slot, target: None }));
+        }
+        e.observe(|ev: On<PointerDrag>, scale: Res<UiScale>, mut q: Query<&mut UiTransform, With<PotionChip>>| {
+            if let Ok(mut tf) = q.get_mut(ev.event_target()) {
+                tf.translation = Val2::px(ev.distance.x / scale.0, ev.distance.y / scale.0);
+            }
+        });
+        e.observe(|ev: On<PointerDragEnd>, mut q: Query<&mut UiTransform, With<PotionChip>>| {
+            if let Ok(mut tf) = q.get_mut(ev.event_target()) {
+                tf.translation = Val2::ZERO;
+            }
+        });
+    }
+}
+
 fn pick_hover(session: Res<Session>, cards: Query<(&CardWidget, &Hovered)>, mut top: ResMut<HoverTop>) {
     let hand = &session.my_hero().hand;
     let dragging = cards.iter().find(|(w, _)| w.dragging).map(|(w, _)| w.uid);
@@ -931,11 +996,17 @@ fn on_drag_end(
 fn on_drop(
     ev: On<PointerDragDrop>,
     units: Query<&UnitWidget>,
+    potions: Query<&PotionChip>,
     cards: Query<&CardWidget>,
     session: Option<Res<Session>>,
     db: Res<Db>,
     mut outbox: ResMut<Outbox>,
 ) {
+    // a potion thrown at a unit
+    if let (Ok(unit), Ok(chip)) = (units.get(ev.event_target()), potions.get(ev.dropped)) {
+        outbox.0.push(CombatAction::UsePotion { slot: chip.slot, target: Some(unit.unit) });
+        return;
+    }
     let (Ok(unit), Ok(w), Some(session)) = (units.get(ev.event_target()), cards.get(ev.dropped), session) else { return };
     let h = session.my_hero();
     let Some(card) = h.hand.iter().find(|c| c.uid == w.uid) else { return };

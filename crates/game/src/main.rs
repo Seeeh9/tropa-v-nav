@@ -37,6 +37,9 @@ pub enum AppState {
     Reward,
     /// The fire.
     Rest,
+    /// The pedlar.
+    Shop,
+    Omen,
     RunEnd,
 }
 

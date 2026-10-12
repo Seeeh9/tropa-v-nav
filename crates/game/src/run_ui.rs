@@ -16,7 +16,7 @@ use bevy::ui_widgets::{observe, Activate, Button};
 use nav_core::*;
 
 pub fn plugin(app: &mut App) {
-    for state in [AppState::Map, AppState::Reward, AppState::Rest, AppState::RunEnd] {
+    for state in [AppState::Map, AppState::Reward, AppState::Rest, AppState::Shop, AppState::Omen, AppState::RunEnd] {
         app.add_systems(OnEnter(state), |mut status: ResMut<NetStatus>, mut pick: ResMut<UpgradePick>| {
             status.run_dirty = true;
             pick.0 = false;
@@ -26,6 +26,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_map.run_if(in_state(AppState::Map)))
         .add_systems(Update, draw_reward.run_if(in_state(AppState::Reward)))
         .add_systems(Update, draw_rest.run_if(in_state(AppState::Rest)))
+        .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
+        .add_systems(Update, draw_omen.run_if(in_state(AppState::Omen)))
         .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)));
 }
 
@@ -396,6 +398,212 @@ fn draw_rest(
         observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = false),
         ChildOf(column),
     ));
+}
+
+// ---- the pedlar ----
+
+/// A priced line on the pedlar's shelf.
+fn shelf_button(commands: &mut Commands, parent: Entity, label: String, price: i32, can_pay: bool, edge: Color, fonts: &Fonts, action: RunAction) {
+    let base = if can_pay { theme::PEAT } else { theme::SOOT };
+    let mut e = commands.spawn((
+        Button,
+        Hovered::default(),
+        Btn(base),
+        Node { width: px(560), padding: UiRect::axes(px(12), px(8)), border: UiRect::all(px(2)), justify_content: JustifyContent::SpaceBetween, column_gap: px(12), ..default() },
+        BackgroundColor(base),
+        BorderColor::all(edge),
+        children![
+            (theme::text(label, &fonts.body, 18.0, if can_pay { theme::BONE } else { theme::DIM }), Node { max_width: px(440), ..default() }),
+            theme::text(price.to_string(), &fonts.num, 22.0, if can_pay { theme::CANDLE } else { theme::RUST_BLOOD }),
+        ],
+        ChildOf(parent),
+    ));
+    e.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(action.clone()));
+}
+
+fn draw_shop(
+    mut commands: Commands,
+    mut status: ResMut<NetStatus>,
+    net: Option<Res<Net>>,
+    db: Res<Db>,
+    old: Query<Entity, With<ScreenRoot>>,
+    canvas: Single<Entity, With<Canvas>>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+    pick: Res<UpgradePick>,
+) {
+    let Some(net) = net else { return };
+    let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
+    let Stage::Shop { stock, done } = &run.stage else { return };
+    if pick.is_changed() {
+        status.run_dirty = true;
+    }
+    let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Shop, *canvas, Color::srgb(0.07, 0.08, 0.06)) else { return };
+    party_panel(&mut commands, root, run, me, &fonts, &l10n);
+    let pl = &run.players[me as usize];
+    commands.spawn((
+        theme::text(l10n.t("shop-title"), &fonts.title, 56.0, theme::CANDLE),
+        Node { position_type: PositionType::Absolute, top: px(90), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
+        TextLayout::justify(Justify::Center),
+        ChildOf(root),
+    ));
+    if done[me as usize] {
+        waiting_line(&mut commands, root, &fonts, &l10n);
+        return;
+    }
+    let columns = commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, top: px(190), width: px(STAGE_W), justify_content: JustifyContent::Center, column_gap: px(30), ..default() },
+            Pickable::IGNORE,
+            ChildOf(root),
+        ))
+        .id();
+    let column = |commands: &mut Commands, title: &str| -> Entity {
+        commands
+            .spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(8), ..default() }, Pickable::IGNORE, ChildOf(columns), children![theme::text(l10n.t(title), &fonts.title, 26.0, theme::BONE)]))
+            .id()
+    };
+    let s = &stock[me as usize];
+    if pick.0 {
+        // choosing which card the pedlar takes away
+        let price = 75 + 25 * pl.removals as i32;
+        let col = column(&mut commands, "shop-remove-pick");
+        let grid = commands.spawn((Node { width: px(1200), flex_wrap: FlexWrap::Wrap, column_gap: px(8), row_gap: px(8), ..default() }, Pickable::IGNORE, ChildOf(col))).id();
+        for (i, (id, up)) in pl.deck.iter().enumerate() {
+            shelf_button(&mut commands, grid, l10n.card_name(id, *up), price, pl.gold >= price, theme::DIM, &fonts, RunAction::RemoveCard(i as u16));
+        }
+        commands.spawn((menu_button(l10n.t("coop-back"), &fonts), observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = false), ChildOf(col)));
+        return;
+    }
+    let col = column(&mut commands, "shop-cards");
+    for (i, slot) in s.cards.iter().enumerate() {
+        let Some((id, price)) = slot else { continue };
+        let Some(def) = db.0.cards.get(id) else { continue };
+        let label = format!("{}  ·  {}", l10n.card_name(id, false), l10n.card_text(id, def, &def.view(false, Form::Human)));
+        let edge = if def.hero.is_empty() { theme::DIM } else { theme::hero_color(&def.hero) };
+        shelf_button(&mut commands, col, label, *price, pl.gold >= *price, edge, &fonts, RunAction::BuyCard(i as u8));
+    }
+    let col = column(&mut commands, "shop-wares");
+    for (i, slot) in s.relics.iter().enumerate() {
+        let Some((id, price)) = slot else { continue };
+        let label = format!("{}  ·  {}", l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")));
+        shelf_button(&mut commands, col, label, *price, pl.gold >= *price, theme::CANDLE, &fonts, RunAction::BuyRelic(i as u8));
+    }
+    let room = pl.potions.len() < POTION_SLOTS;
+    for (i, slot) in s.potions.iter().enumerate() {
+        let Some((id, price)) = slot else { continue };
+        let label = format!("{}  ·  {}", l10n.t(&format!("potion-{id}")), l10n.t(&format!("potion-{id}-desc")));
+        shelf_button(&mut commands, col, label, *price, room && pl.gold >= *price, theme::ROTLIGHT, &fonts, RunAction::BuyPotion(i as u8));
+    }
+    let price = 75 + 25 * pl.removals as i32;
+    commands.spawn((
+        menu_button(l10n.n("shop-remove", price), &fonts),
+        observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = true),
+        ChildOf(col),
+    ));
+    commands.spawn((
+        menu_button(l10n.t("shop-leave"), &fonts),
+        observe(|_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::LeaveShop)),
+        ChildOf(col),
+    ));
+}
+
+// ---- omens ----
+
+fn describe_fx(l10n: &L10n, o: &EventOption) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if o.price > 0 {
+        parts.push(l10n.n("fx-run-pay", o.price));
+    }
+    for fx in &o.fx {
+        parts.push(match fx {
+            RunFx::Gold(n) if *n >= 0 => l10n.n("fx-run-gold", *n),
+            RunFx::Gold(n) => l10n.n("fx-run-lose-gold", -*n),
+            RunFx::Hp(n) if *n >= 0 => l10n.n("fx-run-heal", *n),
+            RunFx::Hp(n) => l10n.n("fx-run-hurt", -*n),
+            RunFx::HpPct(n) if *n >= 0 => l10n.n("fx-run-heal-pct", *n),
+            RunFx::HpPct(n) => l10n.n("fx-run-hurt-pct", -*n),
+            RunFx::MaxHp(n) => l10n.n("fx-run-maxhp", *n),
+            RunFx::Card(id) => l10n.tf("fx-run-card", &[("c", l10n.card_name(id, false).into())]),
+            RunFx::RandomCard(r) => l10n.t(&format!("fx-run-random-{r:?}")),
+            RunFx::Relic => l10n.t("fx-run-relic"),
+            RunFx::Potion => l10n.t("fx-run-potion"),
+            RunFx::RemoveRandomCard => l10n.t("fx-run-remove"),
+            RunFx::UpgradeRandomCard => l10n.t("fx-run-upgrade"),
+        });
+    }
+    parts.join(" ")
+}
+
+fn draw_omen(
+    mut commands: Commands,
+    mut status: ResMut<NetStatus>,
+    net: Option<Res<Net>>,
+    db: Res<Db>,
+    old: Query<Entity, With<ScreenRoot>>,
+    canvas: Single<Entity, With<Canvas>>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+) {
+    let Some(net) = net else { return };
+    let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
+    let Stage::Omen { id, picks } = &run.stage else { return };
+    let Some(def) = db.0.events.get(id) else { return };
+    let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Omen, *canvas, Color::srgb(0.06, 0.06, 0.08)) else { return };
+    party_panel(&mut commands, root, run, me, &fonts, &l10n);
+    let pl = &run.players[me as usize];
+    let column = commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                width: px(STAGE_W),
+                height: px(STAGE_H),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(18),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(root),
+        ))
+        .id();
+    commands.spawn((theme::text(l10n.t(&format!("omen-{id}")), &fonts.title, 56.0, theme::BONE), ChildOf(column)));
+    commands.spawn((
+        theme::text(l10n.t(&format!("omen-{id}-text")), &fonts.body, 26.0, theme::BONE),
+        Node { max_width: px(1100), margin: UiRect::bottom(px(14)), ..default() },
+        TextLayout::justify(Justify::Center),
+        ChildOf(column),
+    ));
+    let vote = def.kind == EventKind::Vote;
+    if vote {
+        commands.spawn((theme::text(l10n.t("omen-vote-hint"), &fonts.body, 20.0, theme::DIM), ChildOf(column)));
+    }
+    let mine = picks[me as usize];
+    if mine.is_some() && !vote {
+        waiting_line(&mut commands, root, &fonts, &l10n);
+        return;
+    }
+    for (i, o) in def.options.iter().enumerate() {
+        let can = pl.gold >= o.price;
+        let voters = picks.iter().filter(|v| **v == Some(i as u8)).count();
+        let mut label = format!("{}  —  {}", l10n.t(&format!("omen-{id}-{}", o.id)), describe_fx(&l10n, o));
+        if vote && voters > 0 {
+            label.push_str(&format!("   [{voters}]"));
+        }
+        let base = if mine == Some(i as u8) { theme::SWAMP } else if can { theme::PEAT } else { theme::SOOT };
+        commands.spawn((
+            Button,
+            Hovered::default(),
+            Btn(base),
+            Node { width: px(1000), padding: UiRect::axes(px(18), px(12)), border: UiRect::all(px(2)), ..default() },
+            BackgroundColor(base),
+            BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+            children![theme::text(label, &fonts.body, 22.0, if can { theme::BONE } else { theme::DIM })],
+            observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8))),
+            ChildOf(column),
+        ));
+    }
 }
 
 // ---- the end ----

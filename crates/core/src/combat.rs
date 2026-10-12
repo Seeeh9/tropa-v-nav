@@ -79,6 +79,7 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
             moon: 0,
             mask: None,
             cauldron: Vec::new(),
+            potions: h.potions.clone(),
             gold_lost: 0,
             flags: BTreeMap::new(),
         });
@@ -124,6 +125,7 @@ pub fn apply(c: &Content, s: &mut Combat, player: u8, action: &CombatAction) -> 
             ex.ev.push(Event::Ready { player, ready: *r });
         }
         CombatAction::Raise { ally, discard } => ex.raise(player, *ally, *discard)?,
+        CombatAction::UsePotion { slot, target } => ex.use_potion(player, *slot, *target)?,
     }
     ex.check_end();
     ex.maybe_close();
@@ -627,6 +629,26 @@ impl<'a> Exec<'a> {
             let to = self.s.rng.pick(&others).copied().unwrap_or(p);
             self.gain_block(UnitRef::Hero(to), 2);
         }
+        Ok(())
+    }
+
+    fn use_potion(&mut self, p: u8, slot: u8, target: Option<UnitRef>) -> Result<(), ActionError> {
+        let id = self.s.heroes[p as usize].potions.get(slot as usize).cloned().ok_or(ActionError::NoSuchPotion)?;
+        let def = self.c.potions.get(&id).ok_or(ActionError::NoSuchPotion)?;
+        let target = match (def.target, target) {
+            (CardTarget::None, _) => None,
+            (CardTarget::Enemy, Some(t @ UnitRef::Enemy(_))) if self.exists(t) => Some(t),
+            // a draught for "an ally" may always be drunk yourself
+            (CardTarget::Ally | CardTarget::AnyHero, Some(t @ UnitRef::Hero(_))) if self.exists(t) => Some(t),
+            (CardTarget::Ally | CardTarget::AnyHero, None) => Some(UnitRef::Hero(p)),
+            (CardTarget::Downed, Some(t @ UnitRef::Hero(j))) if self.s.hero(j).is_some_and(|a| a.downed) => Some(t),
+            _ => return Err(ActionError::BadTarget),
+        };
+        let effects = def.effects.clone();
+        self.hero(p).potions.remove(slot as usize);
+        self.ev.push(Event::PotionUsed { player: p, potion: id, target });
+        let mut ctx = Ctx { src: UnitRef::Hero(p), target, x: 0, consumed: 0, fatal: false, attack: false, card: false, bled: false };
+        self.run(&effects, &mut ctx);
         Ok(())
     }
 

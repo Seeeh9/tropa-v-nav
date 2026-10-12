@@ -188,7 +188,7 @@ pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str
 
 /// Like [`start_offline`], but picks a hero for the host too and sets out at once.
 #[cfg(feature = "dev")]
-pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, hero: Option<String>, bot_me: bool) {
+pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, hero: Option<String>, bot_me: bool, force: Option<nav_core::NodeKind>) {
     let mut node = Node::host(1, "dev");
     let mut locals: Vec<Node> = (0..bots).map(|i| Node::join(2 + i as u64, &format!("bot {}", i + 1), 1)).collect();
     route(db, &mut node, &mut locals);
@@ -206,6 +206,14 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
     route(db, &mut node, &mut locals);
     node.start(db, seed);
     route(db, &mut node, &mut locals);
+    // every in-process node gets the same forced stage, so they stay in step
+    if let Some(kind) = force {
+        for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+            if let Some(run) = n.state.as_mut() {
+                run.force_stage(db, kind);
+            }
+        }
+    }
     commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me });
 }
 
@@ -453,10 +461,12 @@ fn follow_stage(net: Res<Net>, session: Option<Res<Session>>, state: Res<State<A
         Stage::Combat => AppState::Battle,
         Stage::Reward { .. } => AppState::Reward,
         Stage::Rest { .. } => AppState::Rest,
+        Stage::Shop { .. } => AppState::Shop,
+        Stage::Omen { .. } => AppState::Omen,
         Stage::Victory | Stage::Defeat => AppState::RunEnd,
     };
     let now = *state.get();
-    if now == want || !matches!(now, AppState::Lobby | AppState::Map | AppState::Battle | AppState::Reward | AppState::Rest | AppState::RunEnd | AppState::Menu) {
+    if now == want || !matches!(now, AppState::Lobby | AppState::Map | AppState::Battle | AppState::Reward | AppState::Rest | AppState::Shop | AppState::Omen | AppState::RunEnd | AppState::Menu) {
         *linger = 0.0;
         return;
     }

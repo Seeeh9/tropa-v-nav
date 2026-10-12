@@ -4,6 +4,7 @@
 //!   TROPA_BOTS=<0..3>           bot companions for `lobby` and `run`
 //!   TROPA_HERO=<id>             the local hero for `run`
 //!   TROPA_BOT_ME=1              the local seat is played by the autopilot too
+//!   TROPA_FORCE=shop|omen|rest  open `run` straight at that stage
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 
@@ -45,7 +46,13 @@ fn open_screen(
         "run" => {
             let seed = env("TROPA_SEED").unwrap_or(7);
             let bot_me = std::env::var("TROPA_BOT_ME").is_ok();
-            crate::net::start_offline_run(&mut commands, &db.0, bots, seed, std::env::var("TROPA_HERO").ok(), bot_me);
+            let force = match std::env::var("TROPA_FORCE").as_deref() {
+                Ok("shop") => Some(nav_core::NodeKind::Shop),
+                Ok("omen") => Some(nav_core::NodeKind::Event),
+                Ok("rest") => Some(nav_core::NodeKind::Rest),
+                _ => None,
+            };
+            crate::net::start_offline_run(&mut commands, &db.0, bots, seed, std::env::var("TROPA_HERO").ok(), bot_me, force);
         }
         "host" => {
             if let (Some(steam), Some(inbox)) = (steam, inbox) {

@@ -61,6 +61,14 @@ pub struct Reward {
     pub done: bool,
 }
 
+/// One player's shelves at the pedlar: `(id, price)`; a sold item becomes `None`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Stock {
+    pub cards: Vec<Option<(Id, i32)>>,
+    pub relics: Vec<Option<(Id, i32)>>,
+    pub potions: Vec<Option<(Id, i32)>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Stage {
     /// Choosing the next node; `votes[player]` indexes into [`Run::choices`].
@@ -68,6 +76,10 @@ pub enum Stage {
     Combat,
     Reward { rewards: Vec<Reward> },
     Rest { done: Vec<bool> },
+    /// The pedlar: every player has their own shelves.
+    Shop { stock: Vec<Stock>, done: Vec<bool> },
+    /// An omen. `picks[player]` is the chosen option (a vote, for vote omens).
+    Omen { id: Id, picks: Vec<Option<u8>> },
     Victory,
     Defeat,
 }
@@ -106,6 +118,16 @@ pub enum RunAction {
     Upgrade(u16),
     /// Hand some of your gold to an ally (shop and fire only).
     GiveGold { to: u8, amount: i32 },
+    BuyCard(u8),
+    BuyRelic(u8),
+    BuyPotion(u8),
+    /// Pay the pedlar to take a card out of your deck for good.
+    RemoveCard(u16),
+    LeaveShop,
+    /// Choose (or vote for) an option of the omen.
+    Choose(u8),
+    /// Throw away a potion to free the slot.
+    DropPotion(u8),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -116,6 +138,8 @@ pub enum RunError {
     BadChoice,
     AlreadyDone,
     NotEnoughGold,
+    SoldOut,
+    NoRoom,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +156,11 @@ pub enum RunEvent {
     Upgraded { player: u8, card: Id },
     Gold { player: u8, delta: i32 },
     RelicGained { player: u8, relic: Id },
+    PotionGained { player: u8, potion: Id },
+    CardGained { player: u8, card: Id },
+    CardRemoved { player: u8, card: Id },
+    Hp { player: u8, delta: i32 },
+    OmenResolved { option: u8 },
     ActCleared { act: u8 },
     Ended { won: bool },
 }
@@ -440,7 +469,7 @@ impl Run {
                     self.to_map(&mut ev);
                 }
             }
-            (RunAction::GiveGold { to, amount }, Stage::Rest { .. }) => {
+            (RunAction::GiveGold { to, amount }, Stage::Rest { .. } | Stage::Shop { .. }) => {
                 let to = *to as usize;
                 if to >= self.players.len() || to == p || *amount <= 0 {
                     return Err(RunError::BadChoice);
@@ -453,9 +482,147 @@ impl Run {
                 ev.push(RunEvent::Gold { player, delta: -amount });
                 ev.push(RunEvent::Gold { player: to as u8, delta: *amount });
             }
+            (RunAction::BuyCard(i) | RunAction::BuyRelic(i) | RunAction::BuyPotion(i), Stage::Shop { stock, done }) => {
+                if done[p] {
+                    return Err(RunError::AlreadyDone);
+                }
+                let shelf = match action {
+                    RunAction::BuyCard(_) => &mut stock[p].cards,
+                    RunAction::BuyRelic(_) => &mut stock[p].relics,
+                    _ => &mut stock[p].potions,
+                };
+                let slot = shelf.get_mut(*i as usize).ok_or(RunError::BadChoice)?;
+                let (id, price) = slot.clone().ok_or(RunError::SoldOut)?;
+                let pl = &mut self.players[p];
+                if pl.gold < price {
+                    return Err(RunError::NotEnoughGold);
+                }
+                if matches!(action, RunAction::BuyPotion(_)) && pl.potions.len() >= POTION_SLOTS {
+                    return Err(RunError::NoRoom);
+                }
+                pl.gold -= price;
+                *slot = None;
+                ev.push(RunEvent::Gold { player, delta: -price });
+                match action {
+                    RunAction::BuyCard(_) => {
+                        pl.deck.push((id.clone(), false));
+                        ev.push(RunEvent::CardGained { player, card: id });
+                    }
+                    RunAction::BuyRelic(_) => {
+                        pl.relics.push(id.clone());
+                        ev.push(RunEvent::RelicGained { player, relic: id });
+                    }
+                    _ => {
+                        pl.potions.push(id.clone());
+                        ev.push(RunEvent::PotionGained { player, potion: id });
+                    }
+                }
+            }
+            (RunAction::RemoveCard(i), Stage::Shop { done, .. }) => {
+                if done[p] {
+                    return Err(RunError::AlreadyDone);
+                }
+                let pl = &mut self.players[p];
+                // 75 gold, then 25 more each time
+                let price = 75 + 25 * pl.removals as i32;
+                if *i as usize >= pl.deck.len() {
+                    return Err(RunError::BadChoice);
+                }
+                if pl.gold < price {
+                    return Err(RunError::NotEnoughGold);
+                }
+                pl.gold -= price;
+                pl.removals += 1;
+                let (card, _) = pl.deck.remove(*i as usize);
+                ev.push(RunEvent::Gold { player, delta: -price });
+                ev.push(RunEvent::CardRemoved { player, card });
+            }
+            (RunAction::LeaveShop, Stage::Shop { done, .. }) => {
+                done[p] = true;
+                if done.iter().all(|d| *d) {
+                    self.to_map(&mut ev);
+                }
+            }
+            (RunAction::Choose(choice), Stage::Omen { id, picks }) => {
+                let def = c.events.get(id.as_str()).ok_or(RunError::BadChoice)?.clone();
+                let option = def.options.get(*choice as usize).ok_or(RunError::BadChoice)?;
+                if picks[p].is_some() && def.kind == EventKind::Personal {
+                    return Err(RunError::AlreadyDone);
+                }
+                if self.players[p].gold < option.price {
+                    return Err(RunError::NotEnoughGold);
+                }
+                picks[p] = Some(*choice);
+                let all = picks.iter().all(|v| v.is_some());
+                let cast: Vec<u8> = picks.iter().flatten().copied().collect();
+                match def.kind {
+                    // everyone decides for themselves, at once
+                    EventKind::Personal => {
+                        self.apply_option(c, p, option, &mut ev);
+                        if all {
+                            self.to_map(&mut ev);
+                        }
+                    }
+                    // one choice for the party; a tie goes to the lot
+                    EventKind::Vote => {
+                        ev.push(RunEvent::Voted { player, choice: *choice });
+                        if all {
+                            let mut counts = vec![0u32; def.options.len()];
+                            for v in &cast {
+                                counts[*v as usize] += 1;
+                            }
+                            let best = counts.iter().copied().max().unwrap_or(0);
+                            let tied: Vec<u8> = (0..def.options.len() as u8).filter(|i| counts[*i as usize] == best).collect();
+                            let winner = if tied.len() == 1 {
+                                tied[0]
+                            } else {
+                                let chosen = *self.rng.pick(&tied).unwrap_or(&tied[0]);
+                                ev.push(RunEvent::Lot { tied: tied.clone(), chosen });
+                                chosen
+                            };
+                            ev.push(RunEvent::OmenResolved { option: winner });
+                            let option = &def.options[winner as usize];
+                            for q in 0..self.players.len() {
+                                self.apply_option(c, q, option, &mut ev);
+                            }
+                            self.to_map(&mut ev);
+                        }
+                    }
+                }
+            }
+            (RunAction::DropPotion(i), _) => {
+                // not mid-fight: there the potions live in the combat state
+                if self.stage == Stage::Combat {
+                    return Err(RunError::WrongStage);
+                }
+                let pl = &mut self.players[p];
+                if *i as usize >= pl.potions.len() {
+                    return Err(RunError::BadChoice);
+                }
+                pl.potions.remove(*i as usize);
+            }
             _ => return Err(RunError::WrongStage),
         }
         Ok(ev)
+    }
+
+    /// Puts the party straight into a shop or an omen, wherever it stands.
+    /// For tests and the dev build's screen shortcuts; never reachable by a player action.
+    pub fn force_stage(&mut self, c: &Content, kind: NodeKind) {
+        match kind {
+            NodeKind::Shop => {
+                let stock = (0..self.players.len()).map(|p| self.roll_stock(c, p)).collect();
+                self.stage = Stage::Shop { stock, done: vec![false; self.players.len()] };
+            }
+            NodeKind::Event => {
+                let pool: Vec<&EventDef> = c.events.values().collect();
+                if let Some(e) = self.rng.pick(&pool) {
+                    self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] };
+                }
+            }
+            NodeKind::Rest => self.stage = Stage::Rest { done: vec![false; self.players.len()] },
+            _ => {}
+        }
     }
 
     fn to_map(&mut self, ev: &mut Vec<RunEvent>) {
@@ -496,10 +663,20 @@ impl Run {
                 let rewards = (0..self.players.len()).map(|p| Reward { gold: 0, cards: vec![], relic: self.roll_relic(c, p), done: false }).collect();
                 self.grant(rewards, ev);
             }
-            // shops and omens arrive with their own content; until then the road is simply quiet
-            NodeKind::Shop | NodeKind::Event => {
+            NodeKind::Shop => {
                 self.floors_cleared += 1;
-                self.stage = Stage::Map { votes: vec![None; self.players.len()] };
+                let stock = (0..self.players.len()).map(|p| self.roll_stock(c, p)).collect();
+                self.stage = Stage::Shop { stock, done: vec![false; self.players.len()] };
+            }
+            NodeKind::Event => {
+                self.floors_cleared += 1;
+                let act = self.act;
+                let pool: Vec<&EventDef> = c.events.values().filter(|e| e.act == 0 || e.act == act).collect();
+                match self.rng.pick(&pool) {
+                    Some(e) => self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] },
+                    // no omens written yet: the road is simply quiet
+                    None => self.stage = Stage::Map { votes: vec![None; self.players.len()] },
+                }
             }
         }
     }
@@ -533,7 +710,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, potions: p.potions.clone() })
             .collect();
         let rules = Circle(self.circle);
         let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind) };
@@ -554,6 +731,7 @@ impl Run {
             pl.hp = h.hp.max(1);
             pl.max_hp = h.max_hp;
             pl.falls = h.falls;
+            pl.potions = h.potions.clone();
             pl.gold = (pl.gold - h.gold_lost).max(0);
             for _ in 0..h.new_curses {
                 pl.deck.push((NAV_MARK.into(), false));
@@ -576,6 +754,12 @@ impl Run {
             let cards = self.roll_cards(c, p, kind);
             let relic = if kind == NodeKind::Elite { self.roll_relic(c, p) } else { None };
             rewards.push(Reward { gold: base * gold_pct / 100, cards, relic, done: false });
+        }
+        // four fights in ten leave a draught behind
+        for p in 0..self.players.len() {
+            if self.rng.chance(40) {
+                self.give_potion(c, p, ev);
+            }
         }
         self.grant(rewards, ev);
     }
@@ -642,6 +826,138 @@ impl Run {
         out
     }
 
+    fn apply_option(&mut self, c: &Content, p: usize, option: &EventOption, ev: &mut Vec<RunEvent>) {
+        let player = p as u8;
+        if option.price > 0 {
+            self.players[p].gold = (self.players[p].gold - option.price).max(0);
+            ev.push(RunEvent::Gold { player, delta: -option.price });
+        }
+        for fx in &option.fx {
+            match fx {
+                RunFx::Gold(n) => {
+                    let pl = &mut self.players[p];
+                    let delta = (*n).max(-pl.gold);
+                    pl.gold += delta;
+                    ev.push(RunEvent::Gold { player, delta });
+                }
+                RunFx::Hp(n) | RunFx::HpPct(n) => {
+                    let pl = &mut self.players[p];
+                    let n = if matches!(fx, RunFx::HpPct(_)) { pl.max_hp * n / 100 } else { *n };
+                    // an omen may wound, but it never kills outright
+                    let delta = n.clamp(1 - pl.hp, pl.max_hp - pl.hp);
+                    pl.hp += delta;
+                    ev.push(RunEvent::Hp { player, delta });
+                }
+                RunFx::MaxHp(n) => {
+                    let pl = &mut self.players[p];
+                    pl.max_hp = (pl.max_hp + n).max(1);
+                    pl.hp = (pl.hp + (*n).max(0)).min(pl.max_hp).max(1);
+                }
+                RunFx::Card(card) => {
+                    self.players[p].deck.push((card.clone(), false));
+                    ev.push(RunEvent::CardGained { player, card: card.clone() });
+                }
+                RunFx::RandomCard(rarity) => {
+                    let hero = self.players[p].hero.clone();
+                    let coop = self.players.len() > 1;
+                    let pool: Vec<&CardDef> = c.cards.values().filter(|d| d.hero == hero && d.rarity == *rarity && (coop || !d.keywords.contains(&Keyword::Coop))).collect();
+                    if let Some(card) = self.rng.pick(&pool).map(|d| d.id.clone()) {
+                        self.players[p].deck.push((card.clone(), false));
+                        ev.push(RunEvent::CardGained { player, card });
+                    }
+                }
+                RunFx::Relic => {
+                    if let Some(relic) = self.roll_relic(c, p) {
+                        self.players[p].relics.push(relic.clone());
+                        ev.push(RunEvent::RelicGained { player, relic });
+                    }
+                }
+                RunFx::Potion => self.give_potion(c, p, ev),
+                RunFx::RemoveRandomCard => {
+                    let n = self.players[p].deck.len();
+                    if n > 1 {
+                        let i = self.rng.below(n as u32) as usize;
+                        let (card, _) = self.players[p].deck.remove(i);
+                        ev.push(RunEvent::CardRemoved { player, card });
+                    }
+                }
+                RunFx::UpgradeRandomCard => {
+                    let able: Vec<usize> = self.players[p].deck.iter().enumerate().filter(|(_, (id, up))| !up && c.cards.get(id).is_some_and(|d| d.up.is_some())).map(|(i, _)| i).collect();
+                    if let Some(i) = self.rng.pick(&able).copied() {
+                        self.players[p].deck[i].1 = true;
+                        ev.push(RunEvent::Upgraded { player, card: self.players[p].deck[i].0.clone() });
+                    }
+                }
+            }
+        }
+    }
+
+    /// A random potion, if the player has a free slot.
+    fn give_potion(&mut self, c: &Content, p: usize, ev: &mut Vec<RunEvent>) {
+        if self.players[p].potions.len() >= POTION_SLOTS {
+            return;
+        }
+        let pool: Vec<&Id> = c.potions.keys().collect();
+        if let Some(potion) = self.rng.pick(&pool).map(|id| (*id).clone()) {
+            self.players[p].potions.push(potion.clone());
+            ev.push(RunEvent::PotionGained { player: p as u8, potion });
+        }
+    }
+
+    /// The pedlar's shelves for one player: 5 cards of their hero, 2 neutral, 3 relics, 3 potions.
+    fn roll_stock(&mut self, c: &Content, p: usize) -> Stock {
+        let hero = self.players[p].hero.clone();
+        let coop = self.players.len() > 1;
+        let price = |rng: &mut Rng, rarity: Rarity| match rarity {
+            Rarity::Rare => rng.range(135, 165),
+            Rarity::Uncommon => rng.range(68, 82),
+            _ => rng.range(45, 55),
+        };
+        let mut stock = Stock::default();
+        let mine: Vec<&CardDef> = c
+            .cards
+            .values()
+            .filter(|d| d.hero == hero && !matches!(d.rarity, Rarity::Starter | Rarity::Special) && (coop || !d.keywords.contains(&Keyword::Coop)))
+            .collect();
+        let neutral: Vec<&CardDef> = c.cards.values().filter(|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special).collect();
+        for (pool, want) in [(&mine, 5), (&neutral, 2)] {
+            let mut picked: Vec<&Id> = Vec::new();
+            for _ in 0..40 {
+                if picked.len() == want.min(pool.len()) {
+                    break;
+                }
+                if let Some(d) = self.rng.pick(pool) {
+                    if !picked.contains(&&d.id) {
+                        picked.push(&d.id);
+                        let cost = price(&mut self.rng, d.rarity);
+                        stock.cards.push(Some((d.id.clone(), cost)));
+                    }
+                }
+            }
+        }
+        let owned = self.players[p].relics.clone();
+        let relics: Vec<&RelicDef> = c.relics.values().filter(|r| r.rarity != Rarity::Starter && (r.hero.is_empty() || r.hero == hero) && !owned.contains(&r.id)).collect();
+        for _ in 0..40 {
+            if stock.relics.len() == 3.min(relics.len()) {
+                break;
+            }
+            if let Some(r) = self.rng.pick(&relics) {
+                if !stock.relics.iter().flatten().any(|(id, _)| *id == r.id) {
+                    let cost = price(&mut self.rng, r.rarity) + 80;
+                    stock.relics.push(Some((r.id.clone(), cost)));
+                }
+            }
+        }
+        let potions: Vec<&Id> = c.potions.keys().collect();
+        for _ in 0..3.min(potions.len()) {
+            if let Some(id) = self.rng.pick(&potions) {
+                let cost = self.rng.range(45, 60);
+                stock.potions.push(Some(((*id).clone(), cost)));
+            }
+        }
+        stock
+    }
+
     /// A relic this player doesn't own yet: common pool, or their hero's own.
     fn roll_relic(&mut self, c: &Content, p: usize) -> Option<Id> {
         let pl = &self.players[p];
@@ -680,6 +996,32 @@ pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
                 Some(i) if pl.hp * 10 >= pl.max_hp * 7 => RunAction::Upgrade(i as u16),
                 _ => RunAction::Sleep,
             })
+        }
+        Stage::Shop { stock, done } => {
+            if *done.get(p)? {
+                return None;
+            }
+            // the autopilot buys the first thing it can afford, once, and moves on
+            let pl = run.players.get(p)?;
+            let afford = |shelf: &Vec<Option<(Id, i32)>>| shelf.iter().position(|s| s.as_ref().is_some_and(|(_, price)| *price <= pl.gold)).map(|i| i as u8);
+            let s = stock.get(p)?;
+            if let Some(i) = afford(&s.relics) {
+                return Some(RunAction::BuyRelic(i));
+            }
+            if let Some(i) = afford(&s.cards) {
+                return Some(RunAction::BuyCard(i));
+            }
+            Some(RunAction::LeaveShop)
+        }
+        Stage::Omen { id, picks } => {
+            let def = c.events.get(id.as_str())?;
+            if picks.get(p)?.is_some() {
+                return None;
+            }
+            let pl = run.players.get(p)?;
+            // the first option it can pay for
+            let i = def.options.iter().position(|o| o.price <= pl.gold).unwrap_or(def.options.len() - 1);
+            Some(RunAction::Choose(i as u8))
         }
         Stage::Victory | Stage::Defeat => None,
     }

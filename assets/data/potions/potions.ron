@@ -1,0 +1,13 @@
+// Снадобья: 3 слота у героя, пьются в свой ход; целевые можно бросить союзнику.
+[
+    (id: "nettle_brew", effects: [Apply(Strength, N(2), Me)]),
+    (id: "mead", effects: [Energy(N(2), Me)]),
+    (id: "tar", target: AnyHero, effects: [Block(N(12), Target)]),
+    (id: "fly_bottle", effects: [Apply(Rot, N(5), AllFoes)]),
+    (id: "sleeping_draught", target: Enemy, effects: [Apply(Stun, N(1), Target)]),
+    (id: "blood_and_milk", target: AnyHero, effects: [Heal(N(15), Target)]),
+    (id: "rusalka_tear", target: Downed, effects: [Revive(20, Target)]),
+    (id: "fire_water", effects: [Damage(N(10), AllFoes)]),
+    (id: "hoarfrost", effects: [Apply(Weak, N(2), AllFoes)]),
+    (id: "rowan_tincture", target: AnyHero, effects: [Cleanse(Target), Heal(N(5), Target)]),
+]

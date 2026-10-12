@@ -1,0 +1,59 @@
+// Общие реликвии: бои, элиты, лари, Коробейник. Первая партия из 210.
+[
+    (
+        // Подкова с гвоздём: +1 энергия в первом раунде каждого боя
+        id: "horseshoe", rarity: Common,
+        passives: [(on: TurnStart, effects: [Once("horseshoe", [Energy(N(1), Me)])])],
+    ),
+    (
+        // Зуб упыря: при добивании врага вылечите 2 HP
+        id: "ghoul_tooth", rarity: Common,
+        passives: [(on: Kill, effects: [Heal(N(2), Me)])],
+    ),
+    (
+        id: "whetstone", rarity: Common,
+        passives: [(on: CombatStart, effects: [Apply(Strength, N(1), Me)])],
+    ),
+    (
+        id: "birch_tinder", rarity: Common,
+        passives: [(on: TurnStart, effects: [Once("tinder", [Draw(N(2))])])],
+    ),
+    (
+        id: "wolfskin_mitten", rarity: Common,
+        passives: [(on: CombatStart, effects: [Block(N(8), Me)])],
+    ),
+    (
+        id: "thorn_wreath", rarity: Common,
+        passives: [(on: CombatStart, effects: [Apply(Thorns, N(2), Me)])],
+    ),
+    (
+        id: "salt_pouch", rarity: Common,
+        passives: [(on: CombatStart, effects: [Apply(Weak, N(1), AllFoes)])],
+    ),
+    (
+        id: "rowan_beads", rarity: Common,
+        passives: [(on: TurnEnd, effects: [Block(N(1), Me)])],
+    ),
+    (
+        id: "ember_pot", rarity: Uncommon,
+        passives: [(on: CombatStart, effects: [Damage(N(4), AllFoes)])],
+    ),
+    (
+        id: "wax_ear_plugs", rarity: Uncommon,
+        passives: [(on: CombatStart, effects: [Apply(Fortitude, N(1), Me)])],
+    ),
+    (
+        id: "raven_feather", rarity: Uncommon,
+        passives: [(on: AttackPlayed, effects: [OncePerTurn("feather", [Draw(N(1))])])],
+    ),
+    (
+        // Чур (род): все союзники начинают бой с 4 щита
+        id: "chur", rarity: Rare,
+        passives: [(on: CombatStart, effects: [Block(N(4), AllFriends)])],
+    ),
+    (
+        // Братина (род): когда союзника поднимают, вся команда лечит 4 HP
+        id: "bratina", rarity: Rare,
+        passives: [(on: AllyRaised, effects: [Heal(N(4), AllFriends)])],
+    ),
+]

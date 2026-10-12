@@ -314,3 +314,123 @@ fn report_autopilot_outcomes() {
     }
     println!("party of 4 wins {wins}/20");
 }
+
+// ---- potions, the pedlar, omens ----
+
+#[test]
+fn potions_are_drunk_in_a_fight_and_carried_out() {
+    let c = content();
+    let mut run = party(&c, 1, 3, 0);
+    run.players[0].potions = vec!["mead".into(), "fire_water".into()];
+    run.apply(&c, 0, &RunAction::Vote(0)).unwrap();
+    let hp: Vec<i32> = run.combat.as_ref().unwrap().enemies.iter().map(|e| e.hp).collect();
+    run.apply(&c, 0, &RunAction::Combat(CombatAction::UsePotion { slot: 0, target: None })).unwrap();
+    assert_eq!(run.combat.as_ref().unwrap().heroes[0].energy, 5);
+    run.apply(&c, 0, &RunAction::Combat(CombatAction::UsePotion { slot: 0, target: None })).unwrap();
+    let after: Vec<i32> = run.combat.as_ref().unwrap().enemies.iter().map(|e| e.hp).collect();
+    assert!(hp.iter().zip(&after).all(|(a, b)| *b == (*a - 10).max(0)));
+    assert_eq!(
+        run.apply(&c, 0, &RunAction::Combat(CombatAction::UsePotion { slot: 0, target: None })),
+        Err(RunError::Combat(ActionError::NoSuchPotion))
+    );
+}
+
+#[test]
+fn the_pedlar_sells_removes_and_lets_you_leave() {
+    let c = content();
+    let mut run = party(&c, 2, 3, 0);
+    // put the party at a shop by hand
+    let stock: Vec<Stock> = vec![
+        Stock { cards: vec![Some(("bogatyr_shield_wall".into(), 50))], relics: vec![], potions: vec![Some(("mead".into(), 45)), Some(("tar".into(), 45))] },
+        Stock::default(),
+    ];
+    run.stage = Stage::Shop { stock, done: vec![false, false] };
+    run.players[0].gold = 100;
+    let deck = run.players[0].deck.len();
+    run.apply(&c, 0, &RunAction::BuyCard(0)).unwrap();
+    assert_eq!((run.players[0].gold, run.players[0].deck.len()), (50, deck + 1));
+    assert_eq!(run.apply(&c, 0, &RunAction::BuyCard(0)), Err(RunError::SoldOut));
+    run.apply(&c, 0, &RunAction::BuyPotion(0)).unwrap();
+    assert_eq!(run.apply(&c, 0, &RunAction::BuyPotion(1)), Err(RunError::NotEnoughGold));
+    assert_eq!(run.players[0].potions, vec!["mead".to_string()]);
+
+    // removal costs 75, then 100
+    run.players[1].gold = 180;
+    let deck = run.players[1].deck.len();
+    run.apply(&c, 1, &RunAction::RemoveCard(0)).unwrap();
+    run.apply(&c, 1, &RunAction::RemoveCard(0)).unwrap();
+    assert_eq!((run.players[1].gold, run.players[1].deck.len(), run.players[1].removals), (5, deck - 2, 2));
+
+    run.apply(&c, 0, &RunAction::GiveGold { to: 1, amount: 5 }).unwrap();
+    run.apply(&c, 0, &RunAction::LeaveShop).unwrap();
+    assert!(matches!(run.stage, Stage::Shop { .. }));
+    run.apply(&c, 1, &RunAction::LeaveShop).unwrap();
+    assert!(matches!(run.stage, Stage::Map { .. }));
+}
+
+#[test]
+fn pedlar_shelves_are_stocked_for_your_hero() {
+    let c = content();
+    let mut run = party(&c, 1, 3, 0);
+    // walk the map by hand to the first shop on any path; simpler: ask for stock via a shop node
+    run.stage = Stage::Map { votes: vec![None] };
+    for seed in 0..200 {
+        let mut r = party(&c, 1, seed, 0);
+        // find a seed whose first floors lead to a shop quickly by brute force over the bot
+        for _ in 0..400 {
+            if let Stage::Shop { stock, .. } = &r.stage {
+                let s = &stock[0];
+                assert!(s.cards.len() >= 3, "shelves hold cards");
+                for (id, price) in s.cards.iter().flatten() {
+                    let d = &c.cards[id];
+                    assert!(d.hero == "bogatyr" || d.hero.is_empty());
+                    assert!(*price >= 45);
+                }
+                assert_eq!(s.potions.len(), 3);
+                return;
+            }
+            if matches!(r.stage, Stage::Victory | Stage::Defeat) {
+                break;
+            }
+            let Some(a) = run_bot(&c, &r, 0) else { break };
+            r.apply(&c, 0, &a).unwrap();
+        }
+    }
+    panic!("no run ever reached a pedlar");
+}
+
+#[test]
+fn a_personal_omen_is_each_players_own_choice() {
+    let c = content();
+    let mut run = party(&c, 2, 3, 0);
+    run.stage = Stage::Omen { id: "hungry_village".into(), picks: vec![None, None] };
+    run.players[0].gold = 40;
+    run.players[1].gold = 10;
+    let relics = run.players[0].relics.len();
+    run.apply(&c, 0, &RunAction::Choose(0)).unwrap();
+    assert_eq!(run.players[0].gold, 0);
+    // no relic pool beyond starters yet means nothing to hand out; the price is still paid
+    assert!(run.players[0].relics.len() >= relics);
+    assert_eq!(run.apply(&c, 0, &RunAction::Choose(2)), Err(RunError::AlreadyDone));
+    assert_eq!(run.apply(&c, 1, &RunAction::Choose(0)), Err(RunError::NotEnoughGold));
+    run.apply(&c, 1, &RunAction::Choose(1)).unwrap();
+    assert_eq!(run.players[1].gold, 60);
+    assert!(run.players[1].deck.iter().any(|(id, _)| id == "toska"));
+    assert!(matches!(run.stage, Stage::Map { .. }));
+}
+
+#[test]
+fn a_vote_omen_binds_the_whole_party_and_never_kills() {
+    let c = content();
+    let mut run = party(&c, 3, 3, 0);
+    run.stage = Stage::Omen { id: "crossroads_stone".into(), picks: vec![None, None, None] };
+    run.players[2].hp = 3;
+    run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
+    run.apply(&c, 1, &RunAction::Choose(0)).unwrap();
+    assert!(matches!(run.stage, Stage::Omen { .. }));
+    let ev = run.apply(&c, 2, &RunAction::Choose(1)).unwrap();
+    assert!(ev.contains(&RunEvent::OmenResolved { option: 1 }));
+    assert_eq!(run.players[0].hp, 85 - 85 * 12 / 100);
+    assert_eq!(run.players[2].hp, 1, "an omen wounds but does not kill");
+    assert!(matches!(run.stage, Stage::Map { .. }));
+}

@@ -316,6 +316,55 @@ fn common() -> Rarity {
     Rarity::Common
 }
 
+/// A one-use draught. Three slots per hero; drunk on your turn or thrown to an ally.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PotionDef {
+    pub id: Id,
+    #[serde(default = "no_target")]
+    pub target: CardTarget,
+    pub effects: Vec<Effect>,
+}
+
+data_enum!(EventKind { Personal, Vote });
+
+/// Something that happens to a player outside of combat.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RunFx {
+    Gold(i32),
+    Hp(i32),
+    /// Percent of max HP, negative to hurt.
+    HpPct(i32),
+    MaxHp(i32),
+    Card(Id),
+    /// A random card of the player's own hero of this rarity.
+    RandomCard(Rarity),
+    Relic,
+    Potion,
+    RemoveRandomCard,
+    UpgradeRandomCard,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EventOption {
+    pub id: Id,
+    /// Gold the player must have (and pays) to take this option.
+    #[serde(default)]
+    pub price: i32,
+    #[serde(default)]
+    pub fx: Vec<RunFx>,
+}
+
+/// An omen on the path: a short eerie tale with a choice.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EventDef {
+    pub id: Id,
+    /// 0 = any act.
+    #[serde(default)]
+    pub act: u8,
+    pub kind: EventKind,
+    pub options: Vec<EventOption>,
+}
+
 /// What a set of herbs brews into. `herbs` is a multiset; `"*"` matches any herb.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RecipeDef {
@@ -373,6 +422,8 @@ pub struct Content {
     pub encounters: BTreeMap<Id, EncounterDef>,
     /// Most specific first: the first recipe that matches the cauldron wins.
     pub recipes: Vec<RecipeDef>,
+    pub potions: BTreeMap<Id, PotionDef>,
+    pub events: BTreeMap<Id, EventDef>,
 }
 
 #[derive(Debug)]
@@ -441,6 +492,19 @@ impl Content {
         Ok(())
     }
 
+    pub fn add_potions(&mut self, src: &str) -> Result<(), LoadError> {
+        for p in parse::<PotionDef>(src, "potions")? {
+            self.potions.insert(p.id.clone(), p);
+        }
+        Ok(())
+    }
+    pub fn add_events(&mut self, src: &str) -> Result<(), LoadError> {
+        for e in parse::<EventDef>(src, "events")? {
+            self.events.insert(e.id.clone(), e);
+        }
+        Ok(())
+    }
+
     /// Loads every `.ron` under `dir/{cards,heroes,relics,enemies,encounters,recipes}`.
     pub fn load_dir(dir: &Path) -> Result<Content, LoadError> {
         let mut c = Content::default();
@@ -465,6 +529,8 @@ impl Content {
         each("enemies", &mut |s| c.add_enemies(s))?;
         each("encounters", &mut |s| c.add_encounters(s))?;
         each("recipes", &mut |s| c.add_recipes(s))?;
+        each("potions", &mut |s| c.add_potions(s))?;
+        each("events", &mut |s| c.add_events(s))?;
         c.validate()?;
         Ok(c)
     }
@@ -526,6 +592,23 @@ impl Content {
         }
         for r in &self.recipes {
             check(&mut bad, &r.id, &r.effects);
+        }
+        for p in self.potions.values() {
+            check(&mut bad, &p.id, &p.effects);
+        }
+        for e in self.events.values() {
+            if e.options.is_empty() {
+                bad.push(format!("{}: an omen needs at least one option", e.id));
+            }
+            for o in &e.options {
+                for fx in &o.fx {
+                    if let RunFx::Card(card) = fx {
+                        if !self.cards.contains_key(card) {
+                            bad.push(format!("{}: unknown card `{card}`", e.id));
+                        }
+                    }
+                }
+            }
         }
         for h in self.heroes.values() {
             for c in &h.deck {

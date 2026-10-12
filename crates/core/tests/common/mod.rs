@@ -104,6 +104,7 @@ pub fn hero(def: &str, deck: &[&str]) -> HeroSetup {
         deck: deck.iter().map(|d| (d.to_string(), false)).collect(),
         relics: vec![],
         falls: 0,
+        potions: vec![],
     }
 }
 

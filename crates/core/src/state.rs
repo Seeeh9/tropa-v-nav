@@ -61,6 +61,7 @@ pub struct Hero {
     pub mask: Option<MaskKind>,
     /// Herbs waiting to be brewed.
     pub cauldron: Vec<Id>,
+    pub potions: Vec<Id>,
     pub gold_lost: i32,
     pub flags: BTreeMap<String, i32>,
 }
@@ -146,6 +147,8 @@ pub struct HeroSetup {
     pub deck: Vec<(Id, bool)>,
     pub relics: Vec<Id>,
     pub falls: u32,
+    #[serde(default)]
+    pub potions: Vec<Id>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -154,6 +157,8 @@ pub enum CombatAction {
     Ready(bool),
     /// Spend energy and discard a card to raise a downed ally.
     Raise { ally: u8, discard: u32 },
+    /// Drink the potion in this slot, or throw it at the target.
+    UsePotion { slot: u8, target: Option<UnitRef> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -166,6 +171,7 @@ pub enum ActionError {
     NotEnoughEnergy,
     BadTarget,
     NotDowned,
+    NoSuchPotion,
 }
 
 /// Things that happened, in order, for the renderer and the log. Never read back by rules.
@@ -198,6 +204,7 @@ pub enum Event {
     RuneFired { player: u8, rune: RuneKind },
     HerbAdded { player: u8, herb: Id },
     Brewed { player: u8, recipe: Id },
+    PotionUsed { player: u8, potion: Id, target: Option<UnitRef> },
     Shifted { player: u8, form: Form },
     MaskChanged { player: u8, mask: MaskKind },
     Taunt { player: u8 },

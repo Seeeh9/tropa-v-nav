@@ -1,4 +1,4 @@
 // Остров Буян: финальный бой после третьего акта.
 [
-    (id: "a4_koschei", act: 4, kind: Boss, enemies: ["koschei", "death_oak"]),
+    (id: "a4_koschei", act: 4, kind: Boss, enemies: ["koschei", "death_oak"], solo: ["koschei", "death_oak_chest"]),
 ]

@@ -205,3 +205,5 @@ herb-sleep = Sleep-grass
 herb-weep = Weeping-grass
 herb-burst = Burst-grass
 herb-fern = Fern Flower
+kw-Passable = Passable
+kw-Passable-help = Drag the card onto an ally to hand it over for 1 Energy.

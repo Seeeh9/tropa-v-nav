@@ -752,7 +752,7 @@ impl Run {
             return;
         };
         let n = self.players.len();
-        let mut enemies = enc.enemies.clone();
+        let mut enemies = if n == 1 && !enc.solo.is_empty() { enc.solo.clone() } else { enc.enemies.clone() };
         if n == 3 && self.rng.chance(50) {
             enemies.extend(enc.extra3.iter().cloned());
         }

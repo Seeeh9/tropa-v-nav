@@ -2,33 +2,39 @@
 // Цепь смерти выходит по одному звену: дуб → сундук → заяц → утка → яйцо → игла.
 // Добавлено к документу: пока игла цела, Кощей каждые два своих хода получает 1 Силу
 // (иначе отряд, сидящий в глухой обороне, мог тянуть бой бесконечно).
-// Упрощено против документа: Кощей бьёт случайного героя, а не того, кто больше всех
-// ранил цепь; иглу нельзя передать союзнику; укороченной цепи для одиночки нет.
+// Кощей бьёт того, кто больше всех ранил цепь, а после яйца — того, у кого игла.
+// Одиночке: дуб и сундук — одна цель, у яйца 20 щита, латник один (последнее — добавлено).
+// Не сделано: «Кощеева тень» Круга 10.
 [
     (
-        id: "koschei", hp: (600, 600), flags: ["immortal"],
+        id: "koschei", hp: (600, 600), flags: ["immortal", "hunter"],
         moves: [
             (id: "bone_sceptre", intent: Attack, targeted: true, effects: [Damage(N(14), Target), Hook("koschei_turn")]),
             (id: "dead_wind", intent: AttackAll, effects: [Damage(N(8), AllFoes), Hook("koschei_turn")]),
             (id: "call_guard", intent: Summon, effects: [Summon("koschei_guard", 1), Hook("koschei_turn")]),
+            // фаза 2: встаёт с трона
+            (id: "rise", intent: Summon, effects: [Hook("koschei_rise"), Hook("koschei_turn")]),
+            (id: "intercept", intent: Attack, targeted: true, effects: [Damage(N(18), Target), Hook("koschei_turn")]),
+            (id: "black_tide", intent: AttackAll, effects: [Damage(N(11), AllFoes), Hook("koschei_turn")]),
         ],
         pattern: [0, 1, 0, 2, 1],
+        phase2: [3, 4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4, 5, 4],
     ),
     (
-        id: "death_oak", hp: (150, 150),
+        id: "death_oak", hp: (150, 150), flags: ["chain"],
         moves: [(id: "roots", intent: AttackAll, effects: [Damage(N(5), AllFoes)])],
         pattern: [0],
         on_death: [Summon("death_chest", 1)],
     ),
     (
-        id: "death_chest", hp: (100, 100),
+        id: "death_chest", hp: (100, 100), flags: ["chain"],
         moves: [(id: "iron_bands", intent: Defend, effects: [Block(N(20), Me)])],
         pattern: [0],
         on_death: [Summon("death_hare", 1)],
     ),
     (
         // первая атака по нему за ход промахивается
-        id: "death_hare", hp: (60, 60), flags: ["dodge"],
+        id: "death_hare", hp: (60, 60), flags: ["dodge", "chain"],
         moves: [(id: "dart", intent: Unknown, effects: [])],
         pattern: [0],
         on_death: [Summon("death_duck", 1)],
@@ -36,18 +42,36 @@
     (
         // летает: достают только атаки «по всем» и резы. Раз в три хода садится на раунд —
         // этого нет в документе, но без этого отряд без ударов «по всем» не прошёл бы бой никогда
-        id: "death_duck", hp: (60, 60), flags: ["flying"],
+        id: "death_duck", hp: (60, 60), flags: ["flying", "chain"],
         moves: [
             (id: "wingbeat", intent: Unknown, effects: [Hook("duck_fly")]),
             (id: "settle", intent: Unknown, effects: [Hook("duck_land")]),
         ],
         pattern: [0, 0, 1],
-        on_death: [Summon("death_egg", 1)],
+        on_death: [Hook("hatch_egg")],
     ),
     (
         // 1 HP и 30 щита, который возвращается каждый ход: пробить нужно за один раунд
-        id: "death_egg", hp: (1, 1), start_block: 30,
+        id: "death_egg", hp: (1, 1), start_block: 30, flags: ["chain"],
         moves: [(id: "shell", intent: Defend, effects: [Block(N(30), Me)])],
+        opening: [0],
+        pattern: [0],
+        on_death: [Hook("drop_needle")],
+    ),
+    // ---- одиночная игра ----
+    (
+        // дуб и сундук — одна цель
+        id: "death_oak_chest", hp: (180, 180), flags: ["chain"],
+        moves: [
+            (id: "roots", intent: AttackAll, effects: [Damage(N(5), AllFoes)]),
+            (id: "iron_bands", intent: Defend, effects: [Block(N(20), Me)]),
+        ],
+        pattern: [0, 1],
+        on_death: [Summon("death_hare", 1)],
+    ),
+    (
+        id: "death_egg_solo", hp: (1, 1), start_block: 20, flags: ["chain"],
+        moves: [(id: "shell", intent: Defend, effects: [Block(N(20), Me)])],
         opening: [0],
         pattern: [0],
         on_death: [Hook("drop_needle")],

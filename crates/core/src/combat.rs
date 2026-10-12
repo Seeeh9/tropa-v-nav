@@ -125,6 +125,7 @@ pub fn apply(c: &Content, s: &mut Combat, player: u8, action: &CombatAction) -> 
             ex.ev.push(Event::Ready { player, ready: *r });
         }
         CombatAction::Raise { ally, discard } => ex.raise(player, *ally, *discard)?,
+        CombatAction::Pass { card, to } => ex.pass(player, *card, *to)?,
         CombatAction::UsePotion { slot, target } => ex.use_potion(player, *slot, *target)?,
     }
     ex.check_end();
@@ -345,6 +346,12 @@ impl<'a> Exec<'a> {
                 if !e.alive {
                     return false;
                 }
+                // Koschei remembers who struck at the chain of his death
+                let chain = e.flags.contains_key("chain");
+                if let (true, Some(UnitRef::Hero(i))) = (chain, src) {
+                    *self.s.heroes[i as usize].flags.entry("chain_dmg".into()).or_insert(0) += d;
+                }
+                let e = &mut self.s.enemies[idx];
                 // the hare: the first attack against it each round finds only air
                 let d = if attack && e.flags.contains_key("dodge") && !e.flags.contains_key("turn_dodged") {
                     e.flags.insert("turn_dodged".into(), 1);
@@ -756,6 +763,24 @@ impl<'a> Exec<'a> {
         let card = h.hand.remove(pos);
         h.discard.push(card);
         self.revive(ally, 25, Some(p));
+        Ok(())
+    }
+
+    fn pass(&mut self, p: u8, card: u32, to: u8) -> Result<(), ActionError> {
+        let h = &self.s.heroes[p as usize];
+        let pos = h.hand.iter().position(|c| c.uid == card).ok_or(ActionError::NoSuchCard)?;
+        let passable = self.c.cards.get(&h.hand[pos].def).is_some_and(|d| d.keywords.contains(&Keyword::Passable));
+        if !passable || to == p || !self.s.hero(to).is_some_and(|a| !a.downed) {
+            return Err(ActionError::CannotPass);
+        }
+        if h.energy < 1 {
+            return Err(ActionError::NotEnoughEnergy);
+        }
+        let h = self.hero(p);
+        h.energy -= 1;
+        let card = h.hand.remove(pos);
+        self.ev.push(Event::Passed { from: p, to, card: card.def.clone() });
+        self.hero(to).hand.push(card);
         Ok(())
     }
 
@@ -1293,7 +1318,8 @@ impl<'a> Exec<'a> {
             let step = self.s.enemies[idx].step;
             // second phase: once worn down far enough, a boss changes its ways for good
             let (hp, max) = (self.s.enemies[idx].hp, self.s.enemies[idx].max_hp);
-            if !d.phase2.is_empty() && hp * 100 <= max * d.phase2_at && !self.s.enemies[idx].flags.contains_key("phase2") {
+            let risen = self.s.enemies[idx].flags.contains_key("risen");
+            if !d.phase2.is_empty() && (hp * 100 <= max * d.phase2_at || risen) && !self.s.enemies[idx].flags.contains_key("phase2") {
                 self.s.enemies[idx].flags.insert("phase2".into(), step as i32);
                 let enemy = self.s.enemies[idx].uid;
                 self.ev.push(Event::Phase2 { enemy });
@@ -1305,7 +1331,16 @@ impl<'a> Exec<'a> {
             };
             // a hero under Likho's eye draws every aimed blow
             let marked = self.s.heroes.iter().find(|h| !h.downed && h.flags.contains_key("marked")).map(|h| h.slot);
-            let target = if d.moves[mv].targeted { marked.or_else(|| self.s.rng.pick(&standing).copied()) } else { None };
+            // Koschei goes for whoever holds his needle, else whoever hurt the chain most
+            let hunted = if self.s.enemies[idx].flags.contains_key("hunter") {
+                let live = || self.s.heroes.iter().filter(|h| !h.downed);
+                let holder = live().find(|h| h.hand.iter().any(|x| x.def == "koschei_needle")).map(|h| h.slot);
+                let worst = live().filter(|h| h.flags.get("chain_dmg").copied().unwrap_or(0) > 0).max_by_key(|h| (h.flags["chain_dmg"], std::cmp::Reverse(h.slot))).map(|h| h.slot);
+                holder.or(worst)
+            } else {
+                None
+            };
+            let target = if d.moves[mv].targeted { marked.or(hunted).or_else(|| self.s.rng.pick(&standing).copied()) } else { None };
             let e = &mut self.s.enemies[idx];
             e.intent = Some(Intent { mv, target });
             let enemy = e.uid;

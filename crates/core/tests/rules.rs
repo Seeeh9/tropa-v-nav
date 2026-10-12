@@ -1206,3 +1206,61 @@ fn maras_winter_lasts_while_her_crown_stands() {
     assert_eq!(s.heroes[0].hand.len(), 5);
     assert!(!s.heroes[0].flags.contains_key("frozen"));
 }
+
+#[test]
+fn koschei_hunts_whoever_hurt_the_chain_most() {
+    let c = content();
+    let party = [hero("t_plain", &[]), hero("t_plain", &["t_hit"; 5]), hero("t_plain", &["t_hit"; 5])];
+    let (mut s, _) = start(&c, &party, &ids(&["koschei", "death_oak"]), 7);
+    let oak = foe(&s, 1);
+    play(&c, &mut s, 1, "t_hit", Some(oak));
+    play(&c, &mut s, 2, "t_hit", Some(oak));
+    play(&c, &mut s, 2, "t_hit", Some(oak));
+    for _ in 0..3 {
+        end_round(&c, &mut s);
+        if let Some(t) = s.enemies[0].intent.as_ref().unwrap().target {
+            assert_eq!(t, 2);
+        }
+    }
+}
+
+#[test]
+fn the_needle_goes_from_hand_to_hand_and_koschei_follows_it() {
+    let c = content();
+    let party = [hero("t_plain", &["koschei_needle"]), hero("t_plain", &[])];
+    let (mut s, _) = start(&c, &party, &ids(&["koschei", "dummy"]), 7);
+    s.enemies[0].flags.insert("risen".into(), 1);
+    let uid = s.heroes[0].hand[0].uid;
+    assert_eq!(apply(&c, &mut s, 0, &CombatAction::Pass { card: uid, to: 0 }), Err(ActionError::CannotPass));
+    apply(&c, &mut s, 0, &CombatAction::Pass { card: uid, to: 1 }).unwrap();
+    assert_eq!(s.heroes[0].energy, 2);
+    assert!(s.heroes[1].hand.iter().any(|x| x.uid == uid));
+    // he rises, calls two guards, and from then on aims at the holder
+    end_round(&c, &mut s);
+    assert_eq!(s.living_enemies().filter(|e| e.def == "koschei_guard").count(), 0);
+    end_round(&c, &mut s);
+    assert_eq!(s.living_enemies().filter(|e| e.def == "koschei_guard").count(), 2);
+    assert_eq!(s.enemies[0].intent.as_ref().unwrap().target, Some(1), "the needle is retained in hand 1");
+    apply(&c, &mut s, 1, &CombatAction::Pass { card: uid, to: 0 }).unwrap();
+    end_round(&c, &mut s);
+}
+
+#[test]
+fn only_the_needle_can_be_handed_over() {
+    let (c, mut s) = duo(&["t_block"], &[], &["dummy"]);
+    let uid = s.heroes[0].hand[0].uid;
+    assert_eq!(apply(&c, &mut s, 0, &CombatAction::Pass { card: uid, to: 1 }), Err(ActionError::CannotPass));
+}
+
+#[test]
+fn a_lone_hero_faces_a_shorter_chain() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit_all"; 5])], &ids(&["koschei", "death_duck"]), 7);
+    s.enemies[1].flags.remove("flying");
+    s.enemies[1].hp = 1;
+    play(&c, &mut s, 0, "t_hit_all", None);
+    let egg = s.living_enemies().find(|e| e.def == "death_egg_solo").expect("the thin-shelled egg");
+    assert_eq!(egg.block, 20);
+    let enc = c.encounters.values().find(|e| e.id == "a4_koschei").unwrap();
+    assert_eq!(enc.solo, ids(&["koschei", "death_oak_chest"]));
+}

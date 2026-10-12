@@ -281,3 +281,4 @@ trait-asleep = Asleep
 trait-charmed = Charmed
 trait-frozen = Cards frozen
 trait-winter = Winter
+error-CannotPass = That card cannot be handed over

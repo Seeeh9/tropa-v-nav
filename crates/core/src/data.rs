@@ -18,7 +18,8 @@ data_enum!(CardType { Attack, Skill, Power, Herb, Curse, Status });
 data_enum!(Rarity { Starter, Common, Uncommon, Rare, Special });
 data_enum!(
     /// `Coop` cards only show up in rewards with 2+ players.
-    Keyword { Exhaust, Retain, Ethereal, Unplayable, Coop }
+    /// `Passable` cards can be handed to an ally for 1 Energy.
+    Keyword { Exhaust, Retain, Ethereal, Unplayable, Coop, Passable }
 );
 data_enum!(
     /// What the player has to point a card at.
@@ -417,6 +418,9 @@ pub struct EncounterDef {
     pub act: u8,
     pub kind: EncounterKind,
     pub enemies: Vec<Id>,
+    /// Faced instead of `enemies` by a lone hero.
+    #[serde(default)]
+    pub solo: Vec<Id>,
     /// Joins with 3 players (doc: +0-1), rolled 50/50.
     #[serde(default)]
     pub extra3: Vec<Id>,
@@ -633,7 +637,7 @@ impl Content {
             }
         }
         for enc in self.encounters.values() {
-            for e in enc.enemies.iter().chain(&enc.extra3).chain(&enc.extra4) {
+            for e in enc.enemies.iter().chain(&enc.solo).chain(&enc.extra3).chain(&enc.extra4) {
                 if !self.enemies.contains_key(e) {
                     bad.push(format!("{}: unknown enemy `{e}`", enc.id));
                 }

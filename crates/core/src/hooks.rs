@@ -114,6 +114,23 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 e.hp = (e.max_hp * 2 / 5).max(1);
             }
         }
+        // the duck falls and the egg drops out of it; a lone hero faces a thinner shell
+        "hatch_egg" => {
+            let def: Id = if ex.s.heroes.len() == 1 { "death_egg_solo".into() } else { "death_egg".into() };
+            if let Some(uid) = ex.spawn(&def) {
+                ex.ev.push(Event::Summoned { enemy: uid, def });
+            }
+        }
+        // Koschei leaves his throne and calls his guard: two of them, one against a lone hero
+        "koschei_rise" => {
+            let n = if ex.s.heroes.len() == 1 { 1 } else { 2 };
+            let def: Id = "koschei_guard".into();
+            for _ in 0..n {
+                if let Some(uid) = ex.spawn(&def) {
+                    ex.ev.push(Event::Summoned { enemy: uid, def: def.clone() });
+                }
+            }
+        }
         // the duck tires and settles for a round, then takes wing again
         "duck_land" | "duck_fly" => {
             let UnitRef::Enemy(uid) = ctx.src else { return };

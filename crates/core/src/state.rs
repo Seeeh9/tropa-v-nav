@@ -157,6 +157,8 @@ pub enum CombatAction {
     Ready(bool),
     /// Spend energy and discard a card to raise a downed ally.
     Raise { ally: u8, discard: u32 },
+    /// Hand a passable card (Koschei's needle) to a standing ally for 1 Energy.
+    Pass { card: u32, to: u8 },
     /// Drink the potion in this slot, or throw it at the target.
     UsePotion { slot: u8, target: Option<UnitRef> },
 }
@@ -171,6 +173,8 @@ pub enum ActionError {
     NotEnoughEnergy,
     BadTarget,
     NotDowned,
+    /// Only some cards can be handed over, and only to a standing ally.
+    CannotPass,
     NoSuchPotion,
     /// Wrapped in the serpent's coils: no attacks until it lets go.
     Coiled,
@@ -213,6 +217,7 @@ pub enum Event {
     HerbAdded { player: u8, herb: Id },
     Brewed { player: u8, recipe: Id },
     PotionUsed { player: u8, potion: Id, target: Option<UnitRef> },
+    Passed { from: u8, to: u8, card: Id },
     /// An enemy passed into its second phase.
     Phase2 { enemy: u32 },
     Shifted { player: u8, form: Form },

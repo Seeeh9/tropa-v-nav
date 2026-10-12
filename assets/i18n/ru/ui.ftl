@@ -281,3 +281,4 @@ trait-asleep = Спит
 trait-charmed = Очарован
 trait-frozen = Карты замёрзли
 trait-winter = Зима
+error-CannotPass = Эту карту так не передать

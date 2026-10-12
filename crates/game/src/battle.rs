@@ -1165,6 +1165,11 @@ fn on_drop(
         if let UnitRef::Hero(ally) = unit.unit {
             outbox.0.push(CombatAction::Raise { ally, discard: w.uid });
         }
+    } else if let (true, UnitRef::Hero(to)) = (view.has(Keyword::Passable), unit.unit) {
+        // the needle goes from hand to hand
+        if to != session.me {
+            outbox.0.push(CombatAction::Pass { card: w.uid, to });
+        }
     } else if view.target != CardTarget::None {
         outbox.0.push(CombatAction::Play { card: w.uid, target: Some(unit.unit) });
     }
@@ -1336,6 +1341,13 @@ fn cue_effects(
                     // an aimed card flies to its target; a sweeping one to the middle of the other side
                     let to = target.and_then(|t| body(t)).unwrap_or(Vec2::new(if kind == Some(CardType::Attack) { 1450.0 } else { from.x }, from.y - 150.0));
                     ghost(&mut commands, from, to, l10n.card_name(card, *upgraded), theme::hero_color(&hero));
+                }
+            }
+            Event::Passed { from, to, card } => {
+                play(UnitRef::Hero(*from), Anim::Cast);
+                play(UnitRef::Hero(*to), Anim::Buffed);
+                if let (Some(a), Some(b)) = (body(UnitRef::Hero(*from)), body(UnitRef::Hero(*to))) {
+                    ghost(&mut commands, a, b, l10n.card_name(card, false), theme::BONE);
                 }
             }
             Event::PotionUsed { player, potion, target } => {

@@ -430,3 +430,5 @@ chronicle-met = Нечисть: встречено { $n } из { $all }
 chronicle-runs = Забегов: { $runs }  ·  побед: { $wins }
 chronicle-won = { $hero }: выход из Нави на рассвет  ·  Круг { $circle }
 chronicle-fell = { $hero }: гибель в акте { $act }, пройдено этажей: { $floors }  ·  Круг { $circle }
+building-shrine = Капище
+building-shrine-desc = В лобби можно выбрать другую стартовую реликвию героя: по одной новой за уровень.

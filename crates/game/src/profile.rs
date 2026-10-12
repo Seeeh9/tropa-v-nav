@@ -186,8 +186,8 @@ impl Profile {
 }
 
 /// Village buildings and how many levels each has. Only the ones that already do something
-/// are for sale; the palisade, shrine and guest hall of the design wait for their content.
-pub const BUILDINGS: &[(&str, u8)] = &[("smithy", 2), ("hut", 2), ("tavern", 2), ("graveyard", 1)];
+/// are for sale; the palisade and guest hall of the design wait for their art.
+pub const BUILDINGS: &[(&str, u8)] = &[("smithy", 2), ("hut", 2), ("tavern", 2), ("shrine", 2), ("graveyard", 1)];
 
 /// Writes every enemy the player meets into the bestiary, once per fight.
 /// Runs the autopilot played, and dev shortcuts, leave no trace.

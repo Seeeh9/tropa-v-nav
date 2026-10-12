@@ -98,12 +98,16 @@ pub struct Unlocks {
     pub omen_tier: u8,
     /// Hero level of each player, in slot order: uncommon cards from 2, rare from 4.
     pub hero_levels: Vec<u32>,
+    /// Which starting relic each player took, in slot order: 0 is the hero's own,
+    /// 1 and 2 are the shrine's alternatives.
+    #[serde(default)]
+    pub starters: Vec<u8>,
 }
 
 impl Unlocks {
     /// Everything open: tests, the simulator and dev shortcuts.
     pub fn all(players: usize) -> Unlocks {
-        Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![10; players] }
+        Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![10; players], starters: vec![] }
     }
 
     fn relic_ok(&self, rarity: Rarity) -> bool {
@@ -351,13 +355,17 @@ impl Run {
         let mut rng = Rng::new(seed);
         let circle_rules = Circle(circle);
         let mut players = Vec::new();
-        for h in heroes {
+        for (slot, h) in heroes.iter().enumerate() {
             let d = c.heroes.get(h)?;
+            let relic = match unlocks.starters.get(slot).copied().unwrap_or(0) {
+                0 => &d.relic,
+                k => d.alt_relics.get(k as usize - 1).filter(|id| c.relics.contains_key(*id)).unwrap_or(&d.relic),
+            };
             let mut deck: Vec<(Id, bool)> = d.deck.iter().map(|id| (id.clone(), false)).collect();
             if circle_rules.starts_with_toska() && c.cards.contains_key("toska") {
                 deck.push(("toska".into(), false));
             }
-            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![d.relic.clone()], potions: vec![], falls: 0, removals: 0 });
+            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, removals: 0 });
         }
         let map = generate_map(&mut rng, circle_rules);
         let n = players.len();

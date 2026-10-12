@@ -292,3 +292,26 @@ fn a_saved_solo_run_resumes_where_it_stopped() {
     }
     panic!("the resumed run never ended");
 }
+
+#[test]
+fn a_chosen_starting_relic_reaches_the_run() {
+    let c = content();
+    let mut hub = Hub::default();
+    hub.nodes.push(Node::host(1, "host"));
+    hub.nodes.push(Node::join(2, "p2", 1));
+    hub.pump(&c);
+    hub.node(1).pick_hero(Some("bogatyr".into()), 10);
+    hub.node(2).pick_hero(Some("volhv".into()), 10);
+    hub.node(2).pick_starter(1);
+    hub.node(1).pick_starter(7);
+    hub.pump(&c);
+    assert_eq!(hub.node(2).lobby.players[0].starter, 2, "clamped to what a shrine can offer");
+    hub.node(1).set_ready(true);
+    hub.node(2).set_ready(true);
+    hub.pump(&c);
+    assert!(hub.node(1).start(&c, 5, (2, 2, 2)));
+    hub.pump(&c);
+    let run = hub.node(2).state.clone().unwrap();
+    assert_eq!(run.players[0].relics, vec!["bog_alt_brother_bracelet".to_string()]);
+    assert_eq!(run.players[1].relics, vec!["vol_alt_carved_bone".to_string()]);
+}

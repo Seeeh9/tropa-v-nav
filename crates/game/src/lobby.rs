@@ -259,6 +259,30 @@ fn draw_lobby(
             }
         });
 
+        // the shrine's choice: which relic to start with
+        let shrine = profile.building("shrine").min(2);
+        if let (Some(m), true) = (mine, shrine > 0) {
+            if let Some(def) = m.hero.as_ref().and_then(|h| db.0.heroes.get(h)) {
+                p.spawn((Node { column_gap: px(12), ..default() }, Pickable::IGNORE)).with_children(|row| {
+                    let choices = std::iter::once(&def.relic).chain(def.alt_relics.iter().take(shrine as usize));
+                    for (k, relic) in choices.enumerate() {
+                        let picked = m.starter as usize == k;
+                        let base = if picked { theme::SWAMP } else { theme::PEAT };
+                        row.spawn((
+                            Button,
+                            Hovered::default(),
+                            Btn(base),
+                            Node { width: px(540), padding: UiRect::axes(px(12), px(8)), border: UiRect::all(px(2)), ..default() },
+                            BackgroundColor(base),
+                            BorderColor::all(if picked { theme::BONE } else { Color::srgb(0.42, 0.33, 0.22) }),
+                            children![theme::text(format!("{}\n{}", l10n.t(&format!("relic-{relic}")), l10n.t(&format!("relic-{relic}-desc"))), &fonts.body, 17.0, theme::BONE)],
+                            observe(move |_: On<Activate>, mut net: ResMut<Net>| net.node.pick_starter(k as u8)),
+                        ));
+                    }
+                });
+            }
+        }
+
         p.spawn((Node { column_gap: px(18), margin: UiRect::top(px(18)), ..default() }, Pickable::IGNORE)).with_children(|row| {
             let ready = mine.is_some_and(|m| m.ready);
             row.spawn((

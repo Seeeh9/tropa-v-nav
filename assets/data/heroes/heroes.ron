@@ -1,7 +1,7 @@
 // Шесть героев, раздел 3 дизайн-документа. Стартовая колода у всех — 10 карт.
 [
     (
-        id: "bogatyr", max_hp: 85, mechanic: Valor, relic: "father_amulet",
+        id: "bogatyr", max_hp: 85, mechanic: Valor, relic: "father_amulet", alt_relics: ["bog_alt_whetted_mace", "bog_alt_brother_bracelet"],
         deck: [
             "bogatyr_strike", "bogatyr_strike", "bogatyr_strike", "bogatyr_strike",
             "bogatyr_defend", "bogatyr_defend", "bogatyr_defend", "bogatyr_defend",
@@ -9,7 +9,7 @@
         ],
     ),
     (
-        id: "vorozheya", max_hp: 70, mechanic: Curse, relic: "motanka_doll",
+        id: "vorozheya", max_hp: 70, mechanic: Curse, relic: "motanka_doll", alt_relics: ["vor_alt_raven_claw", "vor_alt_tear_vial"],
         deck: [
             "vor_whisper", "vor_whisper", "vor_whisper", "vor_whisper",
             "vor_defend", "vor_defend", "vor_defend", "vor_defend",
@@ -17,7 +17,7 @@
         ],
     ),
     (
-        id: "volhv", max_hp: 72, mechanic: Runes, relic: "thunder_staff",
+        id: "volhv", max_hp: 72, mechanic: Runes, relic: "thunder_staff", alt_relics: ["vol_alt_carved_bone", "vol_alt_wax_tablet"],
         deck: [
             "vol_staff", "vol_staff", "vol_staff", "vol_staff",
             "vol_defend", "vol_defend", "vol_defend", "vol_defend",
@@ -25,7 +25,7 @@
         ],
     ),
     (
-        id: "volkolak", max_hp: 80, mechanic: Moon, relic: "fang_on_cord",
+        id: "volkolak", max_hp: 80, mechanic: Moon, relic: "fang_on_cord", alt_relics: ["wolf_alt_bitten_coin", "wolf_alt_wolf_berry"],
         deck: [
             "wolf_knife", "wolf_knife", "wolf_knife", "wolf_knife",
             "wolf_dodge", "wolf_dodge", "wolf_dodge", "wolf_dodge",
@@ -33,7 +33,7 @@
         ],
     ),
     (
-        id: "znaharka", max_hp: 68, mechanic: Brew, relic: "birch_pot",
+        id: "znaharka", max_hp: 68, mechanic: Brew, relic: "birch_pot", alt_relics: ["zn_alt_herb_knife", "zn_alt_herb_pouch"],
         deck: [
             "zn_sickle", "zn_sickle", "zn_sickle",
             "zn_defend", "zn_defend", "zn_defend",
@@ -41,7 +41,7 @@
         ],
     ),
     (
-        id: "skomoroh", max_hp: 70, mechanic: Masks, relic: "jingle_bells",
+        id: "skomoroh", max_hp: 70, mechanic: Masks, relic: "jingle_bells", alt_relics: ["sk_alt_fools_cap", "sk_alt_bear_tooth"],
         deck: [
             "sk_dance", "sk_dance", "sk_dance",
             "sk_defend", "sk_defend", "sk_defend",

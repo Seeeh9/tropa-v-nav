@@ -30,4 +30,17 @@
         id: "jingle_bells", rarity: Starter, hero: "skomoroh",
         passives: [(on: MaskChanged, effects: [OncePerTurn("bells", [Draw(N(1))])])],
     ),
+    // ---- Капище: другие стартовые реликвии, по две на героя ----
+    (id: "bog_alt_whetted_mace", rarity: Starter, hero: "bogatyr", passives: [(on: CombatStart, effects: [Apply(Valor, N(3), Me)])]),
+    (id: "bog_alt_brother_bracelet", rarity: Starter, hero: "bogatyr", passives: [(on: TurnStart, effects: [Once("bog_alt_bracelet", [Block(N(4), AllFriends), Draw(N(1))])])]),
+    (id: "vor_alt_raven_claw", rarity: Starter, hero: "vorozheya", passives: [(on: CombatStart, effects: [Apply(Hex, N(2), AllFoes)])]),
+    (id: "vor_alt_tear_vial", rarity: Starter, hero: "vorozheya", passives: [(on: Hurt, effects: [Once("vor_alt_vial", [Heal(N(6), Me)])])]),
+    (id: "vol_alt_carved_bone", rarity: Starter, hero: "volhv", passives: [(on: CombatStart, effects: [Rune(Thunder, Me)])]),
+    (id: "vol_alt_wax_tablet", rarity: Starter, hero: "volhv", passives: [(on: TurnStart, effects: [Once("vol_alt_tablet", [Draw(N(2))])])]),
+    (id: "wolf_alt_bitten_coin", rarity: Starter, hero: "volkolak", passives: [(on: Kill, effects: [Heal(N(2), Me)])]),
+    (id: "wolf_alt_wolf_berry", rarity: Starter, hero: "volkolak", passives: [(on: CombatStart, effects: [Apply(Bleed, N(2), AllFoes)])]),
+    (id: "zn_alt_herb_knife", rarity: Starter, hero: "znaharka", passives: [(on: CombatStart, effects: [Herb("wormwood")])]),
+    (id: "zn_alt_herb_pouch", rarity: Starter, hero: "znaharka", passives: [(on: TurnEnd, effects: [Once("zn_alt_pouch", [Heal(N(3), AllFriends)])])]),
+    (id: "sk_alt_fools_cap", rarity: Starter, hero: "skomoroh", passives: [(on: CombatStart, effects: [Mask(Goat), Block(N(4), Me)])]),
+    (id: "sk_alt_bear_tooth", rarity: Starter, hero: "skomoroh", passives: [(on: CombatStart, effects: [Mask(Bear)])]),
 ]

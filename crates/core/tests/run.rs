@@ -498,7 +498,7 @@ fn report_endless_fights() {
 #[test]
 fn a_bare_village_offers_only_the_common_shelf() {
     let c = content();
-    let bare = Unlocks { relic_tier: 0, potion_tier: 0, omen_tier: 0, hero_levels: vec![1] };
+    let bare = Unlocks { relic_tier: 0, potion_tier: 0, omen_tier: 0, hero_levels: vec![1], starters: vec![] };
     for seed in 0..30 {
         let mut run = Run::new_with(&c, &["bogatyr".to_string()], seed, 0, bare.clone()).unwrap();
         run.force_stage(&c, NodeKind::Shop);
@@ -523,7 +523,7 @@ fn hero_level_opens_the_better_cards() {
     let seen = |level: u32| -> std::collections::BTreeSet<Rarity> {
         let mut out = std::collections::BTreeSet::new();
         for seed in 0..40 {
-            let unlocks = Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![level] };
+            let unlocks = Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![level], starters: vec![] };
             let mut run = Run::new_with(&c, &["volhv".to_string()], seed, 0, unlocks).unwrap();
             run.force_stage(&c, NodeKind::Shop);
             let Stage::Shop { stock, .. } = &run.stage else { panic!() };
@@ -611,7 +611,8 @@ fn two_hundred_and_ten_relics_fifteen_for_each_hero() {
     let c = content();
     assert!(c.relics.len() >= 210, "{}", c.relics.len());
     for hero in ["bogatyr", "vorozheya", "volhv", "volkolak", "znaharka", "skomoroh"] {
-        assert_eq!(c.relics.values().filter(|r| r.hero == hero).count(), 15, "{hero}");
+        // fifteen to find, plus the two the shrine lets the hero start with instead
+        assert_eq!(c.relics.values().filter(|r| r.hero == hero).count(), 17, "{hero}");
     }
     assert_eq!(c.relics.values().filter(|r| r.pool == RelicPool::Shop).count(), 10);
     assert_eq!(c.relics.values().filter(|r| r.pool == RelicPool::Boss).count(), 12);
@@ -670,4 +671,22 @@ fn the_pedlar_now_has_wares_for_any_hero() {
     let Stage::Shop { stock, .. } = &run.stage else { panic!() };
     let neutral = stock[0].cards.iter().flatten().filter(|(id, _)| c.cards[id].hero.is_empty()).count();
     assert_eq!(neutral, 2);
+}
+
+#[test]
+fn the_shrine_lets_a_hero_start_with_another_relic() {
+    let c = content();
+    for hero in c.heroes.values().filter(|h| !h.id.starts_with("t_")) {
+        assert_eq!(hero.alt_relics.len(), 2, "{}", hero.id);
+        for id in &hero.alt_relics {
+            assert!(c.relics.get(id).is_some_and(|r| r.rarity == Rarity::Starter && r.hero == hero.id), "{id}");
+        }
+    }
+    let mut unlocks = Unlocks::all(3);
+    unlocks.starters = vec![2, 0, 9];
+    let heroes = ["bogatyr".to_string(), "volhv".to_string(), "znaharka".to_string()];
+    let run = Run::new_with(&c, &heroes, 1, 0, unlocks).unwrap();
+    assert_eq!(run.players[0].relics, ids(&["bog_alt_brother_bracelet"]));
+    assert_eq!(run.players[1].relics, ids(&["thunder_staff"]));
+    assert_eq!(run.players[2].relics, ids(&["birch_pot"]), "a choice that does not exist falls back to the hero's own");
 }

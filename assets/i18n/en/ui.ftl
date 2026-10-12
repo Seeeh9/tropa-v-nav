@@ -430,3 +430,5 @@ chronicle-met = Unclean things: { $n } of { $all } met
 chronicle-runs = Runs: { $runs }  ·  wins: { $wins }
 chronicle-won = { $hero } walked out of Nav at dawn  ·  Circle { $circle }
 chronicle-fell = { $hero } fell in act { $act } after { $floors } floors  ·  Circle { $circle }
+building-shrine = The Shrine
+building-shrine-desc = In the lobby you may pick another starting relic for your hero: one more per level.

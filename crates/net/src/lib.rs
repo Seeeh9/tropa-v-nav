@@ -25,6 +25,9 @@ pub struct LobbyPlayer {
     /// The player's level with that hero; it decides which of their cards may turn up.
     #[serde(default)]
     pub level: u32,
+    /// Which starting relic they chose: 0 the hero's own, 1 or 2 the shrine's.
+    #[serde(default)]
+    pub starter: u8,
     pub ready: bool,
     pub connected: bool,
 }
@@ -68,6 +71,7 @@ pub enum Msg {
     Lobby(Lobby),
     /// A hero and the player's level with them.
     PickHero(Option<Id>, u32),
+    PickStarter(u8),
     SetReady(bool),
     /// Host -> everyone: the run begins from this exact setup.
     Start(StartInfo),
@@ -136,7 +140,7 @@ impl Node {
     pub fn host(me: Peer, name: &str) -> Node {
         let mut node = Node::blank(me, name);
         node.lobby.host = me;
-        node.lobby.players.push(LobbyPlayer { peer: me, name: name.into(), hero: None, level: 1, ready: false, connected: true });
+        node.lobby.players.push(LobbyPlayer { peer: me, name: name.into(), hero: None, level: 1, starter: 0, ready: false, connected: true });
         node
     }
 
@@ -204,6 +208,14 @@ impl Node {
         }
     }
 
+    pub fn pick_starter(&mut self, starter: u8) {
+        if self.is_host() {
+            self.host_starter(self.me, starter);
+        } else {
+            self.out.push((To::One(self.lobby.host), Msg::PickStarter(starter)));
+        }
+    }
+
     pub fn set_ready(&mut self, ready: bool) {
         if self.is_host() {
             self.host_ready(self.me, ready);
@@ -225,6 +237,16 @@ impl Node {
             p.hero = hero;
             p.level = level.clamp(1, 10);
             p.ready = false;
+            self.broadcast_lobby();
+        }
+    }
+
+    fn host_starter(&mut self, peer: Peer, starter: u8) {
+        if self.lobby.started {
+            return;
+        }
+        if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == peer) {
+            p.starter = starter.min(2);
             self.broadcast_lobby();
         }
     }
@@ -264,7 +286,7 @@ impl Node {
         let heroes: Option<Vec<Id>> = self.lobby.players.iter().map(|p| p.hero.clone().filter(|h| c.heroes.contains_key(h))).collect();
         let Some(heroes) = heroes else { return false };
         self.lobby.started = true;
-        let unlocks = Unlocks { relic_tier: village.0, potion_tier: village.1, omen_tier: village.2, hero_levels: self.lobby.players.iter().map(|p| p.level.max(1)).collect() };
+        let unlocks = Unlocks { relic_tier: village.0, potion_tier: village.1, omen_tier: village.2, hero_levels: self.lobby.players.iter().map(|p| p.level.max(1)).collect(), starters: self.lobby.players.iter().map(|p| p.starter).collect() };
         let info = StartInfo { seed, heroes, circle: self.lobby.circle, unlocks };
         self.out.push((To::All, Msg::Lobby(self.lobby.clone())));
         self.out.push((To::All, Msg::Start(info.clone())));
@@ -388,7 +410,7 @@ impl Node {
                     p.connected = true;
                     p.name = name;
                 } else if !self.lobby.started && self.lobby.players.len() < MAX_PLAYERS {
-                    self.lobby.players.push(LobbyPlayer { peer: from, name, hero: None, level: 1, ready: false, connected: true });
+                    self.lobby.players.push(LobbyPlayer { peer: from, name, hero: None, level: 1, starter: 0, ready: false, connected: true });
                 } else {
                     return;
                 }
@@ -398,6 +420,7 @@ impl Node {
                 }
             }
             Msg::PickHero(hero, level) if host => self.host_pick(from, hero, level),
+            Msg::PickStarter(starter) if host => self.host_starter(from, starter),
             Msg::SetReady(ready) if host => self.host_ready(from, ready),
             Msg::Want { seq, action } if host => {
                 let Some(slot) = self.lobby.slot_of(from) else { return };

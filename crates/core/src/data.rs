@@ -304,6 +304,9 @@ pub struct HeroDef {
     pub mechanic: Mechanic,
     pub deck: Vec<Id>,
     pub relic: Id,
+    /// Other relics the hero may start with instead, once the village shrine stands.
+    #[serde(default)]
+    pub alt_relics: Vec<Id>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

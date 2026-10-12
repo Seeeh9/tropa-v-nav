@@ -611,16 +611,28 @@ fn draw_omen(
 fn draw_end(
     mut commands: Commands,
     mut status: ResMut<NetStatus>,
-    net: Option<Res<Net>>,
+    net: Option<ResMut<Net>>,
+    mut profile: ResMut<crate::profile::Profile>,
+    mut opened: Local<Option<u8>>,
     old: Query<Entity, With<ScreenRoot>>,
     canvas: Single<Entity, With<Canvas>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
 ) {
-    let Some(net) = net else { return };
-    let Some(run) = net.node.state.as_ref() else { return };
-    let Some(root) = redraw(&mut commands, &mut status, &old, AppState::RunEnd, *canvas, theme::SOOT) else { return };
+    let Some(mut net) = net else { return };
+    let me = net.node.my_slot();
+    let Some(run) = net.node.state.clone() else { return };
     let won = run.stage == Stage::Victory;
+    if !net.booked {
+        net.booked = true;
+        // each player books the full sum on their own profile;
+        // a run the autopilot played for you (dev build) earns nothing
+        if let Some(pl) = me.and_then(|m| run.players.get(m as usize)).filter(|_| !net.bot_me) {
+            *opened = profile.record_run(&pl.hero, run.oberegi(), won, run.circle);
+        }
+        status.run_dirty = true;
+    }
+    let Some(root) = redraw(&mut commands, &mut status, &old, AppState::RunEnd, *canvas, theme::SOOT) else { return };
     let heroes = run.players.iter().map(|p| l10n.t(&format!("hero-{}", p.hero))).collect::<Vec<_>>().join(", ");
     commands.spawn((
         Node {
@@ -645,6 +657,7 @@ fn draw_end(
                 theme::DIM
             ),
             theme::text(l10n.n("end-oberegi", run.oberegi() as i32), &fonts.num, 40.0, theme::CANDLE),
+            theme::text(opened.map(|c| l10n.n("end-circle-opened", c as i32)).unwrap_or_default(), &fonts.body, 28.0, theme::ROTLIGHT),
             (
                 menu_button(l10n.t("battle-to-menu"), &fonts),
                 observe(|_: On<Activate>, mut commands: Commands, steam: Option<Res<Steam>>, net: Res<Net>, mut next: ResMut<NextState<AppState>>| {

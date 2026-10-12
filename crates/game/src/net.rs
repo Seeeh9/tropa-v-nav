@@ -40,6 +40,8 @@ pub struct Net {
     timer: f32,
     /// Dev: the local seat is played by the autopilot too.
     pub bot_me: bool,
+    /// The finished run has been written to the profile.
+    pub booked: bool,
 }
 
 impl Net {
@@ -183,7 +185,7 @@ pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str
         bot.set_ready(true);
     }
     route(db, &mut node, &mut locals);
-    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false, booked: false });
 }
 
 /// Like [`start_offline`], but picks a hero for the host too and sets out at once.
@@ -214,7 +216,7 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
-    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me, booked: false });
 }
 
 // ---- systems ----
@@ -240,7 +242,7 @@ fn steam_events(
                 let code = new_code(lobby.raw() ^ time.elapsed().as_nanos() as u64);
                 mm.set_lobby_data(lobby, GAME_KEY, GAME_VALUE);
                 mm.set_lobby_data(lobby, CODE_KEY, &code);
-                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false });
+                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);
@@ -276,7 +278,7 @@ fn steam_events(
                 if let Ok(mut set) = allowed.0.lock() {
                     set.extend(mm.lobby_members(lobby).iter().map(|m| m.raw()));
                 }
-                commands.insert_resource(Net { node: Node::join(me.raw(), &name, host.raw()), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false });
+                commands.insert_resource(Net { node: Node::join(me.raw(), &name, host.raw()), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);

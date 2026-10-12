@@ -8,6 +8,7 @@ mod l10n;
 mod lobby;
 mod menu;
 mod net;
+mod profile;
 mod run_ui;
 mod session;
 mod steam;
@@ -71,6 +72,8 @@ fn main() {
         Some(_) => Lang::Ru,
         None => steam.as_ref().ok().map(steam::ui_lang).unwrap_or(Lang::Ru),
     };
+    // offline dev builds share one local profile
+    let account = steam.as_ref().ok().map(|c| c.user().steam_id().raw()).unwrap_or(0);
     let content = match nav_core::Content::load_dir(&assets.join("data")) {
         Ok(c) => c,
         Err(e) => {
@@ -97,6 +100,7 @@ fn main() {
     .insert_resource(art::Art::new(assets.clone()))
     .insert_resource(session::Db(content))
     .insert_resource(config)
+    .insert_resource(profile::Profile::load(account))
     .init_state::<AppState>()
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(Update, fit_stage)

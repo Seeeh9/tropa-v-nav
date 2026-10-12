@@ -176,3 +176,8 @@ error-NoSuchPotion = Такого снадобья нет
 
 trait-immortal = Бессмертен, пока цела игла
 trait-last-breath = Последний вздох: { $n }
+
+lobby-circle = Круг Нави: { $n }
+end-circle-opened = Открыт Круг Нави { $n }
+menu-profile = Обереги: { $oberegi }  ·  побед: { $wins } из { $runs }  ·  открыт Круг { $circle }
+lobby-level = ур. { $n }

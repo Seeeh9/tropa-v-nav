@@ -54,6 +54,7 @@ pub fn menu_button(label: String, fonts: &Fonts) -> impl Bundle {
 
 fn enter_menu(
     mut commands: Commands,
+    profile: Res<crate::profile::Profile>,
     stage: Single<Entity, With<Stage>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
@@ -65,6 +66,17 @@ fn enter_menu(
         Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
         art.node(&assets, "bg/menu", theme::SOOT),
         Pickable::IGNORE,
+        ChildOf(*stage),
+    ));
+    commands.spawn((
+        DespawnOnExit(AppState::Menu),
+        theme::text(
+            l10n.tf("menu-profile", &[("oberegi", (profile.oberegi as i32).into()), ("wins", (profile.wins as i32).into()), ("runs", (profile.runs as i32).into()), ("circle", (profile.circle_unlocked as i32).into())]),
+            &fonts.body,
+            22.0,
+            theme::DIM,
+        ),
+        Node { position_type: PositionType::Absolute, left: px(24), bottom: px(20), ..default() },
         ChildOf(*stage),
     ));
     commands.spawn((

@@ -220,6 +220,14 @@ impl Node {
         }
     }
 
+    /// Host only: choose the Circle of Nav for the run about to start.
+    pub fn set_circle(&mut self, circle: u8) {
+        if self.is_host() && !self.lobby.started && self.lobby.circle != circle.min(10) {
+            self.lobby.circle = circle.min(10);
+            self.broadcast_lobby();
+        }
+    }
+
     /// Host only: begin the run. Returns false if the lobby isn't ready.
     pub fn start(&mut self, c: &Content, seed: u64) -> bool {
         if !self.is_host() || !self.lobby.can_start() || self.lobby.started {

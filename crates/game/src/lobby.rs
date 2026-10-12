@@ -156,6 +156,7 @@ fn draw_lobby(
     old: Query<Entity, With<LobbyRoot>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    profile: Res<crate::profile::Profile>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let Some(net) = net else {
@@ -238,10 +239,15 @@ fn draw_lobby(
                     Button,
                     Hovered::default(),
                     Btn(base),
-                    Node { width: px(210), padding: UiRect::axes(px(10), px(14)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() },
+                    Node { width: px(270), padding: UiRect::axes(px(10), px(14)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() },
                     BackgroundColor(base),
                     BorderColor::all(if picked { theme::BONE } else { theme::hero_color(hero) }),
-                    children![theme::text(l10n.t(&format!("hero-{hero}")), &fonts.title, 22.0, if taken { theme::DIM } else { theme::BONE })],
+                    children![theme::text(
+                        format!("{}  ·  {}", l10n.t(&format!("hero-{hero}")), l10n.n("lobby-level", profile.hero_level(hero) as i32)),
+                        &fonts.title,
+                        18.0,
+                        if taken { theme::DIM } else { theme::BONE }
+                    )],
                 ));
                 if !taken {
                     button.observe(move |_: On<Activate>, mut net: ResMut<Net>| {
@@ -276,6 +282,33 @@ fn draw_lobby(
                         net.node.start(&db.0, seed);
                     }),
                 ));
+            }
+        });
+        // Circle of Nav: the host may pick any circle they have opened
+        let circle = lobby.circle;
+        p.spawn((Node { column_gap: px(14), align_items: AlignItems::Center, ..default() }, Pickable::IGNORE)).with_children(|row| {
+            let max = profile.circle_unlocked;
+            let step = |row: &mut ChildSpawnerCommands, label: &str, to: Option<u8>| {
+                let base = if to.is_some() { theme::PEAT } else { theme::SOOT };
+                let mut e = row.spawn((
+                    Button,
+                    Hovered::default(),
+                    Btn(base),
+                    Node { width: px(56), height: px(48), border: UiRect::all(px(2)), align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
+                    BackgroundColor(base),
+                    BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+                    children![theme::text(label, &fonts.num, 28.0, if to.is_some() { theme::BONE } else { theme::DIM })],
+                ));
+                if let Some(to) = to {
+                    e.observe(move |_: On<Activate>, mut net: ResMut<Net>| net.node.set_circle(to));
+                }
+            };
+            if is_host {
+                step(row, "−", (circle > 0).then(|| circle - 1));
+            }
+            row.spawn(theme::text(l10n.n("lobby-circle", circle as i32), &fonts.title, 26.0, if circle > 0 { theme::FRESH_BLOOD } else { theme::BONE }));
+            if is_host {
+                step(row, "+", (circle < max).then(|| circle + 1));
             }
         });
         if is_host && !lobby.can_start() {

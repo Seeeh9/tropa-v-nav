@@ -176,3 +176,8 @@ error-NoSuchPotion = No such potion
 
 trait-immortal = Deathless while the needle is whole
 trait-last-breath = Last Breath: { $n }
+
+lobby-circle = Circle of Nav: { $n }
+end-circle-opened = Circle of Nav { $n } is open
+menu-profile = Wards: { $oberegi }  ·  wins: { $wins } of { $runs }  ·  Circle { $circle } open
+lobby-level = lv { $n }

@@ -95,3 +95,4 @@ relic-birch_pot = Берестяной котелок
 relic-birch_pot-desc = Котёл вмещает 4 травы.
 relic-jingle_bells = Бубенцы
 relic-jingle_bells-desc = Первая смена личины за ход добирает 1 карту.
+card-toska = Тоска

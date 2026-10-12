@@ -95,3 +95,4 @@ relic-birch_pot = Birch-Bark Pot
 relic-birch_pot-desc = The Cauldron holds 4 herbs.
 relic-jingle_bells = Jingle Bells
 relic-jingle_bells-desc = The first mask change each turn draws 1 card.
+card-toska = Longing

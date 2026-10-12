@@ -6,11 +6,13 @@ pub mod combat;
 pub mod data;
 mod hooks;
 pub mod rng;
+pub mod run;
 pub mod state;
 
-pub use combat::{apply, reduce, start};
+pub use combat::{apply, reduce, start, start_with};
 pub use data::*;
 pub use rng::Rng;
+pub use run::*;
 pub use state::*;
 
 impl HeroSetup {

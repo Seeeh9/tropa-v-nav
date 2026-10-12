@@ -117,6 +117,23 @@ pub struct Combat {
     /// Energy for the "Raise" action; Circle 9 bumps it to 3.
     pub raise_cost: i32,
     pub hp_scale: i32,
+    /// Enemy attack damage in percent (Circles of Nav raise it).
+    pub enemy_dmg: i32,
+}
+
+/// Per-fight rule tweaks, set by the Circle of Nav and the kind of encounter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CombatOpts {
+    pub raise_cost: i32,
+    /// Enemy HP in percent on top of the party-size scaling.
+    pub enemy_hp: i32,
+    pub enemy_dmg: i32,
+}
+
+impl Default for CombatOpts {
+    fn default() -> Self {
+        CombatOpts { raise_cost: 2, enemy_hp: 100, enemy_dmg: 100 }
+    }
 }
 
 /// What a hero brings into a fight from the run.

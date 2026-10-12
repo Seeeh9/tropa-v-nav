@@ -7,6 +7,11 @@
         in_hand_end: [LoseHp(N(2), Me)],
     ),
     (
+        // Тоска: мёртвая карта, с которой герой начинает забег на 6-м Круге Нави
+        id: "toska", kind: Curse, rarity: Special,
+        keywords: [Unplayable],
+    ),
+    (
         // Паутина (Кикимора): мёртвая карта в руке
         id: "web", kind: Status, rarity: Special,
         keywords: [Unplayable],

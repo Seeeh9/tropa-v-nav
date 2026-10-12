@@ -36,6 +36,10 @@ pub struct Exec<'a> {
 
 /// Starts a fight. `enemies` are definition ids, left to right.
 pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (Combat, Vec<Event>) {
+    start_with(c, heroes, enemies, seed, CombatOpts::default())
+}
+
+pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, opts: CombatOpts) -> (Combat, Vec<Event>) {
     let mut rng = Rng::new(seed);
     let mut next_uid = 1u32;
     let mut hs = Vec::new();
@@ -82,13 +86,14 @@ pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (C
     let mut s = Combat {
         round: 0,
         phase: Phase::Heroes,
-        hp_scale: hp_scale(hs.len()),
+        hp_scale: hp_scale(hs.len()) * opts.enemy_hp / 100,
+        enemy_dmg: opts.enemy_dmg,
         heroes: hs,
         enemies: Vec::new(),
         rng,
         next_uid,
         log: Vec::new(),
-        raise_cost: 2,
+        raise_cost: opts.raise_cost,
     };
     let mut ex = Exec { s: &mut s, c, ev: Vec::new(), depth: 0 };
     for id in enemies {
@@ -284,6 +289,9 @@ impl<'a> Exec<'a> {
             d = d.max(0);
             if beast {
                 d = d * 3 / 2;
+            }
+            if matches!(src, Some(UnitRef::Enemy(_))) {
+                d = d * self.s.enemy_dmg / 100;
             }
             if src.is_some_and(|s| self.s.status(s, S::Weak) > 0) {
                 d = d * 3 / 4;

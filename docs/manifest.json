@@ -1,0 +1,24 @@
+{
+  "note": "Generated assets. `chat` is the Gemini conversation (account maksdndz1, /u/3) that holds the image, so a file can be fetched again. status: done = cut out and in assets/; waiting = generated, not downloaded yet; rejected = failed the section-14 checklist; refused = generator declined.",
+  "assets": [
+    {"id": "heroes/bogatyr", "size": "768x1024", "status": "done", "chat": "7c9260f76dd9147d", "source": "_inbox/bogatyr_1.jpg"},
+    {"id": "heroes/vorozheya", "size": "768x1024", "status": "done", "chat": "493206f057c35779", "source": "_inbox/vorozheya_1.jpg", "notes": "eyes are not the milky cataracts the design asks for"},
+    {"id": "heroes/volhv", "size": "768x1024", "status": "done", "chat": "aba8fa210a5f35a7", "source": "_inbox/volhv_1.jpg", "notes": "to be replaced: embers and snow are baked into the sprite, runes are blue"},
+    {"id": "heroes/volhv", "take": 2, "status": "refused", "chat": "031efac1853d9019", "notes": "prompt said 'freshly cut glowing runes'"},
+    {"id": "heroes/volhv", "take": 3, "status": "rejected", "chat": "60328ea006e98634", "notes": "three hands"},
+    {"id": "heroes/volhv", "take": 4, "status": "waiting", "chat": "4d92c11ab0b77d5e", "notes": "dark red runes, no particles; looks right in the chat preview"},
+    {"id": "heroes/volhv", "take": 5, "status": "waiting", "chat": "aa2a3d3fe4ed97b4", "notes": "dark red runes, no particles; not looked at yet"},
+    {"id": "heroes/volkolak", "size": "768x1024", "status": "done", "chat": "410313b8d0fccb32", "source": "_inbox/volkolak_1.jpg"},
+    {"id": "heroes/volkolak_beast", "size": "1024x1024", "status": "done", "chat": "ccbe289f8c99572c", "source": "_inbox/volkolak_beast_1.jpg", "notes": "mirrored after cut-out so it faces right"},
+    {"id": "heroes/znaharka", "size": "768x1024", "status": "done", "chat": "d6ac885f6be54a22", "source": "_inbox/znaharka_1.jpg"},
+    {"id": "heroes/skomoroh", "size": "768x1024", "status": "done", "chat": "55d2ce27575d02ef", "source": "_inbox/skomoroh_1.jpg"},
+    {"id": "enemies/grey_wolf", "size": "512x768", "status": "done", "chat": "430ad62e6cd74e2d", "source": "_inbox/grey_wolf_1.jpg"},
+    {"id": "enemies/kikimora", "size": "512x768", "status": "done", "chat": "5c5375fcc0e5e340", "source": "_inbox/kikimora_1.jpg"},
+    {"id": "bg/act1_battle", "size": "1920x1080", "status": "done", "chat": "37b5bfd7bb4f5a3f", "source": "_inbox/act1_battle_1.jpg"},
+    {"id": "bg/menu", "size": "1920x1080", "status": "waiting", "chat": "06de77454a4d586f"},
+    {"id": "bg/act2_battle", "size": "1920x1080", "status": "waiting", "chat": "874fc036a1988523"},
+    {"id": "bg/act3_battle", "size": "1920x1080", "status": "waiting", "chat": "8291181e361fb3db"},
+    {"id": "cards/bogatyr_strike", "size": "1000x750", "status": "waiting", "chat": "a30ae54b42753546"},
+    {"id": "cards/bogatyr_defend", "size": "1000x750", "status": "waiting", "chat": "e8d8c5b570fd1f60"}
+  ]
+}

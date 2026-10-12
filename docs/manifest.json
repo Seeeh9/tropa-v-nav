@@ -1,5 +1,5 @@
 {
-  "note": "Generated assets. `chat` is the Gemini conversation (account maksdndz1, /u/3) that holds the image, so a file can be fetched again. status: done = cut out and in assets/; waiting = generated, not downloaded yet; rejected = failed the section-14 checklist; refused = generator declined. Downloads from the Gemini page fail in bursts: after a few in a row the button stops producing a file for a while; a long pause helps.",
+  "note": "Generated assets. `chat` is the Gemini conversation (account maksdndz1, /u/3) that holds the image, so a file can be fetched again. status: done = cut out and in assets/; waiting = generated, not downloaded yet; rejected = failed the section-14 checklist; refused = generator declined. The Gemini download button sometimes produces no file. The cause is not known: hidden tabs, pacing, tab discarding and page load time were each suspected and none explained the pattern.",
   "assets": [
     {
       "id": "heroes/bogatyr",
@@ -107,20 +107,23 @@
     {
       "id": "bg/menu",
       "size": "1920x1080",
-      "status": "waiting",
-      "chat": "06de77454a4d586f"
+      "status": "done",
+      "chat": "06de77454a4d586f",
+      "source": "_inbox/menu_1.jpg"
     },
     {
       "id": "bg/act2_battle",
       "size": "1920x1080",
       "status": "waiting",
-      "chat": "874fc036a1988523"
+      "chat": "874fc036a1988523",
+      "notes": "generated and visible in the chat; four download attempts produced no file"
     },
     {
       "id": "bg/act3_battle",
       "size": "1920x1080",
-      "status": "waiting",
-      "chat": "8291181e361fb3db"
+      "status": "done",
+      "chat": "8291181e361fb3db",
+      "source": "_inbox/act3_battle_1.jpg"
     },
     {
       "id": "cards/bogatyr_strike",

@@ -1,0 +1,26 @@
+// Акты 2 и 3.
+[
+    (id: "a2_upyr", act: 2, kind: Normal, enemies: ["upyr", "anchutka"], extra3: ["anchutka"], extra4: ["anchutka"]),
+    (id: "a2_drowned", act: 2, kind: Normal, enemies: ["drowned_maiden", "drowned_maiden"], extra4: ["igosha"]),
+    (id: "a2_igosha", act: 2, kind: Normal, enemies: ["igosha", "upyr"], extra4: ["anchutka"]),
+    (id: "a2_anchutki", act: 2, kind: Normal, enemies: ["anchutka", "anchutka", "anchutka"], extra3: ["anchutka"], extra4: ["swamp_light"]),
+    (id: "a2_lights", act: 2, kind: Normal, enemies: ["swamp_light", "tinyak"], extra4: ["swamp_light"]),
+    (id: "a2_tinyak", act: 2, kind: Normal, enemies: ["tinyak", "yrka"], extra4: ["anchutka"]),
+    (id: "a2_yrka", act: 2, kind: Normal, enemies: ["yrka", "drowned_maiden"], extra4: ["igosha"]),
+    (id: "a2_vurdalak", act: 2, kind: Elite, enemies: ["vurdalak_elder"], extra4: ["upyr"]),
+    (id: "a2_poludnitsa", act: 2, kind: Elite, enemies: ["poludnitsa"], extra4: ["igosha"]),
+    (id: "a2_tryasovitsa", act: 2, kind: Elite, enemies: ["tryasovitsa"], extra4: ["anchutka"]),
+    (id: "a2_bolotnik", act: 2, kind: Boss, enemies: ["bolotnik"]),
+
+    (id: "a3_souls", act: 3, kind: Normal, enemies: ["nav_soul", "nav_soul"], extra4: ["weeper"]),
+    (id: "a3_bones", act: 3, kind: Normal, enemies: ["kostomakha", "raven_upyr", "raven_upyr"], extra4: ["raven_upyr"]),
+    (id: "a3_mavka", act: 3, kind: Normal, enemies: ["mavka", "nav_soul"], extra4: ["raven_upyr"]),
+    (id: "a3_guards", act: 3, kind: Normal, enemies: ["koschei_guard", "weeper"], extra4: ["koschei_guard"]),
+    (id: "a3_volot", act: 3, kind: Normal, enemies: ["volot", "raven_upyr"], extra4: ["weeper"]),
+    (id: "a3_weepers", act: 3, kind: Normal, enemies: ["weeper", "kostomakha", "mavka"], extra4: ["nav_soul"]),
+    (id: "a3_ravens", act: 3, kind: Normal, enemies: ["raven_upyr", "raven_upyr", "raven_upyr"], extra3: ["raven_upyr"], extra4: ["weeper"]),
+    (id: "a3_sirin", act: 3, kind: Elite, enemies: ["sirin"], extra4: ["nav_soul"]),
+    (id: "a3_rider", act: 3, kind: Elite, enemies: ["black_rider"], extra4: ["koschei_guard"]),
+    (id: "a3_giant", act: 3, kind: Elite, enemies: ["volot_giant"], extra4: ["weeper"]),
+    (id: "a3_mara", act: 3, kind: Boss, enemies: ["mara"]),
+]

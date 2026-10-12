@@ -434,3 +434,32 @@ fn a_vote_omen_binds_the_whole_party_and_never_kills() {
     assert_eq!(run.players[2].hp, 1, "an omen wounds but does not kill");
     assert!(matches!(run.stage, Stage::Map { .. }));
 }
+
+/// Not a pass/fail check: prints which fights end solo autopilot runs.
+#[test]
+#[ignore]
+fn report_where_solo_runs_die() {
+    let c = content();
+    let mut deaths: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut floors: Vec<u32> = Vec::new();
+    for hero in SIX {
+        for seed in 0..40u64 {
+            let mut run = Run::new(&c, &[hero.to_string()], seed, 0).unwrap();
+            autoplay(&c, &mut run, 60_000);
+            if run.stage == Stage::Defeat {
+                let mut names: Vec<String> = run.combat.as_ref().map(|k| k.enemies.iter().map(|e| e.def.clone()).collect()).unwrap_or_default();
+                names.sort();
+                names.dedup();
+                *deaths.entry(format!("act {} {:?} {}", run.act, run.fighting.unwrap_or(NodeKind::Fight), names.join("+"))).or_insert(0) += 1;
+                floors.push(run.floors_cleared);
+            }
+        }
+    }
+    let mut rows: Vec<_> = deaths.into_iter().collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+    for (k, n) in rows.iter().take(12) {
+        println!("{n:>4}  {k}");
+    }
+    floors.sort();
+    println!("median floors cleared at death: {}", floors.get(floors.len() / 2).copied().unwrap_or(0));
+}

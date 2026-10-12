@@ -1,0 +1,112 @@
+// Акт 3. Навь. HP — для одного игрока.
+// Особые механики, которых ещё нет в примитивах, упрощены и помечены.
+[
+    (
+        // упрощено: «половина урона проходит сквозь щит» заменена прямой потерей HP
+        id: "nav_soul", hp: (50, 50),
+        moves: [
+            (id: "pass_through", intent: Attack, targeted: true, effects: [Damage(N(7), Target), LoseHp(N(5), Target)]),
+            (id: "moan", intent: Debuff, effects: [Apply(Weak, N(1), AllFoes)]),
+        ],
+        pattern: [0, 0, 1],
+    ),
+    (
+        // упрощено: «встаёт один раз с 50% HP» пока не реализовано
+        id: "kostomakha", hp: (55, 55),
+        moves: [
+            (id: "bone_blow", intent: Attack, targeted: true, effects: [Damage(N(13), Target)]),
+            (id: "rattle", intent: Defend, effects: [Block(N(12), Me)]),
+        ],
+        pattern: [0, 0, 1],
+    ),
+    (
+        // упрощено: «Очарование» (атака героя бьёт союзника) заменено Надломом и Немотой
+        id: "mavka", hp: (45, 45),
+        moves: [
+            (id: "charm", intent: Debuff, targeted: true, effects: [Apply(Weak, N(2), Target), Apply(Vulnerable, N(1), Target)]),
+            (id: "embrace", intent: Attack, targeted: true, effects: [Damage(N(12), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+    (
+        // щит 15 каждый второй ход; Пробой 16
+        id: "koschei_guard", hp: (70, 70),
+        moves: [
+            (id: "pierce", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
+            (id: "shield_up", intent: Defend, effects: [Block(N(15), Me)]),
+        ],
+        pattern: [1, 0],
+    ),
+    (
+        // медленный: тяжёлый удар 24 раз в 2 хода
+        id: "volot", hp: (90, 90),
+        moves: [
+            (id: "wind_up", intent: Unknown, effects: []),
+            (id: "heavy_blow", intent: Attack, targeted: true, effects: [Damage(N(24), Target)]),
+        ],
+        pattern: [0, 1],
+    ),
+    (
+        // усиливает других врагов, пока жива
+        id: "weeper", hp: (30, 30),
+        moves: [
+            (id: "lament", intent: Buff, effects: [Apply(Strength, N(2), OtherFriends)]),
+            (id: "keen", intent: Attack, targeted: true, effects: [Damage(N(6), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+    (
+        // упрощено: «иммунен к первому удару каждый ход» заменено щитом
+        id: "raven_upyr", hp: (20, 20),
+        moves: [
+            (id: "swoop", intent: Attack, targeted: true, effects: [Damage(N(8), Target), Block(N(6), Me)]),
+        ],
+        pattern: [0],
+    ),
+
+    // ---- элиты ----
+    (
+        // упрощено: «герои не видят намерения» пока не реализовано; Сон = Оглушение героя не делаем
+        id: "sirin", hp: (180, 180),
+        moves: [
+            (id: "song", intent: Debuff, effects: [Apply(Weak, N(2), AllFoes), Apply(Vulnerable, N(1), AllFoes)]),
+            (id: "talons", intent: Attack, targeted: true, effects: [Hits(N(9), 2, Target)]),
+            (id: "dive", intent: Attack, targeted: true, effects: [Damage(N(22), Target)]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+    (
+        // бьёт двумя атаками по разным героям (в одиночку — обе в одного)
+        id: "black_rider", hp: (200, 200),
+        moves: [
+            (id: "two_strikes", intent: AttackAll, effects: [Damage(N(13), RandomFoe), Damage(N(13), RandomFoe)]),
+            (id: "charge", intent: Attack, targeted: true, effects: [Damage(N(24), Target)]),
+            (id: "banner", intent: Buff, effects: [Apply(Strength, N(2), Me), Block(N(14), Me)]),
+        ],
+        pattern: [0, 1, 2, 0],
+    ),
+    (
+        // упрощено: «все герои сбрасывают 2 карты» заменено Немотой
+        id: "volot_giant", hp: (220, 220),
+        moves: [
+            (id: "earthquake", intent: AttackAll, effects: [Damage(N(12), AllFoes), Apply(Weak, N(1), AllFoes)]),
+            (id: "stomp", intent: Attack, targeted: true, effects: [Damage(N(28), Target)]),
+            (id: "boulder", intent: Unknown, effects: [Block(N(18), Me)]),
+        ],
+        pattern: [0, 2, 1],
+    ),
+
+    // ---- босс ----
+    (
+        // упрощено: нет «замораживает карты» и ледяного венца; зима даёт Немоту и Гниль
+        id: "mara", hp: (480, 480),
+        moves: [
+            (id: "winter_comes", intent: Debuff, effects: [Apply(Weak, N(2), AllFoes), Apply(Rot, N(2), AllFoes)]),
+            (id: "ice_scythe", intent: Attack, targeted: true, effects: [Damage(N(26), Target)]),
+            (id: "blizzard", intent: AttackAll, effects: [Damage(N(14), AllFoes)]),
+            (id: "ice_crown", intent: Defend, effects: [Block(N(30), Me), Apply(Strength, N(1), Me)]),
+        ],
+        opening: [0],
+        pattern: [1, 2, 3, 1, 2, 0],
+    ),
+]

@@ -1,0 +1,108 @@
+// Акт 2. Мёртвая деревня и болота. HP — для одного игрока.
+// Особые механики, которых ещё нет в примитивах, упрощены и помечены.
+[
+    (
+        // упрощено: по документу лечится на половину нанесённого урона; пока — лечение отдельным ходом
+        id: "upyr", hp: (45, 45),
+        moves: [
+            (id: "bloodsuck", intent: Attack, targeted: true, effects: [Damage(N(10), Target), Heal(N(5), Me)]),
+            (id: "lunge", intent: Attack, targeted: true, effects: [Damage(N(13), Target)]),
+        ],
+        pattern: [0, 1, 0],
+    ),
+    (
+        // тянет на дно: герой теряет 1 энергию (сейчас — сразу, а не в следующем ходу)
+        id: "drowned_maiden", hp: (35, 35),
+        moves: [
+            (id: "drag_under", intent: Debuff, targeted: true, effects: [Damage(N(5), Target), Apply(Weak, N(1), Target)]),
+            (id: "cold_hands", intent: Attack, targeted: true, effects: [Damage(N(11), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+    (
+        id: "igosha", hp: (20, 20),
+        moves: [
+            (id: "wail", intent: Debuff, effects: [Apply(Vulnerable, N(1), AllFoes)]),
+            (id: "nip", intent: Attack, targeted: true, effects: [Damage(N(6), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+    (
+        id: "anchutka", hp: (12, 12),
+        moves: [
+            (id: "pinch", intent: Attack, targeted: true, effects: [Damage(N(4), Target)]),
+        ],
+        pattern: [0],
+    ),
+    (
+        // через 2 хода взрывается: 12 урона всем
+        id: "swamp_light", hp: (15, 15),
+        moves: [
+            (id: "flicker", intent: Unknown, effects: []),
+            (id: "burst", intent: AttackAll, effects: [Damage(N(12), AllFoes), LoseHp(N(99), Me)]),
+        ],
+        pattern: [0, 0, 1],
+    ),
+    (
+        id: "tinyak", hp: (40, 40),
+        moves: [
+            (id: "silt", intent: Debuff, targeted: true, effects: [AddCard(card: "mire", pile: Discard, to: Target, count: 2)]),
+            (id: "mud_fist", intent: Attack, targeted: true, effects: [Damage(N(12), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+    (
+        // пьёт силу: забирает у героя 1 Силу себе
+        id: "yrka", hp: (38, 38),
+        moves: [
+            (id: "drink_strength", intent: Debuff, targeted: true, effects: [Apply(Strength, N(-1), Target), Apply(Strength, N(1), Me)]),
+            (id: "claw", intent: Attack, targeted: true, effects: [Damage(N(11), Target)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+
+    // ---- элиты ----
+    (
+        // упрощено: вместо подъёма павших врагов призывает упыря раз в несколько ходов
+        id: "vurdalak_elder", hp: (160, 160),
+        moves: [
+            (id: "raise_dead", intent: Summon, effects: [Summon("anchutka", 2)]),
+            (id: "rend", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
+            (id: "drain_all", intent: AttackAll, effects: [Damage(N(8), AllFoes), Heal(N(8), Me)]),
+        ],
+        pattern: [1, 2, 0, 1],
+    ),
+    (
+        // «Полдень» 3→0: удар 30 по всем. Оглушение переносит удар (ход пропускается, счёт не идёт)
+        id: "poludnitsa", hp: (140, 140),
+        moves: [
+            (id: "sickle", intent: Attack, targeted: true, effects: [Damage(N(14), Target)]),
+            (id: "noon", intent: AttackAll, effects: [Damage(N(30), AllFoes)]),
+        ],
+        pattern: [0, 0, 0, 1],
+    ),
+    (
+        // упрощено: «Лихорадка», переходящая между героями, заменена Гнилью и Немотой
+        id: "tryasovitsa", hp: (150, 150),
+        moves: [
+            (id: "fever", intent: Debuff, effects: [Apply(Rot, N(3), AllFoes), Apply(Weak, N(1), AllFoes)]),
+            (id: "shaking_grip", intent: Attack, targeted: true, effects: [Damage(N(15), Target)]),
+            (id: "chill", intent: Attack, targeted: true, effects: [Hits(N(6), 3, Target)]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+
+    // ---- босс ----
+    (
+        // упрощено: «затягивает двух героев в трясину» заменено сильными ударами и Немотой
+        id: "bolotnik", hp: (380, 380),
+        moves: [
+            (id: "quagmire", intent: Debuff, effects: [Apply(Weak, N(2), AllFoes), AddCard(card: "mire", pile: Discard, to: AllFoes)]),
+            (id: "pull_down", intent: Attack, targeted: true, effects: [Damage(N(20), Target)]),
+            (id: "mud_wave", intent: AttackAll, effects: [Damage(N(12), AllFoes)]),
+            (id: "sink", intent: Defend, effects: [Block(N(25), Me), Heal(N(10), Me)]),
+        ],
+        opening: [0],
+        pattern: [1, 2, 1, 3, 2, 0],
+    ),
+]

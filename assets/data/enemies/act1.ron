@@ -96,9 +96,9 @@
 
     // ---- босс ----
     (
-        id: "tree_guard", hp: (20, 20),
+        id: "tree_guard", hp: (14, 14),
         moves: [
-            (id: "root_lash", intent: Attack, targeted: true, effects: [Damage(N(5), Target)]),
+            (id: "root_lash", intent: Attack, targeted: true, effects: [Damage(N(4), Target)]),
         ],
         pattern: [0],
     ),
@@ -111,7 +111,8 @@
             (id: "branch_blow", intent: Attack, targeted: true, effects: [Damage(N(18), Target)]),
             (id: "bark", intent: Defend, effects: [Block(N(20), Me), Apply(Strength, N(1), Me)]),
         ],
+        // стражей зовёт один раз в начале и потом редко: в одиночку иначе не выстоять
         opening: [0],
-        pattern: [1, 2, 3, 2, 0],
+        pattern: [1, 2, 3, 2, 1, 2, 3, 0],
     ),
 ]

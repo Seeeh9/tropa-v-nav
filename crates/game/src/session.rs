@@ -63,6 +63,11 @@ impl Session {
         }
     }
 
+    /// A fight whose state came from the network.
+    pub fn from_state(state: Combat, me: u8) -> Session {
+        Session { shown: state.clone(), truth: state, me, bots: vec![], queue: VecDeque::new(), wait: 0.0, bot_wait: 0.6, error: None }
+    }
+
     pub fn my_hero(&self) -> &Hero {
         &self.truth.heroes[self.me as usize]
     }
@@ -199,9 +204,20 @@ fn show(shown: &mut Combat, truth: &Combat, e: &Event) {
     }
 }
 
-pub fn submit(mut session: ResMut<Session>, mut outbox: ResMut<Outbox>, db: Res<Db>, l10n: Res<crate::l10n::L10n>) {
+pub fn submit(
+    mut session: ResMut<Session>,
+    mut outbox: ResMut<Outbox>,
+    db: Res<Db>,
+    l10n: Res<crate::l10n::L10n>,
+    mut net: Option<ResMut<crate::net::Net>>,
+) {
     let me = session.me;
     for action in outbox.0.drain(..) {
+        // in a party the host decides; the result comes back as a protocol note
+        if let Some(net) = net.as_mut() {
+            net.node.submit(&db.0, action);
+            continue;
+        }
         if let Err(e) = session.act(&db.0, me, &action) {
             session.error = Some((l10n.t(&format!("error-{e:?}")), 1.6));
         }

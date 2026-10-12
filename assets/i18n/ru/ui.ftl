@@ -48,3 +48,26 @@ error-NotDowned = Союзник не на краю
 error-NoSuchCard = Карты уже нет в руке
 error-NotHeroPhase = Сейчас ходят враги
 error-NoSuchPlayer = Нет такого игрока
+
+coop-title = Собрать отряд
+coop-create = Создать лобби
+coop-join-hint = Или введите код друга:
+coop-join = Войти по коду
+coop-local = Локально: я и три бота
+coop-back = Назад
+coop-busy = Связываемся со Steam…
+coop-error-not-found = Лобби с таким кодом не найдено
+coop-error-code = В коде шесть символов
+coop-error-steam = Steam не ответил. Попробуйте ещё раз.
+
+lobby-title = Отряд у костра
+lobby-code = Код: { $code }
+lobby-host = хост
+lobby-no-hero = герой не выбран
+lobby-choosing = выбирает
+lobby-dropped = связь потеряна
+lobby-empty = свободно
+lobby-invite = Позвать друга
+lobby-start = В путь
+lobby-waiting = Ждём, пока каждый выберет героя и нажмёт «Готов».
+lobby-leave = Покинуть отряд

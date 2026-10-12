@@ -180,6 +180,7 @@ fn hand_slot(i: usize, n: usize) -> Vec2 {
 fn enter(
     mut commands: Commands,
     pending: Option<Res<PendingBattle>>,
+    existing: Option<Res<Session>>,
     db: Res<Db>,
     stage: Single<Entity, With<Stage>>,
     fonts: Res<Fonts>,
@@ -187,11 +188,20 @@ fn enter(
     art: Res<Art>,
     assets: Res<AssetServer>,
 ) {
-    let Some(pending) = pending else {
-        warn!("battle opened with nothing to fight");
-        return;
+    // a co-op fight arrives with its session already built from the host's state
+    let fresh = match (&existing, pending) {
+        (Some(_), _) => None,
+        (None, Some(pending)) => Some(Session::new(&db.0, &pending)),
+        (None, None) => {
+            warn!("battle opened with nothing to fight");
+            return;
+        }
     };
-    let session = Session::new(&db.0, &pending);
+    let session: &Session = match (&fresh, &existing) {
+        (Some(s), _) => s,
+        (None, Some(s)) => s,
+        (None, None) => return,
+    };
     let layer = || Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() };
 
     let root = commands
@@ -335,7 +345,9 @@ fn enter(
         })
         .id();
     let _ = root;
-    commands.insert_resource(session);
+    if let Some(session) = fresh {
+        commands.insert_resource(session);
+    }
     commands.remove_resource::<PendingBattle>();
 }
 
@@ -1093,7 +1105,12 @@ fn show_result(
                 BackgroundColor(theme::PEAT),
                 BorderColor::all(theme::CANDLE),
                 children![theme::text(l10n.t("battle-to-menu"), &fonts.title, 34.0, theme::BONE)],
-                observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu)),
+                observe(|_: On<Activate>, mut commands: Commands, steam: Option<Res<crate::steam::Steam>>, net: Option<Res<crate::net::Net>>, mut next: ResMut<NextState<AppState>>| {
+                    if let Some(net) = net {
+                        crate::net::leave(&mut commands, steam.as_deref(), &net);
+                    }
+                    next.set(AppState::Menu);
+                }),
             ),
         ],
     ));

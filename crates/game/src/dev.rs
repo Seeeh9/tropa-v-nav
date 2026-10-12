@@ -2,6 +2,7 @@
 //!
 //!   TROPA_AUTOSTART=<players>   skip the menu, fight at once; extra heroes are bots
 //!   TROPA_BOT_ME=1              the local hero is a bot too
+//!   TROPA_SCREEN=coop|local|host  open the party menu, a bot lobby, or a real Steam lobby
 //!   TROPA_SEED=<n>              fixed seed for that fight
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 
@@ -11,7 +12,36 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Menu), autostart).add_systems(Update, shot);
+    app.add_systems(OnEnter(AppState::Menu), (autostart, open_screen)).add_systems(Update, shot);
+}
+
+fn open_screen(
+    mut commands: Commands,
+    db: Res<Db>,
+    steam: Option<Res<crate::steam::Steam>>,
+    inbox: Option<Res<crate::net::Inbox>>,
+    mut status: ResMut<crate::net::NetStatus>,
+    mut next: ResMut<NextState<AppState>>,
+    mut done: Local<bool>,
+) {
+    let Ok(screen) = std::env::var("TROPA_SCREEN") else { return };
+    if *done {
+        return;
+    }
+    *done = true;
+    match screen.as_str() {
+        "coop" => next.set(AppState::Coop),
+        "local" => {
+            crate::net::start_local(&mut commands, &db.0, 3);
+            next.set(AppState::Lobby);
+        }
+        "host" => {
+            if let (Some(steam), Some(inbox)) = (steam, inbox) {
+                crate::net::create_lobby(&steam, &mut status, &inbox);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn autostart(mut commands: Commands, db: Res<Db>, mut next: ResMut<NextState<AppState>>, mut done: Local<bool>) {

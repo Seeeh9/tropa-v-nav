@@ -95,6 +95,10 @@ fn enter_menu(
                 }),
             ),
             (
+                menu_button(l10n.t("menu-coop"), &fonts),
+                observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Coop)),
+            ),
+            (
                 menu_button(l10n.t("menu-lang"), &fonts),
                 observe(|_: On<Activate>, mut l10n: ResMut<L10n>, art: Res<Art>, mut next: ResMut<NextState<AppState>>| {
                     *l10n = L10n::load(art.root(), l10n.lang.other());

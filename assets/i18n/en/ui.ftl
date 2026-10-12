@@ -48,3 +48,26 @@ error-NotDowned = That ally is not on the Edge
 error-NoSuchCard = That card is no longer in hand
 error-NotHeroPhase = The enemies are acting
 error-NoSuchPlayer = No such player
+
+coop-title = Gather a party
+coop-create = Create lobby
+coop-join-hint = Or enter a friend's code:
+coop-join = Join by code
+coop-local = Local: me and three bots
+coop-back = Back
+coop-busy = Talking to Steam…
+coop-error-not-found = No lobby with that code
+coop-error-code = The code has six characters
+coop-error-steam = Steam did not answer. Try again.
+
+lobby-title = The party by the fire
+lobby-code = Code: { $code }
+lobby-host = host
+lobby-no-hero = no hero chosen
+lobby-choosing = choosing
+lobby-dropped = connection lost
+lobby-empty = empty
+lobby-invite = Invite a friend
+lobby-start = Set out
+lobby-waiting = Waiting for everyone to pick a hero and press Ready.
+lobby-leave = Leave the party

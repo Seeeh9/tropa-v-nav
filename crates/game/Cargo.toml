@@ -9,6 +9,7 @@ dev = []
 
 [dependencies]
 nav_core = { path = "../core" }
+nav_net = { path = "../net" }
 bevy = { version = "0.20", default-features = false, features = ["2d", "ui", "audio", "png"] }
 steamworks = "0.13"
 serde.workspace = true

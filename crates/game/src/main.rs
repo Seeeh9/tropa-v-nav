@@ -5,7 +5,9 @@ mod battle;
 #[cfg(feature = "dev")]
 mod dev;
 mod l10n;
+mod lobby;
 mod menu;
+mod net;
 mod session;
 mod steam;
 mod theme;
@@ -24,6 +26,10 @@ pub enum AppState {
     Boot,
     NoSteam,
     Menu,
+    /// Create or join a party.
+    Coop,
+    /// Seats, heroes, ready.
+    Lobby,
     Battle,
 }
 
@@ -84,7 +90,7 @@ fn main() {
     .init_state::<AppState>()
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);

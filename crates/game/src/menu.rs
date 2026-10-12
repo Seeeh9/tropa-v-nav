@@ -200,7 +200,16 @@ fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fon
     commands.spawn((
         DespawnOnExit(AppState::Village),
         Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
-        art.node(&assets, "bg/village", theme::SOOT),
+        // the stockade is rebuilt in three stages as the palisade rises: ruin, half raised, whole
+        {
+            let stage = match profile.building("palisade") {
+                0..=1 => 0,
+                2..=3 => 1,
+                _ => 2,
+            };
+            let picture = [format!("bg/village_{stage}"), "bg/village_0".to_string(), "bg/menu".to_string()].into_iter().find(|s| art.image(&assets, s).is_some()).unwrap_or_default();
+            art.node(&assets, &picture, theme::SOOT)
+        },
         Pickable::IGNORE,
         ChildOf(*stage),
     ));

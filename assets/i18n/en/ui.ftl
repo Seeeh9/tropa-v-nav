@@ -432,3 +432,5 @@ chronicle-won = { $hero } walked out of Nav at dawn  ·  Circle { $circle }
 chronicle-fell = { $hero } fell in act { $act } after { $floors } floors  ·  Circle { $circle }
 building-shrine = The Shrine
 building-shrine-desc = In the lobby you may pick another starting relic for your hero: one more per level.
+building-palisade = The Palisade
+building-palisade-desc = The stockade is rebuilt before your eyes. It changes nothing in a run.

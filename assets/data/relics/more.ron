@@ -1,0 +1,38 @@
+// Вторая партия реликвий: общие, геройские и «реликвии рода» (действуют на весь отряд).
+[
+    // ---- общие ----
+    (id: "iron_nail", rarity: Common, passives: [(on: AttackPlayed, effects: [OncePerTurn("nail", [Damage(N(3), RandomFoe)])])]),
+    (id: "linen_bandage", rarity: Common, passives: [(on: TurnEnd, effects: [Once("bandage", [Heal(N(6), Me)])])]),
+    (id: "old_coin", rarity: Common, passives: [(on: CombatStart, effects: [Draw(N(1))])]),
+    (id: "hare_foot", rarity: Common, passives: [(on: CombatStart, effects: [Apply(Mist, N(1), Me)])]),
+    (id: "bone_whistle", rarity: Common, passives: [(on: CombatStart, effects: [Apply(Fear, N(25), AllFoes)])]),
+    (id: "ash_twig", rarity: Common, passives: [(on: Kill, effects: [Block(N(4), Me)])]),
+    (id: "copper_bell", rarity: Common, passives: [(on: CardPlayed, effects: [OncePerTurn("bell", [Block(N(2), Me)])])]),
+    (id: "garlic_string", rarity: Uncommon, passives: [(on: CombatStart, effects: [Apply(Vulnerable, N(1), AllFoes)])]),
+    (id: "smith_tongs", rarity: Uncommon, passives: [(on: TurnStart, effects: [Once("tongs", [Apply(Strength, N(2), Me)])])]),
+    (id: "widow_candle", rarity: Uncommon, passives: [(on: AllyHpLoss, effects: [OncePerTurn("candle", [Block(N(3), Me)])])]),
+    (id: "wolf_tooth_necklace", rarity: Uncommon, passives: [(on: Kill, effects: [Apply(TempStrength, N(2), Me)])]),
+    (id: "mossy_stone", rarity: Uncommon, passives: [(on: TurnEnd, effects: [Block(N(2), Me)])]),
+    (id: "firebird_feather", rarity: Rare, passives: [(on: CombatStart, effects: [Energy(N(1), Me), Draw(N(1))])]),
+    (id: "sword_kladenets", rarity: Rare, passives: [(on: CombatStart, effects: [Apply(Strength, N(2), Me)])]),
+    (id: "samobranka", rarity: Rare, passives: [(on: TurnStart, effects: [Heal(N(1), Me)])]),
+
+    // ---- геройские ----
+    (id: "bog_ancestral_horn", rarity: Uncommon, hero: "bogatyr", passives: [(on: CombatStart, effects: [Apply(Valor, N(2), Me)])]),
+    (id: "bog_split_shield", rarity: Rare, hero: "bogatyr", passives: [(on: TurnEnd, effects: [Block(N(2), AllFriends)])]),
+    (id: "vor_black_hen", rarity: Uncommon, hero: "vorozheya", passives: [(on: CombatStart, effects: [Apply(Hex, N(1), AllFoes)])]),
+    (id: "vor_grave_dirt", rarity: Rare, hero: "vorozheya", passives: [(on: TurnStart, effects: [Apply(Rot, N(1), AllFoes)])]),
+    (id: "vol_rune_stone", rarity: Uncommon, hero: "volhv", passives: [(on: CombatStart, effects: [Rune(Frost, Me)])]),
+    (id: "vol_perun_axe", rarity: Rare, hero: "volhv", passives: [(on: CombatStart, effects: [Rune(Thunder, Me)])]),
+    (id: "wolf_moon_stone", rarity: Uncommon, hero: "volkolak", passives: [(on: Shifted, effects: [Block(N(6), Me)])]),
+    (id: "wolf_alpha_pelt", rarity: Rare, hero: "volkolak", passives: [(on: Kill, effects: [Heal(N(3), Me), Draw(N(1))])]),
+    (id: "zn_mortar", rarity: Uncommon, hero: "znaharka", passives: [(on: CombatStart, effects: [Herb("wormwood")])]),
+    (id: "zn_spring_water", rarity: Rare, hero: "znaharka", passives: [(on: TurnEnd, effects: [Heal(N(1), AllFriends)])]),
+    (id: "sk_painted_mask", rarity: Uncommon, hero: "skomoroh", passives: [(on: MaskChanged, effects: [Block(N(4), Me)])]),
+    (id: "sk_bear_on_chain", rarity: Rare, hero: "skomoroh", passives: [(on: CombatStart, effects: [Mask(Bear), Apply(Strength, N(1), Me)])]),
+
+    // ---- реликвии рода ----
+    (id: "plachea", rarity: Rare, passives: [(on: AllyHpLoss, effects: [OncePerTurn("plachea", [Apply(TempStrength, N(1), AllFriends)])])]),
+    (id: "clan_banner", rarity: Rare, passives: [(on: CombatStart, effects: [Apply(TempStrength, N(1), AllFriends), Block(N(2), AllFriends)])]),
+    (id: "shared_bread", rarity: Rare, passives: [(on: TurnStart, effects: [Once("bread", [Heal(N(4), AllFriends)])])]),
+]

@@ -1,0 +1,23 @@
+// Ещё 20 снадобий: всего 30, как в разделе 5.
+[
+    (id: "oak_bark", effects: [Block(N(10), Me), Apply(Fortitude, N(1), Me)]),
+    (id: "wolfsbane", target: Enemy, effects: [Apply(Vulnerable, N(3), Target)]),
+    (id: "henbane", target: Enemy, effects: [Apply(Weak, N(3), Target)]),
+    (id: "rot_jar", target: Enemy, effects: [Apply(Rot, N(8), Target)]),
+    (id: "evil_eye_bead", target: Enemy, effects: [Apply(Hex, N(4), Target)]),
+    (id: "thunder_flask", target: Enemy, effects: [Damage(N(20), Target)]),
+    (id: "burning_pitch", effects: [Damage(N(6), AllFoes), Apply(Vulnerable, N(1), AllFoes)]),
+    (id: "kvass", effects: [Draw(N(3))]),
+    (id: "strong_kvass", effects: [Draw(N(2)), Energy(N(1), Me)]),
+    (id: "bear_fat", effects: [Apply(Thorns, N(4), Me)]),
+    (id: "holy_water", effects: [Cleanse(AllFriends)]),
+    (id: "honey_cake", target: AnyHero, effects: [Heal(N(8), Target), Block(N(6), Target)]),
+    (id: "party_broth", effects: [Heal(N(6), AllFriends)]),
+    (id: "shield_resin", effects: [Block(N(7), AllFriends)]),
+    (id: "battle_mead", effects: [Apply(TempStrength, N(3), AllFriends)]),
+    (id: "fear_smoke", effects: [Apply(Fear, N(50), AllFoes)]),
+    (id: "mist_vial", target: AnyHero, effects: [Apply(Mist, N(2), Target)]),
+    (id: "bleeding_thorn", target: Enemy, effects: [Apply(Bleed, N(5), Target)]),
+    (id: "wake_root", target: AnyHero, effects: [Energy(N(2), Target)]),
+    (id: "last_drop", target: Downed, effects: [Revive(40, Target)]),
+]

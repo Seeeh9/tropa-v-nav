@@ -70,7 +70,26 @@ pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
         }
     }
 
-    let weakest = s.living_enemies().min_by_key(|e| e.hp + e.block).map(|e| UnitRef::Enemy(e.uid));
+    // no point striking what cannot die, or what a single blow cannot reach
+    let reachable = |e: &&Enemy| !e.flags.contains_key("immortal") && !e.flags.contains_key("flying");
+    let weakest = s
+        .living_enemies()
+        .filter(reachable)
+        .min_by_key(|e| e.hp + e.block)
+        .or_else(|| s.living_enemies().filter(|e| !e.flags.contains_key("immortal")).min_by_key(|e| e.hp + e.block))
+        .or_else(|| s.living_enemies().min_by_key(|e| e.hp + e.block))
+        .map(|e| UnitRef::Enemy(e.uid));
+    // the needle ends Koschei's deathlessness: nothing matters more
+    if let Some((card, _)) = playable.iter().find(|(c, _)| c.def == "koschei_needle") {
+        return CombatAction::Play { card: card.uid, target: None };
+    }
+    // something on the wing: sweeping blows first
+    if s.living_enemies().any(|e| e.flags.contains_key("flying")) {
+        let sweep = playable.iter().find(|(_, v)| v.target == CardTarget::None && v.effects.iter().any(|e| matches!(e, Effect::Damage(_, Tgt::AllFoes) | Effect::Hits(_, _, Tgt::AllFoes))));
+        if let Some((card, _)) = sweep {
+            return CombatAction::Play { card: card.uid, target: None };
+        }
+    }
     let other = s.standing_heroes().find(|a| a.slot != slot).map(|a| UnitRef::Hero(a.slot));
     let target_for = |v: &CardView| -> Option<Option<UnitRef>> {
         match v.target {

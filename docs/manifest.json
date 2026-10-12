@@ -1,5 +1,5 @@
 {
-  "note": "Generated assets. `chat` is the Gemini conversation (account maksdndz1, /u/3) that holds the image, so a file can be fetched again. status: done = cut out and in assets/; waiting = generated, not downloaded yet; rejected = failed the section-14 checklist; refused = generator declined. The Gemini download button sometimes produces no file. The cause is not known: hidden tabs, pacing, tab discarding and page load time were each suspected and none explained the pattern.",
+  "note": "Generated assets. `chat` is the Gemini conversation (account maksdndz1, /u/3) that holds the image, so a file can be fetched again. status: done = cut out and in assets/; waiting = generated, not downloaded yet; rejected = failed the section-14 checklist; refused = generator declined. The Gemini download button produces no file when the page has had no real input event since it loaded (a tab driven only by script): Chrome wants a user gesture. A real click anywhere in the page before pressing the button fixes it; found on 2026-10-12, 12 of 12 downloads after the fix against 0 of 4 without.",
   "assets": [
     {
       "id": "heroes/bogatyr",

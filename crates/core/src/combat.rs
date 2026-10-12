@@ -362,7 +362,28 @@ impl<'a> Exec<'a> {
                 e.hp -= lost;
                 let dead = e.hp <= 0;
                 let (hp, block) = (e.hp, e.block);
+                // the serpent loosens its coils once it has been hurt enough
+                let mut uncoil = false;
+                if lost > 0 {
+                    if let Some(left) = e.flags.get_mut("coil_left") {
+                        *left -= lost;
+                        uncoil = *left <= 0;
+                    }
+                }
+                let enrage = attack && lost > 0 && !dead && e.flags.contains_key("enrage");
                 self.ev.push(Event::Damage { src, dst, blocked, lost, attack, hp, block });
+                if uncoil || dead {
+                    self.s.enemies[idx].flags.remove("coil_left");
+                    for h in &mut self.s.heroes {
+                        if h.flags.get("coiled").copied() == Some(uid as i32) {
+                            h.flags.remove("coiled");
+                        }
+                    }
+                }
+                // the Shatun: every blow that lands feeds his rage
+                if enrage {
+                    self.add_status(dst, S::Strength, 2);
+                }
                 if dead {
                     self.kill(idx, src);
                     killed = true;
@@ -567,6 +588,9 @@ impl<'a> Exec<'a> {
         if view.has(Keyword::Unplayable) {
             return Err(ActionError::Unplayable);
         }
+        if view.kind == CardType::Attack && h.flags.contains_key("coiled") {
+            return Err(ActionError::Coiled);
+        }
         let carves = view.effects.iter().any(|e| matches!(e, Effect::Rune(..)));
         let free_rune = carves && h.flags.get("free_rune").copied().unwrap_or(0) > 0;
         let cost = if card.free || free_rune {
@@ -590,6 +614,14 @@ impl<'a> Exec<'a> {
             _ => return Err(ActionError::BadTarget),
         };
 
+        // the Leshy's tangled paths: an aimed blow goes astray
+        let target = match target {
+            Some(UnitRef::Enemy(_)) if self.s.heroes[p as usize].flags.contains_key("confused") => {
+                let foes = self.living();
+                self.s.rng.pick(&foes).copied().map(UnitRef::Enemy)
+            }
+            other => other,
+        };
         let h = self.hero(p);
         h.hand.remove(pos);
         h.energy -= cost;
@@ -1213,12 +1245,21 @@ impl<'a> Exec<'a> {
             self.s.enemies[idx].flags.retain(|k, _| !k.starts_with("turn_"));
             let Some(d) = self.c.enemies.get(&self.s.enemies[idx].def) else { continue };
             let step = self.s.enemies[idx].step;
-            let mv = if step < d.opening.len() {
-                d.opening[step]
-            } else {
-                d.pattern[(step - d.opening.len()) % d.pattern.len()]
+            // second phase: once worn down far enough, a boss changes its ways for good
+            let (hp, max) = (self.s.enemies[idx].hp, self.s.enemies[idx].max_hp);
+            if !d.phase2.is_empty() && hp * 100 <= max * d.phase2_at && !self.s.enemies[idx].flags.contains_key("phase2") {
+                self.s.enemies[idx].flags.insert("phase2".into(), step as i32);
+                let enemy = self.s.enemies[idx].uid;
+                self.ev.push(Event::Phase2 { enemy });
+            }
+            let mv = match self.s.enemies[idx].flags.get("phase2") {
+                Some(since) => d.phase2[(step - *since as usize) % d.phase2.len()],
+                None if step < d.opening.len() => d.opening[step],
+                None => d.pattern[(step - d.opening.len()) % d.pattern.len()],
             };
-            let target = if d.moves[mv].targeted { self.s.rng.pick(&standing).copied() } else { None };
+            // a hero under Likho's eye draws every aimed blow
+            let marked = self.s.heroes.iter().find(|h| !h.downed && h.flags.contains_key("marked")).map(|h| h.slot);
+            let target = if d.moves[mv].targeted { marked.or_else(|| self.s.rng.pick(&standing).copied()) } else { None };
             let e = &mut self.s.enemies[idx];
             e.intent = Some(Intent { mv, target });
             let enemy = e.uid;
@@ -1254,6 +1295,15 @@ impl<'a> Exec<'a> {
     }
 
     fn end_round(&mut self) {
+        // afflictions that last one hero turn lift as it ends
+        for h in &mut self.s.heroes {
+            for flag in ["blind", "confused", "coiled"] {
+                h.flags.remove(flag);
+            }
+        }
+        for e in &mut self.s.enemies {
+            e.flags.remove("coil_left");
+        }
         // end of the heroes' turn, in slot order
         for slot in self.standing() {
             self.fire(slot, Trigger::TurnEnd);

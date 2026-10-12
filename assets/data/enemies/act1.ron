@@ -1,5 +1,5 @@
 // Акт 1. Чёрный лес. HP — для одного игрока (раздел 6 дизайн-документа).
-// Особые механики элит и босса пока упрощены до примитивов — помечено у каждого.
+// У Ауки «Морок» пока упрощён (помечено); элиты и Леший — по документу.
 [
     (
         id: "grey_wolf", hp: (13, 15),
@@ -64,30 +64,31 @@
 
     // ---- элиты ----
     (
-        // упрощено: «метка единственным глазом» и Ослепление заменены Надломом на цели
+        // отмечает героя единственным глазом: все прицельные атаки идут в него;
+        // отмеченный один ход играет карты вслепую
         id: "likho", hp: (110, 110),
         moves: [
-            (id: "evil_eye", intent: Debuff, targeted: true, effects: [Apply(Vulnerable, N(2), Target)]),
+            (id: "evil_eye", intent: Special, targeted: true, effects: [Hook("likho_mark"), Apply(Vulnerable, N(1), Target)]),
             (id: "crush", intent: Attack, targeted: true, effects: [Damage(N(14), Target)]),
             (id: "flail", intent: Attack, targeted: true, effects: [Hits(N(7), 2, Target)]),
         ],
         pattern: [0, 1, 2],
     ),
     (
-        // упрощено: Ярость «+2 Силы за каждый удар по нему» заменена ходом-усилением
-        id: "shatun", hp: (130, 130),
+        // Ярость: +2 Силы за каждый удар, который до него дошёл
+        id: "shatun", hp: (130, 130), flags: ["enrage"],
         moves: [
-            (id: "maul", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
-            (id: "rage", intent: Buff, effects: [Apply(Strength, N(3), Me), Block(N(10), Me)]),
-            (id: "swipe", intent: AttackAll, effects: [Damage(N(8), AllFoes)]),
+            (id: "maul", intent: Attack, targeted: true, effects: [Damage(N(12), Target)]),
+            (id: "swipe", intent: AttackAll, effects: [Damage(N(6), AllFoes)]),
+            (id: "lick_wounds", intent: Defend, effects: [Block(N(12), Me)]),
         ],
-        pattern: [0, 1, 2, 0],
+        pattern: [0, 1, 0, 2],
     ),
     (
-        // упрощено: «Обвить» (запрет атак, пока змею не нанесут 15) заменено Немотой и Надломом
+        // Обвить: герой не играет атаки, пока змею не нанесут 15 урона (или до конца его хода)
         id: "poloz", hp: (100, 100),
         moves: [
-            (id: "coil", intent: Debuff, targeted: true, effects: [Damage(N(6), Target), Apply(Weak, N(2), Target)]),
+            (id: "coil", intent: Special, targeted: true, effects: [Damage(N(6), Target), Hook("poloz_coil")]),
             (id: "constrict", intent: Attack, targeted: true, effects: [Damage(N(12), Target), Apply(Vulnerable, N(1), Target)]),
             (id: "venom", intent: Attack, targeted: true, effects: [Damage(N(9), Target), Apply(Rot, N(3), Target)]),
         ],
@@ -103,16 +104,21 @@
         pattern: [0],
     ),
     (
-        // упрощено: нет «Путаных троп» и второй фазы на 50% HP
+        // «Путаные тропы» сбивают прицел героев на ход; на 50% HP вырастает выше леса —
+        // вторая фаза, удары по всем
         id: "leshy", hp: (280, 280),
         moves: [
             (id: "call_trees", intent: Summon, effects: [Summon("tree_guard", 2)]),
             (id: "trample", intent: AttackAll, effects: [Damage(N(10), AllFoes)]),
             (id: "branch_blow", intent: Attack, targeted: true, effects: [Damage(N(18), Target)]),
             (id: "bark", intent: Defend, effects: [Block(N(20), Me), Apply(Strength, N(1), Me)]),
+            (id: "tangled_paths", intent: Special, effects: [Hook("tangle_paths"), Block(N(10), Me)]),
+            (id: "towering_stomp", intent: AttackAll, effects: [Damage(N(14), AllFoes)]),
+            (id: "uproot", intent: AttackAll, effects: [Damage(N(9), AllFoes), Apply(Weak, N(1), AllFoes)]),
         ],
-        // стражей зовёт один раз в начале и потом редко: в одиночку иначе не выстоять
         opening: [0],
-        pattern: [1, 2, 3, 2, 1, 2, 3, 0],
+        pattern: [1, 4, 2, 3, 2, 1, 4, 0],
+        phase2_at: 50,
+        phase2: [5, 6, 4, 5, 2],
     ),
 ]

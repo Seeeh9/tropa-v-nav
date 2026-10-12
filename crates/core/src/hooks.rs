@@ -125,6 +125,32 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 }
             }
         }
+        // Likho's single eye settles on a hero: every aimed blow now goes to them,
+        // and for one turn they play their cards unseen
+        "likho_mark" => {
+            let Some(UnitRef::Hero(slot)) = ctx.target else { return };
+            for h in ex.s.heroes.iter_mut() {
+                h.flags.remove("marked");
+            }
+            let h = &mut ex.s.heroes[slot as usize];
+            h.flags.insert("marked".into(), 1);
+            h.flags.insert("blind".into(), 1);
+        }
+        // the Poloz wraps a hero: no attacks from them until the serpent takes 15 damage,
+        // or their next turn ends
+        "poloz_coil" => {
+            let (UnitRef::Enemy(uid), Some(UnitRef::Hero(slot))) = (ctx.src, ctx.target) else { return };
+            ex.s.heroes[slot as usize].flags.insert("coiled".into(), uid as i32);
+            if let Some(e) = ex.s.enemies.iter_mut().find(|e| e.uid == uid) {
+                e.flags.insert("coil_left".into(), 15);
+            }
+        }
+        // the Leshy tangles the paths: next turn every hero's aimed card finds a random enemy
+        "tangle_paths" => {
+            for h in ex.s.heroes.iter_mut().filter(|h| !h.downed) {
+                h.flags.insert("confused".into(), 1);
+            }
+        }
         _ => debug_assert!(false, "unknown hook `{name}`"),
     }
 }

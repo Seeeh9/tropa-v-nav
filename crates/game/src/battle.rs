@@ -129,6 +129,8 @@ enum Label {
 struct CardWidget {
     uid: u32,
     form: Form,
+    /// Drawn face down: the hero is blinded this turn.
+    hidden: bool,
     pos: Vec2,
     drag: Vec2,
     dragging: bool,
@@ -692,6 +694,11 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
                     if !real.cauldron.is_empty() {
                         parts.push(format!("{}: {}", l10n.t("res-cauldron"), real.cauldron.iter().map(|x| l10n.t(&format!("herb-{x}"))).collect::<Vec<_>>().join(", ")));
                     }
+                    for flag in ["marked", "blind", "coiled", "confused"] {
+                        if real.flags.contains_key(flag) {
+                            parts.push(l10n.t(&format!("trait-{flag}")));
+                        }
+                    }
                     let st = statuses_line(&l10n, &h.statuses);
                     if !st.is_empty() {
                         parts.push(st);
@@ -797,6 +804,7 @@ pub fn spawn_card<B: Bundle>(
     card: &Card,
     form: Form,
     pos: Option<Vec2>,
+    hidden: bool,
     extra: B,
     db: &Content,
     l10n: &L10n,
@@ -807,7 +815,7 @@ pub fn spawn_card<B: Bundle>(
     let def = db.cards.get(&card.def)?;
     let view = def.view(card.upgraded, form);
     let edge = if def.hero.is_empty() { theme::DIM } else { theme::hero_color(&def.hero) };
-    let cost = if view.has(Keyword::Unplayable) {
+    let cost = if hidden || view.has(Keyword::Unplayable) {
         String::new()
     } else if view.x_cost {
         "X".into()
@@ -839,6 +847,11 @@ pub fn spawn_card<B: Bundle>(
             ChildOf(parent),
         ))
         .with_children(|c| {
+            // a blinded hero sees only the backs: which card is which must be remembered
+            if hidden {
+                c.spawn((theme::text("?", &fonts.title, 120.0, theme::DIM), Node { margin: UiRect::top(px(70)), ..default() }));
+                return;
+            }
             let name = l10n.card_name(&card.def, card.upgraded);
             c.spawn((
                 // long names shrink to stay on one line
@@ -894,22 +907,23 @@ fn sync_hand(
     assets: Res<AssetServer>,
 ) {
     let h = session.my_hero();
+    let blind = h.flags.contains_key("blind");
     for (entity, w) in &cards {
         // a form change flips every card, so the widget is rebuilt
-        if !h.hand.iter().any(|c| c.uid == w.uid) || w.form != h.form {
+        if !h.hand.iter().any(|c| c.uid == w.uid) || w.form != h.form || w.hidden != blind {
             commands.entity(entity).despawn();
         }
     }
     for card in &h.hand {
-        if !cards.iter().any(|(_, w)| w.uid == card.uid && w.form == h.form) {
+        if !cards.iter().any(|(_, w)| w.uid == card.uid && w.form == h.form && w.hidden == blind) {
             // new cards slide in from the draw pile
             let from = Vec2::new(60.0, 900.0);
             let widget = (
-                CardWidget { uid: card.uid, form: h.form, pos: from, drag: Vec2::ZERO, dragging: false },
+                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false },
                 // let the pointer through, so a dragged card can be dropped on the unit under it
                 Pickable { should_block_lower: false, is_hoverable: true },
             );
-            spawn_card(&mut commands, *layer, card, h.form, Some(from), widget, &db.0, &l10n, &fonts, &art, &assets);
+            spawn_card(&mut commands, *layer, card, h.form, Some(from), blind, widget, &db.0, &l10n, &fonts, &art, &assets);
         }
     }
 }
@@ -1112,7 +1126,7 @@ fn update_tooltip(
     let mut lines: Vec<(String, String)> = Vec::new();
     let mut at = Vec2::ZERO;
     let h = session.my_hero();
-    if let Some(w) = top.0.and_then(|uid| cards.iter().find(|w| w.uid == uid && !w.dragging)) {
+    if let Some(w) = top.0.and_then(|uid| cards.iter().find(|w| w.uid == uid && !w.dragging && !w.hidden)) {
         if let Some((card, def)) = h.hand.iter().find(|c| c.uid == w.uid).and_then(|c| db.0.cards.get(&c.def).map(|d| (c, d))) {
             lines = l10n.card_glossary(&def.view(card.upgraded, h.form));
             at = Vec2::new(w.pos.x + CARD_W * 1.08 + 14.0, HAND_TOP - 260.0);

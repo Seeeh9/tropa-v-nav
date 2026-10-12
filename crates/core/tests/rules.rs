@@ -930,3 +930,101 @@ fn a_deathless_koschei_grows_angrier() {
     }
     assert_eq!(s.status(k, StatusKind::Strength), 3);
 }
+
+// ---- act one elites and the Leshy ----
+
+#[test]
+fn every_blow_that_lands_feeds_the_shatuns_rage() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit", "t_multi", "t_rot"])], &ids(&["shatun"]), 7);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.status(t, StatusKind::Strength), 2);
+    play(&c, &mut s, 0, "t_multi", Some(t));
+    assert_eq!(s.status(t, StatusKind::Strength), 8, "three more hits");
+    play(&c, &mut s, 0, "t_rot", Some(t));
+    end_round(&c, &mut s);
+    assert_eq!(s.status(t, StatusKind::Strength), 8, "rot is not a blow");
+}
+
+#[test]
+fn likhos_eye_draws_every_aimed_attack() {
+    let c = content();
+    let party = [hero("t_plain", &[]), hero("t_plain", &[]), hero("t_plain", &[])];
+    let (mut s, _) = start(&c, &party, &ids(&["likho", "hitter"]), 7);
+    let marked = s.enemies[0].intent.as_ref().unwrap().target.unwrap();
+    end_round(&c, &mut s);
+    assert!(s.heroes[marked as usize].flags.contains_key("marked"));
+    assert!(s.heroes[marked as usize].flags.contains_key("blind"));
+    for round in 0..4 {
+        for e in s.living_enemies() {
+            assert_eq!(e.intent.as_ref().unwrap().target, Some(marked), "round {round}: {} aims at the marked hero", e.def);
+        }
+        end_round(&c, &mut s);
+        if s.phase != Phase::Heroes || s.heroes[marked as usize].downed {
+            break;
+        }
+    }
+    assert!(!s.heroes.iter().any(|h| h.flags.contains_key("blind") && h.slot != marked));
+}
+
+#[test]
+fn the_poloz_holds_until_hurt_enough_or_the_turn_ends() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit", "t_rot", "t_block"])], &ids(&["poloz"]), 7);
+    let t = foe(&s, 0);
+    end_round(&c, &mut s);
+    assert!(s.heroes[0].flags.contains_key("coiled"));
+    assert_eq!(try_play(&c, &mut s, 0, "t_hit", Some(t)), Err(ActionError::Coiled));
+    play(&c, &mut s, 0, "t_block", None);
+    end_round(&c, &mut s);
+    assert!(!s.heroes[0].flags.contains_key("coiled"), "free again after one turn");
+
+    // an ally breaks the hold by hurting the serpent
+    let party = [hero("t_plain", &["t_hit"]), hero("t_plain", &["t_hit", "t_hit"])];
+    let (mut s, _) = start(&c, &party, &ids(&["poloz"]), 7);
+    let t = foe(&s, 0);
+    let held = s.enemies[0].intent.as_ref().unwrap().target.unwrap();
+    end_round(&c, &mut s);
+    let free = 1 - held;
+    assert_eq!(try_play(&c, &mut s, held, "t_hit", Some(t)), Err(ActionError::Coiled));
+    play(&c, &mut s, free, "t_hit", Some(t));
+    assert!(s.heroes[held as usize].flags.contains_key("coiled"), "10 of 15");
+    if s.heroes[free as usize].hand.iter().any(|x| x.def == "t_hit") {
+        play(&c, &mut s, free, "t_hit", Some(t));
+        assert!(!s.heroes[held as usize].flags.contains_key("coiled"));
+        play(&c, &mut s, held, "t_hit", Some(t));
+    }
+}
+
+#[test]
+fn the_leshy_tangles_paths_and_grows_at_half_health() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_hit"])], &ids(&["leshy", "dummy"]), 7);
+    s.heroes[0].hp = 9000;
+    s.heroes[0].max_hp = 9000;
+    let leshy = foe(&s, 0);
+    // tangled paths is the second move of his pattern
+    end_round(&c, &mut s);
+    end_round(&c, &mut s);
+    assert_eq!(c.enemies["leshy"].moves[s.enemies[0].intent.as_ref().unwrap().mv].id, "tangled_paths");
+    end_round(&c, &mut s);
+    assert!(s.heroes[0].flags.contains_key("confused"));
+    // an aimed blow now lands on whoever the forest decides
+    let before: i32 = s.living_enemies().map(|e| e.hp + e.block).sum();
+    play(&c, &mut s, 0, "t_hit", Some(leshy));
+    let after: i32 = s.living_enemies().map(|e| e.hp + e.block).sum();
+    assert_eq!(before - after, 10, "the blow still lands somewhere");
+    end_round(&c, &mut s);
+    assert!(!s.heroes[0].flags.contains_key("confused"));
+
+    // worn to half, he changes for good
+    s.enemies[0].hp = 100;
+    end_round(&c, &mut s);
+    assert!(s.enemies[0].flags.contains_key("phase2"));
+    let mv = s.enemies[0].intent.as_ref().unwrap().mv;
+    assert_eq!(c.enemies["leshy"].moves[mv].id, "towering_stomp");
+    s.enemies[0].hp = 280;
+    end_round(&c, &mut s);
+    assert!(s.enemies[0].flags.contains_key("phase2"), "there is no way back from the second phase");
+}

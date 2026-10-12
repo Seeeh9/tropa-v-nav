@@ -172,6 +172,8 @@ pub enum ActionError {
     BadTarget,
     NotDowned,
     NoSuchPotion,
+    /// Wrapped in the serpent's coils: no attacks until it lets go.
+    Coiled,
 }
 
 /// Things that happened, in order, for the renderer and the log. Never read back by rules.
@@ -205,6 +207,8 @@ pub enum Event {
     HerbAdded { player: u8, herb: Id },
     Brewed { player: u8, recipe: Id },
     PotionUsed { player: u8, potion: Id, target: Option<UnitRef> },
+    /// An enemy passed into its second phase.
+    Phase2 { enemy: u32 },
     Shifted { player: u8, form: Form },
     MaskChanged { player: u8, mask: MaskKind },
     Taunt { player: u8 },

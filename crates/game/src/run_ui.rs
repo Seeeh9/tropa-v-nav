@@ -300,7 +300,7 @@ fn draw_reward(
     for (i, id) in r.cards.iter().enumerate() {
         let card = Card { uid: i as u32, def: id.clone(), upgraded: false, free: false };
         let frame = db.0.cards.get(id).map(crate::battle::card_frame).unwrap_or(theme::PEAT);
-        if let Some(e) = spawn_card(&mut commands, row, &card, Form::Human, None, (Button, Btn(frame)), &db.0, &l10n, &fonts, &art, &assets) {
+        if let Some(e) = spawn_card(&mut commands, row, &card, Form::Human, None, false, (Button, Btn(frame)), &db.0, &l10n, &fonts, &art, &assets) {
             commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::TakeCard(Some(i as u8))));
         }
     }

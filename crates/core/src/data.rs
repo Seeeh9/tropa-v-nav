@@ -403,6 +403,12 @@ pub struct EnemyDef {
     /// Block it already has when it appears.
     #[serde(default)]
     pub start_block: i32,
+    /// Second phase: at or below this percent of HP the enemy switches to `phase2`.
+    #[serde(default)]
+    pub phase2_at: i32,
+    /// Pattern of the second phase (indices into `moves`).
+    #[serde(default)]
+    pub phase2: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -587,7 +593,7 @@ impl Content {
             for m in &e.moves {
                 check(&mut bad, &e.id, &m.effects);
             }
-            for &i in e.opening.iter().chain(&e.pattern) {
+            for &i in e.opening.iter().chain(&e.pattern).chain(&e.phase2) {
                 if i >= e.moves.len() {
                     bad.push(format!("{}: pattern index {i} out of range", e.id));
                 }

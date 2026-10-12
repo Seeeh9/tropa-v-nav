@@ -515,7 +515,12 @@ fn describe_fx(l10n: &L10n, o: &EventOption) -> String {
     if o.price > 0 {
         parts.push(l10n.n("fx-run-pay", o.price));
     }
-    for fx in &o.fx {
+    let mut told = false;
+    for (all, fx) in o.fx.iter().map(|f| (false, f)).chain(o.all.iter().map(|f| (true, f))) {
+        if all && !told {
+            told = true;
+            parts.push(l10n.t("fx-run-all"));
+        }
         parts.push(match fx {
             RunFx::Gold(n) if *n >= 0 => l10n.n("fx-run-gold", *n),
             RunFx::Gold(n) => l10n.n("fx-run-lose-gold", -*n),
@@ -523,7 +528,8 @@ fn describe_fx(l10n: &L10n, o: &EventOption) -> String {
             RunFx::Hp(n) => l10n.n("fx-run-hurt", -*n),
             RunFx::HpPct(n) if *n >= 0 => l10n.n("fx-run-heal-pct", *n),
             RunFx::HpPct(n) => l10n.n("fx-run-hurt-pct", -*n),
-            RunFx::MaxHp(n) => l10n.n("fx-run-maxhp", *n),
+            RunFx::MaxHp(n) if *n >= 0 => l10n.n("fx-run-maxhp", *n),
+            RunFx::MaxHp(n) => l10n.n("fx-run-lose-maxhp", -*n),
             RunFx::Card(id) => l10n.tf("fx-run-card", &[("c", l10n.card_name(id, false).into())]),
             RunFx::RandomCard(r) => l10n.t(&format!("fx-run-random-{r:?}")),
             RunFx::Relic => l10n.t("fx-run-relic"),
@@ -576,18 +582,29 @@ fn draw_omen(
         ChildOf(column),
     ));
     let vote = def.kind == EventKind::Vote;
-    if vote {
-        commands.spawn((theme::text(l10n.t("omen-vote-hint"), &fonts.body, 20.0, theme::DIM), ChildOf(column)));
+    let hint = match def.kind {
+        EventKind::Vote => Some("omen-vote-hint"),
+        EventKind::Sacrifice => Some("omen-sacrifice-hint"),
+        EventKind::Schism if picks.len() > 1 => Some("omen-schism-hint"),
+        _ => None,
+    };
+    if let Some(hint) = hint {
+        commands.spawn((theme::text(l10n.t(hint), &fonts.body, 20.0, theme::DIM), ChildOf(column)));
     }
+    let closed = if def.kind == EventKind::Schism { nav_core::run::schism_closed(picks, me as usize) } else { None };
     let mine = picks[me as usize];
     if mine.is_some() && !vote {
         waiting_line(&mut commands, root, &fonts, &l10n);
         return;
     }
     for (i, o) in def.options.iter().enumerate() {
-        let can = pl.gold >= o.price;
+        let can = pl.gold >= o.price && closed != Some(i as u8);
         let voters = picks.iter().filter(|v| **v == Some(i as u8)).count();
-        let mut label = format!("{}  —  {}", l10n.t(&format!("omen-{id}-{}", o.id)), describe_fx(&l10n, o));
+        let mut label = l10n.t(&format!("omen-{id}-{}", o.id));
+        let outcome = describe_fx(&l10n, o);
+        if !outcome.is_empty() {
+            label.push_str(&format!("  —  {outcome}"));
+        }
         if vote && voters > 0 {
             label.push_str(&format!("   [{voters}]"));
         }

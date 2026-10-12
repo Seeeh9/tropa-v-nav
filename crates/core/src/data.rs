@@ -326,7 +326,11 @@ pub struct PotionDef {
     pub effects: Vec<Effect>,
 }
 
-data_enum!(EventKind { Personal, Vote });
+data_enum!(
+    /// `Sacrifice`: one pays an option's `fx` and everyone gets its `all`.
+    /// `Schism`: each goes their own way, but the party may not all go the same one.
+    EventKind { Personal, Vote, Sacrifice, Schism }
+);
 
 /// Something that happens to a player outside of combat.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -353,6 +357,9 @@ pub struct EventOption {
     pub price: i32,
     #[serde(default)]
     pub fx: Vec<RunFx>,
+    /// What the whole party gets when one of them takes this option (sacrifice omens).
+    #[serde(default)]
+    pub all: Vec<RunFx>,
 }
 
 /// An omen on the path: a short eerie tale with a choice.

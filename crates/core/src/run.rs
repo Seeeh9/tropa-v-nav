@@ -169,6 +169,14 @@ pub enum RunAction {
     DropPotion(u8),
 }
 
+/// At a schism the party must part: when every other player has gone the same way,
+/// that way is closed to the last one. `None` alone, or while the others differ or still think.
+pub fn schism_closed(picks: &[Option<u8>], p: usize) -> Option<u8> {
+    let mut others = picks.iter().enumerate().filter(|(i, _)| *i != p).map(|(_, v)| *v);
+    let first = others.next()??;
+    others.all(|v| v == Some(first)).then_some(first)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RunError {
     Combat(ActionError),
@@ -177,6 +185,8 @@ pub enum RunError {
     BadChoice,
     AlreadyDone,
     NotEnoughGold,
+    /// A schism: the others all went that way, so this player must take another.
+    MustSplit,
     SoldOut,
     NoRoom,
 }
@@ -596,8 +606,11 @@ impl Run {
             (RunAction::Choose(choice), Stage::Omen { id, picks }) => {
                 let def = c.events.get(id.as_str()).ok_or(RunError::BadChoice)?.clone();
                 let option = def.options.get(*choice as usize).ok_or(RunError::BadChoice)?;
-                if picks[p].is_some() && def.kind == EventKind::Personal {
+                if picks[p].is_some() && def.kind != EventKind::Vote {
                     return Err(RunError::AlreadyDone);
+                }
+                if def.kind == EventKind::Schism && schism_closed(picks, p) == Some(*choice) {
+                    return Err(RunError::MustSplit);
                 }
                 if self.players[p].gold < option.price {
                     return Err(RunError::NotEnoughGold);
@@ -606,8 +619,22 @@ impl Run {
                 let all = picks.iter().all(|v| v.is_some());
                 let cast: Vec<u8> = picks.iter().flatten().copied().collect();
                 match def.kind {
+                    // one pays, all gain; those who refuse just wait to see if anyone will
+                    EventKind::Sacrifice => {
+                        self.apply_option(c, p, option, &mut ev);
+                        if !option.all.is_empty() {
+                            ev.push(RunEvent::OmenResolved { option: *choice });
+                            let gift = EventOption { id: option.id.clone(), price: 0, fx: option.all.clone(), all: vec![] };
+                            for q in 0..self.players.len() {
+                                self.apply_option(c, q, &gift, &mut ev);
+                            }
+                            self.to_map(&mut ev);
+                        } else if all {
+                            self.to_map(&mut ev);
+                        }
+                    }
                     // everyone decides for themselves, at once
-                    EventKind::Personal => {
+                    EventKind::Personal | EventKind::Schism => {
                         self.apply_option(c, p, option, &mut ev);
                         if all {
                             self.to_map(&mut ev);
@@ -1076,8 +1103,9 @@ pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
                 return None;
             }
             let pl = run.players.get(p)?;
-            // the first option it can pay for
-            let i = def.options.iter().position(|o| o.price <= pl.gold).unwrap_or(def.options.len() - 1);
+            // the first option it can pay for (and, at a schism, that is still open to it)
+            let closed = if def.kind == EventKind::Schism { schism_closed(picks, p) } else { None };
+            let i = (0..def.options.len()).find(|i| def.options[*i].price <= pl.gold && closed != Some(*i as u8)).unwrap_or(def.options.len() - 1);
             Some(RunAction::Choose(i as u8))
         }
         Stage::Victory | Stage::Defeat => None,

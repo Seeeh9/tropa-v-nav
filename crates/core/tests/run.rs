@@ -539,3 +539,69 @@ fn hero_level_opens_the_better_cards() {
     assert!(seen(2).contains(&Rarity::Uncommon) && !seen(2).contains(&Rarity::Rare));
     assert!(seen(4).contains(&Rarity::Rare));
 }
+
+#[test]
+fn a_sacrifice_is_paid_by_one_and_shared_by_all() {
+    let c = content();
+    let mut run = party(&c, 3, 3, 0);
+    run.stage = Stage::Omen { id: "empty_cradle".into(), picks: vec![None; 3] };
+    let hp: Vec<i32> = run.players.iter().map(|p| p.max_hp).collect();
+    // one refuses and waits; nothing happens yet
+    run.apply(&c, 1, &RunAction::Choose(1)).unwrap();
+    assert!(matches!(run.stage, Stage::Omen { .. }));
+    assert_eq!(run.apply(&c, 1, &RunAction::Choose(0)), Err(RunError::AlreadyDone));
+    run.apply(&c, 2, &RunAction::Choose(0)).unwrap();
+    assert!(matches!(run.stage, Stage::Map { .. }));
+    for (p, pl) in run.players.iter().enumerate() {
+        assert_eq!(pl.max_hp, hp[p] + 5);
+        assert_eq!(pl.deck.iter().any(|(id, _)| id == "toska"), p == 2, "only the one who rocked the cradle carries the grief");
+    }
+}
+
+#[test]
+fn a_sacrifice_nobody_makes_gives_nothing() {
+    let c = content();
+    let mut run = party(&c, 2, 3, 0);
+    run.stage = Stage::Omen { id: "krada".into(), picks: vec![None; 2] };
+    let relics: Vec<usize> = run.players.iter().map(|p| p.relics.len()).collect();
+    run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
+    run.apply(&c, 1, &RunAction::Choose(1)).unwrap();
+    assert!(matches!(run.stage, Stage::Map { .. }));
+    assert_eq!(run.players.iter().map(|p| p.relics.len()).collect::<Vec<_>>(), relics);
+}
+
+#[test]
+fn a_schism_parts_the_party() {
+    let c = content();
+    let mut run = party(&c, 3, 3, 0);
+    run.stage = Stage::Omen { id: "forked_path".into(), picks: vec![None; 3] };
+    let gold: Vec<i32> = run.players.iter().map(|p| p.gold).collect();
+    run.apply(&c, 0, &RunAction::Choose(0)).unwrap();
+    run.apply(&c, 1, &RunAction::Choose(0)).unwrap();
+    assert_eq!(run.apply(&c, 2, &RunAction::Choose(0)), Err(RunError::MustSplit));
+    run.apply(&c, 2, &RunAction::Choose(1)).unwrap();
+    assert!(matches!(run.stage, Stage::Map { .. }));
+    assert_eq!(run.players[0].gold, gold[0] + 45);
+    assert_eq!(run.players[2].gold, gold[2]);
+    // alone there is nobody to part from
+    let mut solo = party(&c, 1, 3, 0);
+    solo.stage = Stage::Omen { id: "forked_path".into(), picks: vec![None] };
+    solo.apply(&c, 0, &RunAction::Choose(0)).unwrap();
+}
+
+#[test]
+fn fifty_omens_of_all_four_kinds() {
+    let c = content();
+    assert_eq!(c.events.len(), 50);
+    for kind in [EventKind::Personal, EventKind::Vote, EventKind::Sacrifice, EventKind::Schism] {
+        assert!(c.events.values().any(|e| e.kind == kind), "{kind:?}");
+    }
+    for e in c.events.values() {
+        match e.kind {
+            EventKind::Sacrifice => assert!(e.options.iter().any(|o| !o.all.is_empty()) && e.options.iter().any(|o| o.all.is_empty()), "{}", e.id),
+            // both ways must be open to a penniless hero, or the last one could be stuck
+            EventKind::Schism => assert!(e.options.len() == 2 && e.options.iter().all(|o| o.price == 0), "{}", e.id),
+            _ => assert!(e.options.iter().all(|o| o.all.is_empty()), "{}", e.id),
+        }
+    }
+}

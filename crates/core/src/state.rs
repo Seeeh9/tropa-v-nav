@@ -120,6 +120,9 @@ pub struct Combat {
     pub hp_scale: i32,
     /// Enemy attack damage in percent (Circles of Nav raise it).
     pub enemy_dmg: i32,
+    /// Circle 10: breaking the needle also lets Koschei's shadow loose.
+    #[serde(default)]
+    pub shadow: bool,
 }
 
 /// Per-fight rule tweaks, set by the Circle of Nav and the kind of encounter.
@@ -129,11 +132,12 @@ pub struct CombatOpts {
     /// Enemy HP in percent on top of the party-size scaling.
     pub enemy_hp: i32,
     pub enemy_dmg: i32,
+    pub shadow: bool,
 }
 
 impl Default for CombatOpts {
     fn default() -> Self {
-        CombatOpts { raise_cost: 2, enemy_hp: 100, enemy_dmg: 100 }
+        CombatOpts { raise_cost: 2, enemy_hp: 100, enemy_dmg: 100, shadow: false }
     }
 }
 

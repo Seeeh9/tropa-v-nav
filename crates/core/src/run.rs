@@ -247,6 +247,9 @@ impl Circle {
     pub fn enemy_hp(self) -> i32 {
         if self.0 >= 8 { 110 } else { 100 }
     }
+    pub fn koschei_shadow(self) -> bool {
+        self.0 >= 10
+    }
     pub fn raise_cost(self) -> i32 {
         if self.0 >= 9 { 3 } else { 2 }
     }
@@ -841,7 +844,7 @@ impl Run {
             .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, potions: p.potions.clone() })
             .collect();
         let rules = Circle(self.circle);
-        let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind) };
+        let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind), shadow: rules.koschei_shadow() };
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
         let (combat, events) = combat::start_with(c, &party, &enemies, seed, opts);
         self.combat = Some(combat);

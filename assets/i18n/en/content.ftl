@@ -859,3 +859,6 @@ relic-sk_alt_fools_cap = Fool's Cap
 relic-sk_alt_fools_cap-desc = At the start of combat: put on the Goat mask and gain 4 Block.
 relic-sk_alt_bear_tooth = Tooth of a Dancing Bear
 relic-sk_alt_bear_tooth-desc = At the start of combat: put on the Bear mask.
+enemy-koschei_shadow = Koschei's Shadow
+move-mimic = Mimic
+move-mimic-desc = Turns each hero's last card of this round against that hero. Whoever played nothing takes 8 damage.

@@ -1277,3 +1277,44 @@ fn curses_that_spoil_the_next_turn() {
     assert!(!h.hand.iter().chain(&h.draw).chain(&h.discard).any(|x| x.def == "ice_shard"));
     assert_eq!(h.hand.len(), 4);
 }
+
+#[test]
+fn on_the_tenth_circle_the_needle_frees_koscheis_shadow() {
+    let c = content();
+    let opts = CombatOpts { shadow: true, ..CombatOpts::default() };
+    let party = [hero("t_plain", &["koschei_needle", "t_hit", "t_block"]), hero("t_plain", &[])];
+    let (mut s, _) = start_with(&c, &party, &ids(&["koschei"]), 7, opts);
+    s.heroes[0].energy = 9;
+    play(&c, &mut s, 0, "koschei_needle", None);
+    let shadow = s.living_enemies().find(|e| e.def == "koschei_shadow").expect("the shadow is loose").uid;
+    assert!(s.enemies.iter().any(|e| e.uid == shadow && e.alive));
+    // alone with the shadow: one hero ends on a block card, the other plays nothing
+    let party = [hero("t_plain", &["t_hit", "t_block"]), hero("t_plain", &[])];
+    let (mut duel, _) = start(&c, &party, &ids(&["koschei_shadow"]), 7);
+    let it = foe(&duel, 0);
+    play(&c, &mut duel, 0, "t_hit", Some(it));
+    play(&c, &mut duel, 0, "t_block", None);
+    end_round(&c, &mut duel);
+    assert_eq!(duel.heroes[0].hp, 50, "a mirrored shield shields the shadow, and hurts nobody");
+    assert_eq!(duel.heroes[1].hp, 42, "the idle hero is struck");
+    // without the tenth circle there is no shadow
+    let (mut plain, _) = start(&c, &[hero("t_plain", &["koschei_needle"])], &ids(&["koschei"]), 7);
+    play(&c, &mut plain, 0, "koschei_needle", None);
+    assert!(!plain.enemies.iter().any(|e| e.def == "koschei_shadow"));
+}
+
+#[test]
+fn the_shadow_can_mirror_every_card_in_the_game() {
+    let c = content();
+    let opts = CombatOpts { shadow: true, ..CombatOpts::default() };
+    for def in c.cards.values().filter(|d| !d.hero.is_empty() && !d.id.starts_with("t_")) {
+        let party = [hero(&def.hero, &[]), hero("t_plain", &[])];
+        let (mut s, _) = start_with(&c, &party, &ids(&["koschei_shadow", "dummy"]), 3, opts.clone());
+        s.heroes[0].hp = 500;
+        s.heroes[0].max_hp = 500;
+        s.log.push(Played { player: 0, card: def.id.clone(), upgraded: true, kind: def.kind });
+        end_round(&c, &mut s);
+        assert!(s.heroes[0].hp <= 500, "{}", def.id);
+        assert_eq!(s.phase, Phase::Heroes, "{}", def.id);
+    }
+}

@@ -89,6 +89,7 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
         phase: Phase::Heroes,
         hp_scale: hp_scale(hs.len()) * opts.enemy_hp / 100,
         enemy_dmg: opts.enemy_dmg,
+        shadow: opts.shadow,
         heroes: hs,
         enemies: Vec::new(),
         rng,
@@ -147,7 +148,7 @@ impl<'a> Exec<'a> {
     fn enemy_idx(&self, uid: u32) -> Option<usize> {
         self.s.enemies.iter().position(|e| e.uid == uid)
     }
-    fn standing(&self) -> Vec<u8> {
+    pub(crate) fn standing(&self) -> Vec<u8> {
         self.s.standing_heroes().map(|h| h.slot).collect()
     }
     fn living(&self) -> Vec<u32> {

@@ -4,6 +4,31 @@ use crate::combat::{Ctx, Exec};
 use crate::data::*;
 use crate::state::*;
 
+/// A hero's card as the shadow plays it back: blows and curses land on the hero, shields and
+/// strength go to the shadow. Whatever only a hero can do (drawing, runes, masks) is lost in the mirror.
+fn mirror(effects: &[Effect]) -> Vec<Effect> {
+    // numbers that depend on the hero's own state have nothing to read in a shadow
+    let flat = |a: &Amount| match a {
+        Amount::N(n) => Amount::N(*n),
+        _ => Amount::N(6),
+    };
+    let mut out = Vec::new();
+    for e in effects {
+        match e {
+            Effect::Damage(a, _) => out.push(Effect::Damage(flat(a), Tgt::Target)),
+            Effect::Hits(a, k, _) => out.push(Effect::Hits(flat(a), *k, Tgt::Target)),
+            Effect::Block(a, _) | Effect::Guard(a, _) => out.push(Effect::Block(flat(a), Tgt::Me)),
+            Effect::Heal(a, _) => out.push(Effect::Heal(flat(a), Tgt::Me)),
+            Effect::Apply(st @ (StatusKind::Vulnerable | StatusKind::Weak), a, Tgt::Target | Tgt::AllFoes | Tgt::RandomFoe) => out.push(Effect::Apply(*st, flat(a), Tgt::Target)),
+            Effect::Apply(st @ (StatusKind::Strength | StatusKind::Thorns), a, Tgt::Me | Tgt::AllFriends) => out.push(Effect::Apply(*st, flat(a), Tgt::Me)),
+            Effect::If(_, then, _) => out.extend(mirror(then)),
+            Effect::Repeat(_, body) | Effect::Once(_, body) | Effect::OncePerTurn(_, body) => out.extend(mirror(body)),
+            _ => {}
+        }
+    }
+    out
+}
+
 pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
     match name {
         // Vorozheya's "Transfer": every debuff on the heroes moves onto the targeted enemy
@@ -112,6 +137,29 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 e.flags.remove("immortal");
                 e.flags.insert("last_breath".into(), 5);
                 e.hp = (e.max_hp * 2 / 5).max(1);
+            }
+            // the tenth Circle: his shadow tears loose and fights on beside him
+            if ex.s.shadow {
+                let def: Id = "koschei_shadow".into();
+                if let Some(uid) = ex.spawn(&def) {
+                    ex.ev.push(Event::Summoned { enemy: uid, def });
+                }
+            }
+        }
+        // Koschei's shadow turns each hero's last card of the round against that same hero;
+        // whoever played nothing is simply struck
+        "shadow_mimic" => {
+            for slot in ex.standing() {
+                let last = ex.s.log.iter().rev().find(|p| p.player == slot).map(|p| (p.card.clone(), p.upgraded));
+                let mirrored = last
+                    .and_then(|(card, upgraded)| ex.c.cards.get(&card).map(|d| mirror(&d.view(upgraded, Form::Human).effects)))
+                    .filter(|fx| !fx.is_empty())
+                    .unwrap_or_else(|| vec![Effect::Damage(Amount::N(8), Tgt::Target)]);
+                if ex.s.heroes[slot as usize].downed {
+                    continue;
+                }
+                let mut turned = Ctx { src: ctx.src, target: Some(UnitRef::Hero(slot)), x: 0, consumed: 0, fatal: false, attack: true, card: false, bled: false };
+                ex.run(&mirrored, &mut turned);
             }
         }
         // the duck falls and the egg drops out of it; a lone hero faces a thinner shell

@@ -859,3 +859,6 @@ relic-sk_alt_fools_cap = Дурацкий колпак
 relic-sk_alt_fools_cap-desc = В начале боя: наденьте личину Козы и получите 4 щита.
 relic-sk_alt_bear_tooth = Зуб учёного медведя
 relic-sk_alt_bear_tooth-desc = В начале боя: наденьте личину Медведя.
+enemy-koschei_shadow = Кощеева тень
+move-mimic = Передразнить
+move-mimic-desc = Обращает против каждого героя его последнюю карту за этот раунд. Кто не сыграл ничего — получает 8 урона.

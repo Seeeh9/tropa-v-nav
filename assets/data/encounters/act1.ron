@@ -1,5 +1,17 @@
+// Акт 1. `extra3` приходит с вероятностью 50% при трёх игроках, `extra4` — всегда при четырёх.
 [
     (id: "a1_wolves", act: 1, kind: Normal, enemies: ["grey_wolf", "grey_wolf"], extra3: ["grey_wolf"], extra4: ["grey_wolf"]),
     (id: "a1_kikimora", act: 1, kind: Normal, enemies: ["kikimora"], extra3: ["grey_wolf"], extra4: ["grey_wolf"]),
     (id: "a1_kikimora_wolf", act: 1, kind: Normal, enemies: ["kikimora", "grey_wolf"], extra4: ["grey_wolf"]),
+    (id: "a1_lesavka", act: 1, kind: Normal, enemies: ["lesavka", "grey_wolf"], extra3: ["grey_wolf"], extra4: ["lesavka"]),
+    (id: "a1_auka", act: 1, kind: Normal, enemies: ["auka", "shishiga"], extra4: ["raven"]),
+    (id: "a1_mushrooms", act: 1, kind: Normal, enemies: ["mushroom_corpse", "mushroom_corpse"], extra4: ["mushroom_corpse"]),
+    (id: "a1_ravens", act: 1, kind: Normal, enemies: ["raven", "raven", "raven", "raven"], extra3: ["raven"], extra4: ["raven"]),
+    (id: "a1_shishiga", act: 1, kind: Normal, enemies: ["shishiga", "raven", "raven"], extra4: ["raven"]),
+
+    (id: "a1_likho", act: 1, kind: Elite, enemies: ["likho"], extra4: ["raven"]),
+    (id: "a1_shatun", act: 1, kind: Elite, enemies: ["shatun"], extra4: ["grey_wolf"]),
+    (id: "a1_poloz", act: 1, kind: Elite, enemies: ["poloz"], extra4: ["raven"]),
+
+    (id: "a1_leshy", act: 1, kind: Boss, enemies: ["leshy"]),
 ]

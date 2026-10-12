@@ -37,7 +37,7 @@ pub fn plugin(app: &mut App) {
             (
                 playback,
                 (sync_units, sync_hand, cue_effects).chain(),
-                (pick_hover, layout_hand, layout_units, animate_sprites, update_labels, update_bars, update_tooltip),
+                (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_bars, update_tooltip),
                 (floaters, dying, style_buttons),
             )
                 .chain()
@@ -79,6 +79,8 @@ struct UnitSprite {
     unit: UnitRef,
     /// Resting colour: white for real art, the hero colour for a missing sprite.
     base: Color,
+    /// Art currently shown, so a change of form swaps the picture once.
+    stem: String,
     t: f32,
     anim: Option<(Anim, f32)>,
 }
@@ -408,7 +410,7 @@ fn sync_units(
                 let sprite = art.node(&assets, &stem, color);
                 let base = sprite.0.color;
                 u.spawn((
-                    UnitSprite { unit, base, t: if is_hero { 0.0 } else { 1.3 }, anim: None },
+                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None },
                     Node { width: px(size.x), height: px(size.y), ..default() },
                     sprite,
                     UiTransform::IDENTITY,
@@ -479,6 +481,23 @@ fn layout_units(session: Res<Session>, time: Res<Time>, mut widgets: Query<(&mut
             node.top = px(w.pos.y);
             z.0 = foot.y as i32;
         }
+    }
+}
+
+/// The werewolf has a second body: when the form changes, so does the sprite.
+fn swap_form_art(session: Res<Session>, art: Res<Art>, assets: Res<AssetServer>, mut sprites: Query<(&mut UnitSprite, &mut ImageNode)>) {
+    for (mut s, mut image) in &mut sprites {
+        let UnitRef::Hero(i) = s.unit else { continue };
+        let Some(h) = session.shown.hero(i) else { continue };
+        let want = if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) };
+        if s.stem == want {
+            continue;
+        }
+        // no beast art for this hero: keep what is shown rather than blank the sprite
+        if let Some(handle) = art.image(&assets, &want) {
+            image.image = handle;
+        }
+        s.stem = want;
     }
 }
 

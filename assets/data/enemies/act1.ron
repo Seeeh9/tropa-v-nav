@@ -1,4 +1,5 @@
-// Акт 1. Чёрный лес. HP — для одного игрока.
+// Акт 1. Чёрный лес. HP — для одного игрока (раздел 6 дизайн-документа).
+// Особые механики элит и босса пока упрощены до примитивов — помечено у каждого.
 [
     (
         id: "grey_wolf", hp: (13, 15),
@@ -15,5 +16,102 @@
             (id: "choke", intent: Attack, targeted: true, effects: [Damage(N(8), Target)]),
         ],
         pattern: [0, 1, 1],
+    ),
+    (
+        // крадёт 15 золота и убегает через 3 хода, если не убита
+        id: "lesavka", hp: (18, 18),
+        moves: [
+            (id: "pilfer", intent: Debuff, targeted: true, effects: [StealGold(15)]),
+            (id: "scratch", intent: Attack, targeted: true, effects: [Damage(N(5), Target)]),
+            (id: "vanish", intent: Unknown, effects: [Flee]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+    (
+        // Морок по документу перенаправляет атаку героя; пока — Немота на героя
+        id: "auka", hp: (25, 25),
+        moves: [
+            (id: "shriek", intent: Attack, targeted: true, effects: [Damage(N(10), Target)]),
+            (id: "delusion", intent: Debuff, targeted: true, effects: [Apply(Weak, N(2), Target)]),
+        ],
+        pattern: [1, 0, 0],
+    ),
+    (
+        id: "shishiga", hp: (40, 40),
+        moves: [
+            (id: "rot_claws", intent: Attack, targeted: true, effects: [Damage(N(7), Target), Apply(Rot, N(2), Target)]),
+            (id: "hunker", intent: Defend, effects: [Block(N(8), Me)]),
+        ],
+        pattern: [0, 0, 1],
+    ),
+    (
+        // при смерти выпускает споры: 3 Гнили всем героям
+        id: "mushroom_corpse", hp: (35, 35),
+        moves: [
+            (id: "lurch", intent: Attack, targeted: true, effects: [Damage(N(8), Target)]),
+            (id: "swell", intent: Buff, effects: [Apply(Strength, N(2), Me)]),
+        ],
+        pattern: [0, 0, 1],
+        on_death: [Apply(Rot, N(3), AllFoes)],
+    ),
+    (
+        id: "raven", hp: (8, 8),
+        moves: [
+            (id: "peck_eyes", intent: Attack, targeted: true, effects: [Damage(N(3), Target), Apply(Weak, N(1), Target)]),
+        ],
+        pattern: [0],
+    ),
+
+    // ---- элиты ----
+    (
+        // упрощено: «метка единственным глазом» и Ослепление заменены Надломом на цели
+        id: "likho", hp: (110, 110),
+        moves: [
+            (id: "evil_eye", intent: Debuff, targeted: true, effects: [Apply(Vulnerable, N(2), Target)]),
+            (id: "crush", intent: Attack, targeted: true, effects: [Damage(N(14), Target)]),
+            (id: "flail", intent: Attack, targeted: true, effects: [Hits(N(7), 2, Target)]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+    (
+        // упрощено: Ярость «+2 Силы за каждый удар по нему» заменена ходом-усилением
+        id: "shatun", hp: (130, 130),
+        moves: [
+            (id: "maul", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
+            (id: "rage", intent: Buff, effects: [Apply(Strength, N(3), Me), Block(N(10), Me)]),
+            (id: "swipe", intent: AttackAll, effects: [Damage(N(8), AllFoes)]),
+        ],
+        pattern: [0, 1, 2, 0],
+    ),
+    (
+        // упрощено: «Обвить» (запрет атак, пока змею не нанесут 15) заменено Немотой и Надломом
+        id: "poloz", hp: (100, 100),
+        moves: [
+            (id: "coil", intent: Debuff, targeted: true, effects: [Damage(N(6), Target), Apply(Weak, N(2), Target)]),
+            (id: "constrict", intent: Attack, targeted: true, effects: [Damage(N(12), Target), Apply(Vulnerable, N(1), Target)]),
+            (id: "venom", intent: Attack, targeted: true, effects: [Damage(N(9), Target), Apply(Rot, N(3), Target)]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+
+    // ---- босс ----
+    (
+        id: "tree_guard", hp: (20, 20),
+        moves: [
+            (id: "root_lash", intent: Attack, targeted: true, effects: [Damage(N(5), Target)]),
+        ],
+        pattern: [0],
+    ),
+    (
+        // упрощено: нет «Путаных троп» и второй фазы на 50% HP
+        id: "leshy", hp: (280, 280),
+        moves: [
+            (id: "call_trees", intent: Summon, effects: [Summon("tree_guard", 2)]),
+            (id: "trample", intent: AttackAll, effects: [Damage(N(10), AllFoes)]),
+            (id: "branch_blow", intent: Attack, targeted: true, effects: [Damage(N(18), Target)]),
+            (id: "bark", intent: Defend, effects: [Block(N(20), Me), Apply(Strength, N(1), Me)]),
+        ],
+        opening: [0],
+        pattern: [1, 2, 3, 2, 0],
     ),
 ]

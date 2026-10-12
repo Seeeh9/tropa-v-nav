@@ -1,6 +1,7 @@
 //! «Тропа в Навь» — Bevy client. Rules live in `nav_core`; this crate only draws and sends actions.
 
 mod art;
+mod audio;
 mod battle;
 #[cfg(feature = "dev")]
 mod dev;
@@ -104,7 +105,7 @@ fn main() {
     .init_state::<AppState>()
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);

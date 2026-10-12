@@ -12,6 +12,12 @@
         keywords: [Unplayable],
     ),
     (
+        // Лихорадка (Трясовица): жжёт в руке и переходит к следующему герою
+        id: "fever", kind: Curse, rarity: Special,
+        keywords: [Unplayable, Ethereal],
+        in_hand_end: [LoseHp(N(3), Me), Hook("pass_fever")],
+    ),
+    (
         // Паутина (Кикимора): мёртвая карта в руке
         id: "web", kind: Status, rarity: Special,
         keywords: [Unplayable],

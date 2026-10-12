@@ -402,8 +402,12 @@ impl<'a> Exec<'a> {
     }
 
     fn hero_take(&mut self, src: Option<UnitRef>, i: u8, d: i32, attack: bool) {
+        let src_flag = |me: &Self, flag: &str| matches!(src, Some(UnitRef::Enemy(uid)) if me.s.enemy(uid).is_some_and(|e| e.flags.contains_key(flag)));
+        // a soul of Nav: half of its blow passes through any shield
+        let piercing = attack && src_flag(self, "piercing");
+        let lifesteal = attack && src_flag(self, "lifesteal");
         let h = self.hero(i);
-        let blocked = d.min(h.block);
+        let blocked = if piercing { (d / 2).min(h.block) } else { d.min(h.block) };
         h.block -= blocked;
         let lost = (d - blocked).min(h.hp);
         h.hp -= lost;
@@ -423,6 +427,12 @@ impl<'a> Exec<'a> {
             for other in self.standing() {
                 if other != i {
                     self.fire(other, Trigger::AllyHpLoss);
+                }
+            }
+            // the upyr drinks: half of what it draws heals it
+            if lifesteal {
+                if let Some(s) = src {
+                    self.heal(s, lost / 2);
                 }
             }
         }
@@ -508,6 +518,14 @@ impl<'a> Exec<'a> {
     }
 
     fn kill(&mut self, idx: usize, src: Option<UnitRef>) {
+        // the kostomakha gets up once, at half its bones
+        if self.s.enemies[idx].flags.remove("rises").is_some() {
+            let e = &mut self.s.enemies[idx];
+            e.hp = (e.max_hp / 2).max(1);
+            let (unit, hp) = (UnitRef::Enemy(e.uid), e.hp);
+            self.ev.push(Event::Heal { unit, amount: hp, hp });
+            return;
+        }
         let e = &mut self.s.enemies[idx];
         e.alive = false;
         e.hp = 0;
@@ -591,6 +609,20 @@ impl<'a> Exec<'a> {
         if view.kind == CardType::Attack && h.flags.contains_key("coiled") {
             return Err(ActionError::Coiled);
         }
+        if h.flags.contains_key("mired") || h.flags.contains_key("asleep") {
+            return Err(ActionError::Held);
+        }
+        // Mara's frost: the leftmost cards in hand cannot be played this turn
+        if (pos as i32) < h.flags.get("frozen").copied().unwrap_or(0) {
+            return Err(ActionError::Frozen);
+        }
+        // the igosha cowers behind its fellows: aim at them first
+        if let Some(UnitRef::Enemy(uid)) = target {
+            let hiding = self.s.enemy(uid).is_some_and(|e| e.alive && e.flags.contains_key("hiding"));
+            if hiding && self.s.living_enemies().any(|e| !e.flags.contains_key("hiding")) && view.target == CardTarget::Enemy {
+                return Err(ActionError::Hidden);
+            }
+        }
         let carves = view.effects.iter().any(|e| matches!(e, Effect::Rune(..)));
         let free_rune = carves && h.flags.get("free_rune").copied().unwrap_or(0) > 0;
         let cost = if card.free || free_rune {
@@ -614,6 +646,20 @@ impl<'a> Exec<'a> {
             _ => return Err(ActionError::BadTarget),
         };
 
+        // pulling a friend out of the mire: any card played on them does it
+        if let Some(UnitRef::Hero(j)) = target {
+            if j != p {
+                self.hero(j).flags.remove("mired");
+            }
+        }
+        // the mavka's charm: the next attack turns on a friend, or is wasted when alone
+        let charmed = view.kind == CardType::Attack && matches!(target, Some(UnitRef::Enemy(_))) && self.s.heroes[p as usize].flags.remove("charmed").is_some();
+        let target = if charmed {
+            let others: Vec<u8> = self.standing().into_iter().filter(|s| *s != p).collect();
+            self.s.rng.pick(&others).copied().map(UnitRef::Hero)
+        } else {
+            target
+        };
         // the Leshy's tangled paths: an aimed blow goes astray
         let target = match target {
             Some(UnitRef::Enemy(_)) if self.s.heroes[p as usize].flags.contains_key("confused") => {
@@ -1272,7 +1318,10 @@ impl<'a> Exec<'a> {
             if round > 1 {
                 h.block = 0;
             }
-            h.energy = BASE_ENERGY;
+            // dragged under, shaken by a quake, or caught in Mara's winter
+            let less_energy = h.flags.remove("energy_less").unwrap_or(0);
+            let less_draw = h.flags.remove("draw_less").unwrap_or(0) + h.flags.get("winter").copied().unwrap_or(0);
+            h.energy = (BASE_ENERGY - less_energy).max(0);
             h.ready = false;
             h.flags.retain(|k, _| !k.starts_with("turn_"));
             let hungry = h.form == Form::Beast && !h.flags.contains_key("no_hunger");
@@ -1282,7 +1331,7 @@ impl<'a> Exec<'a> {
             if self.s.heroes[slot as usize].downed {
                 continue;
             }
-            self.draw(slot, BASE_DRAW);
+            self.draw(slot, (BASE_DRAW - less_draw).max(1));
             self.fire(slot, Trigger::TurnStart);
         }
         self.check_end();
@@ -1296,8 +1345,13 @@ impl<'a> Exec<'a> {
 
     fn end_round(&mut self) {
         // afflictions that last one hero turn lift as it ends
+        // nobody pulled them out: the mire takes its due and lets go
+        let sunk: Vec<u8> = self.s.heroes.iter().filter(|h| !h.downed && h.flags.contains_key("mired")).map(|h| h.slot).collect();
+        for slot in sunk {
+            self.lose_hp(UnitRef::Hero(slot), 8);
+        }
         for h in &mut self.s.heroes {
-            for flag in ["blind", "confused", "coiled"] {
+            for flag in ["blind", "confused", "coiled", "mired", "asleep", "frozen", "charmed", "no_intents"] {
                 h.flags.remove(flag);
             }
         }

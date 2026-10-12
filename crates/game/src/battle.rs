@@ -752,7 +752,7 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
                     if !real.cauldron.is_empty() {
                         parts.push(format!("{}: {}", l10n.t("res-cauldron"), real.cauldron.iter().map(|x| l10n.t(&format!("herb-{x}"))).collect::<Vec<_>>().join(", ")));
                     }
-                    for flag in ["marked", "blind", "coiled", "confused"] {
+                    for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter"] {
                         if real.flags.contains_key(flag) {
                             parts.push(l10n.t(&format!("trait-{flag}")));
                         }
@@ -784,6 +784,10 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
             }),
             Label::Intent(uid) => shown.enemy(uid).map(|e| {
                 let Some(intent) = &e.intent else { return String::new() };
+                // the Sirin's song: nobody can tell what is coming
+                if session.my_hero().flags.contains_key("no_intents") {
+                    return "?".into();
+                }
                 let Some(mv) = db.0.enemies.get(&e.def).and_then(|d| d.moves.get(intent.mv)) else { return String::new() };
                 let mut s = match bot::intent_damage(&db.0, shown, e) {
                     Some((d, 1)) => format!("{} {d}", l10n.t(&format!("intent-{:?}", mv.intent))),
@@ -1199,7 +1203,8 @@ fn update_tooltip(
         };
         if let UnitRef::Enemy(uid) = w.unit {
             if let Some(e) = session.shown.enemy(uid) {
-                if let Some(mv) = e.intent.as_ref().and_then(|i| db.0.enemies.get(&e.def)?.moves.get(i.mv)) {
+                let sung = session.my_hero().flags.contains_key("no_intents");
+                if let Some(mv) = e.intent.as_ref().filter(|_| !sung).and_then(|i| db.0.enemies.get(&e.def)?.moves.get(i.mv)) {
                     let key = format!("move-{}", mv.id);
                     let desc = format!("{key}-desc");
                     lines.push((l10n.t(&key), if l10n.has(&desc) { l10n.t(&desc) } else { l10n.t(&format!("intent-{:?}", mv.intent)) }));

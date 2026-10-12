@@ -151,6 +151,70 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 h.flags.insert("confused".into(), 1);
             }
         }
+        // one-turn afflictions an enemy lays on the hero it aimed at
+        "drag_under" | "charm" | "sleep" => {
+            let Some(UnitRef::Hero(slot)) = ctx.target else { return };
+            let flag = match name {
+                "drag_under" => "energy_less",
+                "charm" => "charmed",
+                _ => "asleep",
+            };
+            ex.s.heroes[slot as usize].flags.insert(flag.into(), 1);
+        }
+        // ...and on the whole party
+        "quake" | "sirin_song" | "freeze" => {
+            let (flag, n) = match name {
+                "quake" => ("draw_less", 2),
+                "sirin_song" => ("no_intents", 1),
+                _ => ("frozen", 2),
+            };
+            for h in ex.s.heroes.iter_mut().filter(|h| !h.downed) {
+                h.flags.insert(flag.into(), n);
+            }
+        }
+        // the Bolotnik drags heroes into the mire: two of them, but never the whole party
+        "mire_grab" => {
+            let mut standing: Vec<u8> = ex.s.standing_heroes().map(|h| h.slot).collect();
+            ex.s.rng.shuffle(&mut standing);
+            let take = if standing.len() <= 1 { standing.len() } else { 2.min(standing.len() - 1) };
+            for slot in standing.into_iter().take(take) {
+                ex.s.heroes[slot as usize].flags.insert("mired".into(), 1);
+            }
+        }
+        // the vurdalak elder calls a fallen servant back at half strength
+        "raise_dead" => {
+            if let Some(e) = ex.s.enemies.iter_mut().find(|e| !e.alive && !e.fled) {
+                e.alive = true;
+                e.hp = (e.max_hp / 2).max(1);
+                e.block = 0;
+                e.statuses.clear();
+                let (unit, hp) = (UnitRef::Enemy(e.uid), e.hp);
+                ex.ev.push(Event::Heal { unit, amount: hp, hp });
+            }
+        }
+        // the fever moves on to the next hero
+        "pass_fever" => {
+            let UnitRef::Hero(me) = ctx.src else { return };
+            let standing: Vec<u8> = ex.s.standing_heroes().map(|h| h.slot).collect();
+            let next = standing.iter().copied().find(|s| *s > me).or_else(|| standing.first().copied());
+            if let Some(next) = next {
+                ex.add_card(next, "fever", Pile::Draw);
+            }
+        }
+        // Mara's winter deepens while her crown stands: one card fewer each turn, three at most
+        "winter" => {
+            if ex.s.enemies.iter().any(|e| e.alive && e.def == "ice_crown") {
+                for h in ex.s.heroes.iter_mut().filter(|h| !h.downed) {
+                    let w = h.flags.entry("winter".into()).or_insert(0);
+                    *w = (*w + 1).min(3);
+                }
+            }
+        }
+        "thaw" => {
+            for h in ex.s.heroes.iter_mut() {
+                h.flags.remove("winter");
+            }
+        }
         _ => debug_assert!(false, "unknown hook `{name}`"),
     }
 }

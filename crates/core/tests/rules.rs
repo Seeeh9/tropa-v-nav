@@ -1028,3 +1028,181 @@ fn the_leshy_tangles_paths_and_grows_at_half_health() {
     end_round(&c, &mut s);
     assert!(s.enemies[0].flags.contains_key("phase2"), "there is no way back from the second phase");
 }
+
+// ---- acts two and three ----
+
+fn set_flag(s: &mut Combat, slot: usize, flag: &str, n: i32) {
+    s.heroes[slot].flags.insert(flag.into(), n);
+}
+
+#[test]
+fn the_upyr_heals_by_half_of_what_it_draws() {
+    let (c, mut s) = solo(&[], &["upyr"]);
+    s.enemies[0].hp = 20;
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 40);
+    assert_eq!(s.enemies[0].hp, 25);
+}
+
+#[test]
+fn a_soul_of_nav_strikes_half_through_any_shield() {
+    let (c, mut s) = solo(&[], &["nav_soul"]);
+    s.heroes[0].block = 50;
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 44);
+}
+
+#[test]
+fn the_igosha_cannot_be_aimed_at_while_others_stand() {
+    let (c, mut s) = solo(&["t_hit", "t_hit"], &["igosha", "weakling"]);
+    let (ig, other) = (foe(&s, 0), foe(&s, 1));
+    assert_eq!(try_play(&c, &mut s, 0, "t_hit", Some(ig)), Err(ActionError::Hidden));
+    s.enemies[1].hp = 1;
+    play(&c, &mut s, 0, "t_hit", Some(other));
+    assert!(!s.enemies[1].alive);
+    play(&c, &mut s, 0, "t_hit", Some(ig));
+}
+
+#[test]
+fn the_kostomakha_gets_up_once() {
+    let (c, mut s) = solo(&["t_hit", "t_hit"], &["kostomakha"]);
+    let k = foe(&s, 0);
+    s.enemies[0].hp = 1;
+    play(&c, &mut s, 0, "t_hit", Some(k));
+    assert!(s.enemies[0].alive);
+    assert_eq!(s.enemies[0].hp, 27);
+    s.enemies[0].hp = 1;
+    play(&c, &mut s, 0, "t_hit", Some(k));
+    assert!(!s.enemies[0].alive);
+}
+
+#[test]
+fn a_friend_pulls_a_hero_out_of_the_mire() {
+    let (c, mut s) = duo(&["t_energy"], &["t_block"], &["dummy"]);
+    set_flag(&mut s, 1, "mired", 1);
+    assert_eq!(try_play(&c, &mut s, 1, "t_block", None), Err(ActionError::Held));
+    play(&c, &mut s, 0, "t_energy", Some(UnitRef::Hero(1)));
+    play(&c, &mut s, 1, "t_block", None);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[1].hp, 50);
+}
+
+#[test]
+fn the_mire_takes_its_due_from_a_hero_left_in_it() {
+    let (c, mut s) = duo(&[], &[], &["dummy"]);
+    set_flag(&mut s, 1, "mired", 1);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[1].hp, 42);
+    assert!(!s.heroes[1].flags.contains_key("mired"));
+}
+
+#[test]
+fn the_bolotnik_never_takes_the_whole_party() {
+    let (c, mut s) = duo(&[], &[], &["bolotnik"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes.iter().filter(|h| h.flags.contains_key("mired")).count(), 1);
+}
+
+#[test]
+fn a_charmed_attack_turns_on_a_friend() {
+    let (c, mut s) = duo(&["t_hit", "t_hit"], &[], &["dummy"]);
+    let d = foe(&s, 0);
+    set_flag(&mut s, 0, "charmed", 1);
+    play(&c, &mut s, 0, "t_hit", Some(d));
+    assert_eq!(s.enemies[0].hp, s.enemies[0].max_hp);
+    assert!(s.heroes[1].hp < 50);
+    // the charm is spent: the next blow lands where it was aimed
+    play(&c, &mut s, 0, "t_hit", Some(d));
+    assert!(s.enemies[0].hp < s.enemies[0].max_hp);
+}
+
+#[test]
+fn alone_a_charmed_attack_is_wasted() {
+    let (c, mut s) = solo(&["t_hit"], &["dummy"]);
+    let d = foe(&s, 0);
+    set_flag(&mut s, 0, "charmed", 1);
+    play(&c, &mut s, 0, "t_hit", Some(d));
+    assert_eq!(s.enemies[0].hp, s.enemies[0].max_hp);
+    assert_eq!(s.heroes[0].hp, 50);
+}
+
+#[test]
+fn frozen_cards_are_the_leftmost_ones() {
+    let (c, mut s) = solo(&["t_block"; 5], &["dummy"]);
+    set_flag(&mut s, 0, "frozen", 2);
+    let (first, third) = (s.heroes[0].hand[0].uid, s.heroes[0].hand[2].uid);
+    assert_eq!(apply(&c, &mut s, 0, &CombatAction::Play { card: first, target: None }), Err(ActionError::Frozen));
+    assert!(apply(&c, &mut s, 0, &CombatAction::Play { card: third, target: None }).is_ok());
+}
+
+#[test]
+fn a_sleeper_misses_the_turn_and_wakes() {
+    let (c, mut s) = solo(&["t_block"; 10], &["dummy"]);
+    set_flag(&mut s, 0, "asleep", 1);
+    assert_eq!(try_play(&c, &mut s, 0, "t_block", None), Err(ActionError::Held));
+    end_round(&c, &mut s);
+    play(&c, &mut s, 0, "t_block", None);
+}
+
+#[test]
+fn dragged_under_and_shaken_heroes_start_the_turn_short() {
+    let (c, mut s) = solo(&["t_block"; 12], &["dummy"]);
+    set_flag(&mut s, 0, "energy_less", 1);
+    set_flag(&mut s, 0, "draw_less", 2);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].energy, 2);
+    assert_eq!(s.heroes[0].hand.len(), 3);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].energy, 3);
+    assert_eq!(s.heroes[0].hand.len(), 5);
+}
+
+#[test]
+fn the_fever_burns_and_moves_on() {
+    let (c, mut s) = duo(&[], &[], &["dummy"]);
+    s.heroes[0].hand.push(Card { uid: 9999, def: "fever".into(), upgraded: false, free: false });
+    let has = |h: &Hero| h.hand.iter().chain(&h.draw).chain(&h.discard).any(|x| x.def == "fever");
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, 47);
+    assert!(!has(&s.heroes[0]));
+    assert!(has(&s.heroes[1]));
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[1].hp, 47);
+    assert!(has(&s.heroes[0]));
+    assert!(!has(&s.heroes[1]));
+}
+
+#[test]
+fn the_vurdalak_elder_raises_its_dead() {
+    let (c, mut s) = solo(&["t_hit"], &["vurdalak_elder", "weakling"]);
+    let w = foe(&s, 1);
+    s.enemies[1].hp = 1;
+    play(&c, &mut s, 0, "t_hit", Some(w));
+    assert!(!s.enemies[1].alive);
+    for _ in 0..3 {
+        end_round(&c, &mut s);
+    }
+    assert!(s.enemies[1].alive);
+    assert_eq!(s.enemies[1].hp, 5);
+    assert!(s.enemies[1].intent.is_some());
+}
+
+#[test]
+fn maras_winter_lasts_while_her_crown_stands() {
+    let (c, mut s) = solo(&["t_hit"; 12], &["mara", "ice_crown"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].flags.get("winter"), Some(&1));
+    assert_eq!(s.heroes[0].flags.get("frozen"), Some(&2));
+    assert_eq!(s.heroes[0].hand.len(), 4);
+    let crown = foe(&s, 1);
+    s.enemies[1].hp = 1;
+    s.enemies[1].block = 0;
+    let (first, third) = (s.heroes[0].hand[0].uid, s.heroes[0].hand[2].uid);
+    assert_eq!(apply(&c, &mut s, 0, &CombatAction::Play { card: first, target: Some(crown) }), Err(ActionError::Frozen));
+    apply(&c, &mut s, 0, &CombatAction::Play { card: third, target: Some(crown) }).unwrap();
+    assert!(!s.enemies[1].alive);
+    assert!(!s.heroes[0].flags.contains_key("winter"));
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hand.len(), 5);
+    assert!(!s.heroes[0].flags.contains_key("frozen"));
+}

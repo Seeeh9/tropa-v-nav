@@ -174,6 +174,12 @@ pub enum ActionError {
     NoSuchPotion,
     /// Wrapped in the serpent's coils: no attacks until it lets go.
     Coiled,
+    /// Sunk in the mire or put to sleep: no cards this turn.
+    Held,
+    /// This card is frozen in hand for the turn.
+    Frozen,
+    /// The target hides behind its fellows.
+    Hidden,
 }
 
 /// Things that happened, in order, for the renderer and the log. Never read back by rules.

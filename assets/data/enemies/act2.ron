@@ -1,26 +1,27 @@
 // Акт 2. Мёртвая деревня и болота. HP — для одного игрока.
-// Особые механики, которых ещё нет в примитивах, упрощены и помечены.
+// Анчутки по документу ещё и меняются местами каждый ход — это чисто зрительное, не сделано.
 [
     (
-        // упрощено: по документу лечится на половину нанесённого урона; пока — лечение отдельным ходом
-        id: "upyr", hp: (45, 45),
+        // Кровопийца: лечится на половину нанесённого урона
+        id: "upyr", hp: (45, 45), flags: ["lifesteal"],
         moves: [
-            (id: "bloodsuck", intent: Attack, targeted: true, effects: [Damage(N(10), Target), Heal(N(5), Me)]),
+            (id: "bloodsuck", intent: Attack, targeted: true, effects: [Damage(N(10), Target)]),
             (id: "lunge", intent: Attack, targeted: true, effects: [Damage(N(13), Target)]),
         ],
         pattern: [0, 1, 0],
     ),
     (
-        // тянет на дно: герой теряет 1 энергию (сейчас — сразу, а не в следующем ходу)
+        // Тянет на дно: герой теряет 1 энергию в следующем ходу
         id: "drowned_maiden", hp: (35, 35),
         moves: [
-            (id: "drag_under", intent: Debuff, targeted: true, effects: [Damage(N(5), Target), Apply(Weak, N(1), Target)]),
+            (id: "drag_under", intent: Debuff, targeted: true, effects: [Damage(N(5), Target), Hook("drag_under")]),
             (id: "cold_hands", intent: Attack, targeted: true, effects: [Damage(N(11), Target)]),
         ],
         pattern: [0, 1, 1],
     ),
     (
-        id: "igosha", hp: (20, 20),
+        // Плач: всем героям Надлом; прячется за другими врагами
+        id: "igosha", hp: (20, 20), flags: ["hiding"],
         moves: [
             (id: "wail", intent: Debuff, effects: [Apply(Vulnerable, N(1), AllFoes)]),
             (id: "nip", intent: Attack, targeted: true, effects: [Damage(N(6), Target)]),
@@ -63,17 +64,17 @@
 
     // ---- элиты ----
     (
-        // упрощено: вместо подъёма павших врагов призывает упыря раз в несколько ходов
+        // поднимает павших врагов с 50% HP раз в 3 хода
         id: "vurdalak_elder", hp: (160, 160),
         moves: [
-            (id: "raise_dead", intent: Summon, effects: [Summon("anchutka", 2)]),
+            (id: "raise_dead", intent: Summon, effects: [Hook("raise_dead")]),
             (id: "rend", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
             (id: "drain_all", intent: AttackAll, effects: [Damage(N(8), AllFoes), Heal(N(8), Me)]),
         ],
-        pattern: [1, 2, 0, 1],
+        pattern: [1, 2, 0],
     ),
     (
-        // «Полдень» 3→0: удар 30 по всем. Оглушение переносит удар (ход пропускается, счёт не идёт)
+        // «Полдень» 3→0: удар 30 по всем. Оглушённая, она пропускает ход, и удар не случается
         id: "poludnitsa", hp: (140, 140),
         moves: [
             (id: "sickle", intent: Attack, targeted: true, effects: [Damage(N(14), Target)]),
@@ -82,10 +83,10 @@
         pattern: [0, 0, 0, 1],
     ),
     (
-        // упрощено: «Лихорадка», переходящая между героями, заменена Гнилью и Немотой
+        // раздаёт «Лихорадку»: проклятие, переходящее к соседнему герою каждый ход
         id: "tryasovitsa", hp: (150, 150),
         moves: [
-            (id: "fever", intent: Debuff, effects: [Apply(Rot, N(3), AllFoes), Apply(Weak, N(1), AllFoes)]),
+            (id: "fever", intent: Debuff, targeted: true, effects: [AddCard(card: "fever", pile: Draw, to: Target)]),
             (id: "shaking_grip", intent: Attack, targeted: true, effects: [Damage(N(15), Target)]),
             (id: "chill", intent: Attack, targeted: true, effects: [Hits(N(6), 3, Target)]),
         ],
@@ -94,15 +95,17 @@
 
     // ---- босс ----
     (
-        // упрощено: «затягивает двух героев в трясину» заменено сильными ударами и Немотой
+        // затягивает героев в трясину: они не ходят, пока союзник не сыграет на них карту;
+        // иначе в конце хода трясина берёт 8 HP и отпускает. Берёт двоих, но не всю партию;
+        // одиночку вытащить некому — он теряет ход и 8 HP
         id: "bolotnik", hp: (380, 380),
         moves: [
-            (id: "quagmire", intent: Debuff, effects: [Apply(Weak, N(2), AllFoes), AddCard(card: "mire", pile: Discard, to: AllFoes)]),
+            (id: "quagmire", intent: Special, effects: [Hook("mire_grab")]),
             (id: "pull_down", intent: Attack, targeted: true, effects: [Damage(N(20), Target)]),
             (id: "mud_wave", intent: AttackAll, effects: [Damage(N(12), AllFoes)]),
             (id: "sink", intent: Defend, effects: [Block(N(25), Me), Heal(N(10), Me)]),
         ],
         opening: [0],
-        pattern: [1, 2, 1, 3, 2, 0],
+        pattern: [1, 2, 0, 1, 3, 2],
     ),
 ]

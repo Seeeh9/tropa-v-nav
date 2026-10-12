@@ -22,5 +22,5 @@
     (id: "a3_sirin", act: 3, kind: Elite, enemies: ["sirin"], extra4: ["nav_soul"]),
     (id: "a3_rider", act: 3, kind: Elite, enemies: ["black_rider"], extra4: ["koschei_guard"]),
     (id: "a3_giant", act: 3, kind: Elite, enemies: ["volot_giant"], extra4: ["weeper"]),
-    (id: "a3_mara", act: 3, kind: Boss, enemies: ["mara"]),
+    (id: "a3_mara", act: 3, kind: Boss, enemies: ["mara", "ice_crown"]),
 ]

@@ -45,10 +45,17 @@ fn blocks_self(view: &CardView) -> bool {
 
 pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
     let Some(h) = s.hero(slot) else { return CombatAction::Ready(true) };
+    // sunk in the mire or asleep: nothing to do but wait
+    if h.flags.contains_key("mired") || h.flags.contains_key("asleep") {
+        return CombatAction::Ready(true);
+    }
+    let frozen = h.flags.get("frozen").copied().unwrap_or(0) as usize;
     let playable: Vec<(&Card, CardView)> = h
         .hand
         .iter()
-        .filter_map(|card| {
+        .enumerate()
+        .filter(|(i, _)| *i >= frozen)
+        .filter_map(|(_, card)| {
             let v = c.cards.get(&card.def)?.view(card.upgraded, h.form);
             let cost = if v.x_cost { 1 } else { v.cost };
             // paying in blood is for players who can count; the autopilot never does
@@ -72,13 +79,14 @@ pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
     }
 
     // no point striking what cannot die, or what a single blow cannot reach
-    let reachable = |e: &&Enemy| !e.flags.contains_key("immortal") && !e.flags.contains_key("flying");
+    let others_out = s.living_enemies().any(|e| !e.flags.contains_key("hiding"));
+    let reachable = |e: &&Enemy| !e.flags.contains_key("immortal") && !e.flags.contains_key("flying") && !(others_out && e.flags.contains_key("hiding"));
     let weakest = s
         .living_enemies()
         .filter(reachable)
         .min_by_key(|e| e.hp + e.block)
-        .or_else(|| s.living_enemies().filter(|e| !e.flags.contains_key("immortal")).min_by_key(|e| e.hp + e.block))
-        .or_else(|| s.living_enemies().min_by_key(|e| e.hp + e.block))
+        .or_else(|| s.living_enemies().filter(|e| !e.flags.contains_key("immortal") && !(others_out && e.flags.contains_key("hiding"))).min_by_key(|e| e.hp + e.block))
+        .or_else(|| s.living_enemies().filter(|e| !(others_out && e.flags.contains_key("hiding"))).min_by_key(|e| e.hp + e.block))
         .map(|e| UnitRef::Enemy(e.uid));
     // the needle ends Koschei's deathlessness: nothing matters more
     if let Some((card, _)) = playable.iter().find(|(c, _)| c.def == "koschei_needle") {

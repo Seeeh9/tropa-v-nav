@@ -15,6 +15,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::NoSteam), enter_no_steam)
         .add_systems(OnEnter(AppState::Settings), enter_settings)
         .add_systems(OnEnter(AppState::Village), enter_village)
+        .add_systems(OnEnter(AppState::Chronicle), enter_chronicle)
+        .add_systems(Update, crate::profile::note_enemies)
         .add_systems(Update, crate::battle::style_buttons.run_if(not(in_state(AppState::Battle))));
 }
 
@@ -234,9 +236,56 @@ fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fon
                 });
             }
         }
+        if profile.building("graveyard") > 0 {
+            p.spawn((
+                menu_button(l10n.t("chronicle-open"), &fonts),
+                observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Chronicle)),
+            ));
+        }
         p.spawn((
             menu_button(l10n.t("coop-back"), &fonts),
             observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu)),
+        ));
+    });
+}
+
+/// The graveyard's chronicle: every enemy in the game, named once met, and the last runs.
+fn enter_chronicle(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, profile: Res<crate::profile::Profile>, db: Res<Db>) {
+    let met = db.0.enemies.keys().filter(|id| profile.bestiary.contains_key(*id)).count();
+    commands.spawn(screen(AppState::Chronicle, *stage)).with_children(|p| {
+        p.spawn(theme::text(l10n.t("chronicle-title"), &fonts.title, 56.0, theme::BONE));
+        p.spawn(theme::text(
+            l10n.tf("chronicle-met", &[("n", (met as i32).into()), ("all", (db.0.enemies.len() as i32).into())]),
+            &fonts.body,
+            22.0,
+            theme::CANDLE,
+        ));
+        p.spawn(Node { width: px(1640), flex_wrap: FlexWrap::Wrap, column_gap: px(20), row_gap: px(4), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
+            for (id, def) in &db.0.enemies {
+                let (label, color) = match profile.bestiary.get(id) {
+                    Some(n) => (format!("{}  ·  HP {}  ·  ×{n}", l10n.t(&format!("enemy-{id}")), def.hp.1), theme::BONE),
+                    None => ("? ? ?".to_string(), theme::DIM),
+                };
+                grid.spawn((theme::text(label, &fonts.body, 18.0, color), Node { width: px(390), ..default() }));
+            }
+        });
+        p.spawn(theme::text(
+            l10n.tf("chronicle-runs", &[("runs", (profile.runs as i32).into()), ("wins", (profile.wins as i32).into())]),
+            &fonts.body,
+            22.0,
+            theme::CANDLE,
+        ));
+        p.spawn(Node { width: px(1640), flex_wrap: FlexWrap::Wrap, column_gap: px(20), row_gap: px(4), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
+            // newest first; twelve fit on the page
+            for r in profile.history.iter().rev().take(12) {
+                let key = if r.won { "chronicle-won" } else { "chronicle-fell" };
+                let line = l10n.tf(key, &[("hero", l10n.t(&format!("hero-{}", r.hero)).into()), ("act", (r.act as i32).into()), ("floors", (r.floors as i32).into()), ("circle", (r.circle as i32).into())]);
+                grid.spawn((theme::text(line, &fonts.body, 18.0, if r.won { theme::ROTLIGHT } else { theme::BONE }), Node { width: px(530), ..default() }));
+            }
+        });
+        p.spawn((
+            menu_button(l10n.t("coop-back"), &fonts),
+            observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Village)),
         ));
     });
 }

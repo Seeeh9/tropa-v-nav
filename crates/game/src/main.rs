@@ -32,6 +32,8 @@ pub enum AppState {
     Settings,
     /// The last stockade: spend village currency between runs.
     Village,
+    /// The graveyard's chronicle: enemies met and runs past.
+    Chronicle,
     /// Create or join a party.
     Coop,
     /// Seats, heroes, ready.

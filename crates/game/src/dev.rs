@@ -39,6 +39,7 @@ fn open_screen(
     match screen.as_str() {
         "coop" => next.set(AppState::Coop),
         "village" => next.set(AppState::Village),
+        "chronicle" => next.set(AppState::Chronicle),
         "settings" => next.set(AppState::Settings),
         "lobby" => {
             crate::net::start_offline(&mut commands, &db.0, "dev", bots);

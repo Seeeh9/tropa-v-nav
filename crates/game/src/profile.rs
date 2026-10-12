@@ -26,6 +26,19 @@ impl Default for Settings {
     }
 }
 
+/// One finished run, as the graveyard's chronicle remembers it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub hero: String,
+    pub won: bool,
+    pub floors: u32,
+    pub act: u8,
+    pub circle: u8,
+}
+
+/// How many runs the chronicle keeps.
+pub const HISTORY: usize = 40;
+
 #[derive(Resource, Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Profile {
@@ -38,6 +51,10 @@ pub struct Profile {
     pub wins: u32,
     /// Village buildings by id and the level each has reached.
     pub buildings: BTreeMap<String, u8>,
+    /// Enemies met, by id, and in how many fights.
+    pub bestiary: BTreeMap<String, u32>,
+    /// The most recent runs, newest last.
+    pub history: Vec<RunRecord>,
     pub settings: Settings,
     #[serde(skip)]
     path: Option<PathBuf>,
@@ -114,7 +131,12 @@ impl Profile {
     }
 
     /// Books a finished run. Returns the Circle this win has just opened, if any.
-    pub fn record_run(&mut self, hero: &str, oberegi: u32, won: bool, circle: u8) -> Option<u8> {
+    pub fn record_run(&mut self, hero: &str, oberegi: u32, won: bool, circle: u8, floors: u32, act: u8) -> Option<u8> {
+        self.history.push(RunRecord { hero: hero.to_string(), won, floors, act, circle });
+        if self.history.len() > HISTORY {
+            let extra = self.history.len() - HISTORY;
+            self.history.drain(..extra);
+        }
         self.oberegi += oberegi;
         *self.hero_xp.entry(hero.to_string()).or_insert(0) += oberegi;
         self.runs += 1;
@@ -163,9 +185,29 @@ impl Profile {
     }
 }
 
-/// Village buildings and how many levels each has. Only the ones that already change a run
-/// are for sale; the palisade, shrine, graveyard and guest hall of the design wait for their content.
-pub const BUILDINGS: &[(&str, u8)] = &[("smithy", 2), ("hut", 2), ("tavern", 2)];
+/// Village buildings and how many levels each has. Only the ones that already do something
+/// are for sale; the palisade, shrine and guest hall of the design wait for their content.
+pub const BUILDINGS: &[(&str, u8)] = &[("smithy", 2), ("hut", 2), ("tavern", 2), ("graveyard", 1)];
+
+/// Writes every enemy the player meets into the bestiary, once per fight.
+/// Runs the autopilot played, and dev shortcuts, leave no trace.
+pub fn note_enemies(net: Option<Res<crate::net::Net>>, mut profile: ResMut<Profile>, mut seen: Local<(u64, std::collections::BTreeSet<u32>)>) {
+    let Some(net) = net else { return };
+    if net.bot_me || net.ephemeral {
+        return;
+    }
+    let Some(run) = net.node.state.as_ref() else { return };
+    let Some(combat) = run.combat.as_ref() else { return };
+    let fight = run.floors_cleared as u64 * 8 + run.act as u64;
+    if seen.0 != fight {
+        *seen = (fight, Default::default());
+    }
+    for e in &combat.enemies {
+        if seen.1.insert(e.uid) {
+            *profile.bestiary.entry(e.def.clone()).or_insert(0) += 1;
+        }
+    }
+}
 
 fn profile_dir() -> Option<PathBuf> {
     std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("TropaVNav").join("profiles"))
@@ -178,11 +220,17 @@ mod tests {
     #[test]
     fn a_win_opens_the_next_circle_only_from_the_highest() {
         let mut p = Profile::default();
-        assert_eq!(p.record_run("bogatyr", 50, false, 0), None);
-        assert_eq!(p.record_run("bogatyr", 150, true, 0), Some(1));
-        assert_eq!(p.record_run("bogatyr", 150, true, 0), None, "an old circle opens nothing new");
-        assert_eq!(p.record_run("volhv", 150, true, 1), Some(2));
+        assert_eq!(p.record_run("bogatyr", 50, false, 0, 9, 1), None);
+        assert_eq!(p.record_run("bogatyr", 150, true, 0, 9, 1), Some(1));
+        assert_eq!(p.record_run("bogatyr", 150, true, 0, 9, 1), None, "an old circle opens nothing new");
+        assert_eq!(p.record_run("volhv", 150, true, 1, 9, 1), Some(2));
         assert_eq!((p.oberegi, p.runs, p.wins, p.circle_unlocked), (500, 4, 3, 2));
+        assert_eq!(p.history.len(), 4);
+        assert_eq!(p.history[3], RunRecord { hero: "volhv".into(), won: true, floors: 9, act: 1, circle: 1 });
+        for _ in 0..HISTORY + 5 {
+            p.record_run("volhv", 0, false, 0, 1, 1);
+        }
+        assert_eq!(p.history.len(), HISTORY, "the chronicle forgets the oldest runs");
     }
 
     #[test]

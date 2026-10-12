@@ -2,7 +2,7 @@
 //!
 //!   TROPA_AUTOSTART=<players>   skip the menu, fight at once; extra heroes are bots
 //!   TROPA_BOT_ME=1              the local hero is a bot too
-//!   TROPA_SCREEN=coop|local|host  open the party menu, a bot lobby, or a real Steam lobby
+//!   TROPA_SCREEN=coop|local|localfight|host  open the party menu, a bot lobby, or a real Steam lobby
 //!   TROPA_SEED=<n>              fixed seed for that fight
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 
@@ -34,6 +34,11 @@ fn open_screen(
         "local" => {
             crate::net::start_local(&mut commands, &db.0, 3);
             next.set(AppState::Lobby);
+        }
+        // a four-hero fight over the real protocol, the other three seats played by bots
+        "localfight" => {
+            let seed = std::env::var("TROPA_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(7);
+            crate::net::start_local_fight(&mut commands, &db.0, 3, seed, vec!["kikimora".into(), "grey_wolf".into(), "grey_wolf".into()]);
         }
         "host" => {
             if let (Some(steam), Some(inbox)) = (steam, inbox) {

@@ -1,0 +1,69 @@
+// Знахарка: Варево. Трава даёт малый эффект сразу и ложится в Котёл; «Сварить» разрешает рецепт.
+[
+    (
+        id: "zn_sickle", hero: "znaharka", kind: Attack, cost: 1, target: Enemy,
+        effects: [Damage(N(5), Target)],
+        up: (effects: [Damage(N(8), Target)]),
+    ),
+    (
+        id: "zn_defend", hero: "znaharka", kind: Skill, cost: 1,
+        effects: [Block(N(5), Me)],
+        up: (effects: [Block(N(8), Me)]),
+    ),
+    (
+        id: "herb_wormwood", hero: "znaharka", kind: Herb, cost: 1, target: Enemy,
+        effects: [Damage(N(4), Target), Herb("wormwood")],
+        up: (effects: [Damage(N(6), Target), Herb("wormwood")]),
+    ),
+    (
+        id: "herb_sleep", hero: "znaharka", kind: Herb, cost: 1,
+        effects: [Block(N(4), Me), Herb("sleep")],
+        up: (effects: [Block(N(6), Me), Herb("sleep")]),
+    ),
+    (
+        id: "herb_weep", hero: "znaharka", kind: Herb, cost: 1,
+        effects: [Heal(N(2), Me), Herb("weep")],
+        up: (effects: [Heal(N(4), Me), Herb("weep")]),
+    ),
+    (
+        id: "herb_burst", hero: "znaharka", kind: Herb, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Damage(N(5), Target), Herb("burst")],
+        up: (effects: [Damage(N(8), Target), Herb("burst")]),
+    ),
+    (
+        id: "herb_fern", hero: "znaharka", kind: Herb, rarity: Rare, cost: 1,
+        effects: [Draw(N(1)), Herb("fern")],
+        up: (cost: 0),
+    ),
+    (
+        id: "zn_brew", hero: "znaharka", kind: Skill, cost: 1, target: Enemy,
+        effects: [Brew],
+        up: (cost: 0),
+    ),
+    (
+        id: "zn_living_water", hero: "znaharka", kind: Skill, rarity: Rare, cost: 1, target: Downed,
+        keywords: [Exhaust, Coop],
+        effects: [Revive(50, Target)],
+        up: (cost: 0),
+    ),
+    (
+        id: "zn_dead_water", hero: "znaharka", kind: Skill, rarity: Uncommon, cost: 1, target: AnyHero,
+        effects: [Heal(N(8), Target), Cleanse(Target)],
+        up: (effects: [Heal(N(11), Target), Cleanse(Target)]),
+    ),
+    (
+        id: "zn_brew_for_all", hero: "znaharka", kind: Skill, rarity: Uncommon, cost: 2,
+        effects: [Flag("brew_all", 1)],
+        up: (cost: 1),
+    ),
+    (
+        id: "zn_herbalist", hero: "znaharka", kind: Power, rarity: Uncommon, cost: 1,
+        passives: [(on: TurnStart, effects: [Hook("random_herb")])],
+        up: (cost: 0),
+    ),
+    (
+        id: "zn_witch_smoke", hero: "znaharka", kind: Skill, rarity: Common, cost: 1,
+        effects: [Apply(Weak, N(1), AllFoes), Block(N(3), AllFriends)],
+        up: (effects: [Apply(Weak, N(1), AllFoes), Block(N(5), AllFriends)]),
+    ),
+]

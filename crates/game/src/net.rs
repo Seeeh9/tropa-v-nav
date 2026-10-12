@@ -186,6 +186,28 @@ pub fn start_local(commands: &mut Commands, db: &nav_core::Content, bots: usize)
     commands.insert_resource(Net { node, lobby: None, code: "LOCAL".into(), locals, timer: 0.0 });
 }
 
+/// Like [`start_local`], but seats the host too and starts the fight at once.
+#[cfg(feature = "dev")]
+pub fn start_local_fight(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, enemies: Vec<String>) {
+    let mut node = Node::host(1, "dev");
+    let mut locals: Vec<Node> = (0..bots).map(|i| Node::join(2 + i as u64, &format!("bot {}", i + 1), 1)).collect();
+    route(db, &mut node, &mut locals);
+    let heroes: Vec<String> = db.heroes.keys().cloned().collect();
+    node.pick_hero(heroes.first().cloned());
+    for (i, bot) in locals.iter_mut().enumerate() {
+        bot.pick_hero(heroes.get(i + 1).cloned());
+    }
+    route(db, &mut node, &mut locals);
+    node.set_ready(true);
+    for bot in &mut locals {
+        bot.set_ready(true);
+    }
+    route(db, &mut node, &mut locals);
+    node.start(db, seed, enemies);
+    route(db, &mut node, &mut locals);
+    commands.insert_resource(Net { node, lobby: None, code: "LOCAL".into(), locals, timer: 0.0 });
+}
+
 // ---- systems ----
 
 fn steam_events(

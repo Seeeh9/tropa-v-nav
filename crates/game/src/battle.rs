@@ -78,6 +78,8 @@ struct UnitWidget {
 #[derive(Component)]
 struct UnitSprite {
     unit: UnitRef,
+    /// Resting colour: white for real art, the hero colour for a missing sprite.
+    base: Color,
     t: f32,
     anim: Option<(Anim, f32)>,
 }
@@ -419,11 +421,10 @@ fn sync_units(
                         UnitRef::Hero(_) => (Label::Intent(0), theme::text("", &fonts.num, 26.0, theme::BONE)),
                     }],
                 ));
-                let mut sprite = art.node(&assets, &stem, color);
-                // heroes face right, enemies are drawn facing left already
-                sprite.0.flip_x = false;
+                let sprite = art.node(&assets, &stem, color);
+                let base = sprite.0.color;
                 u.spawn((
-                    UnitSprite { unit, t: if is_hero { 0.0 } else { 1.3 }, anim: None },
+                    UnitSprite { unit, base, t: if is_hero { 0.0 } else { 1.3 }, anim: None },
                     Node { width: px(size.x), height: px(size.y), ..default() },
                     sprite,
                     UiTransform::IDENTITY,
@@ -511,7 +512,7 @@ fn animate_sprites(
         let mut scale = Vec2::new(1.0 - breath * 0.006, 1.0 + breath * 0.012);
         let mut offset = Vec2::new(0.0, -breath * 2.0);
         let toward = if matches!(s.unit, UnitRef::Hero(_)) { 1.0 } else { -1.0 };
-        let mut tint = Color::WHITE;
+        let mut tint = s.base;
 
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
@@ -526,7 +527,7 @@ fn animate_sprites(
                     offset.x -= toward * 22.0 * (1.0 - p) * (p * 40.0).cos().abs();
                     scale.x *= 1.0 - 0.04 * (1.0 - p);
                     if p < 0.4 {
-                        tint = Color::srgb(1.0, 0.45, 0.4);
+                        tint = s.base.mix(&Color::srgb(1.0, 0.2, 0.15), 0.55);
                     }
                 }
             }
@@ -537,7 +538,7 @@ fn animate_sprites(
         if let UnitRef::Hero(i) = s.unit {
             if session.shown.hero(i).is_some_and(|h| h.downed) {
                 // on the Edge: slumped and dark
-                tint = Color::srgb(0.28, 0.28, 0.32);
+                tint = s.base.mix(&Color::srgb(0.05, 0.05, 0.08), 0.72);
                 offset.y += 46.0;
                 scale *= Vec2::new(1.0, 0.86);
             }
@@ -607,7 +608,26 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
                 if h.downed {
                     l10n.t("battle-downed")
                 } else {
-                    statuses_line(&l10n, &h.statuses)
+                    // the hero's own resource first, then statuses
+                    let mut parts = Vec::new();
+                    let real = truth.hero(i).unwrap_or(h);
+                    if h.mechanic == Mechanic::Moon {
+                        parts.push(format!("{} · {} {}/5", l10n.t(&format!("form-{:?}", h.form)), l10n.t("res-moon"), real.moon));
+                    }
+                    if let Some(m) = h.mask {
+                        parts.push(format!("{} {}", l10n.t("res-mask"), l10n.t(&format!("mask-{m:?}"))));
+                    }
+                    if !h.runes.is_empty() {
+                        parts.push(format!("{}: {}", l10n.t("res-runes"), h.runes.iter().map(|r| l10n.t(&format!("rune-{r:?}"))).collect::<Vec<_>>().join(", ")));
+                    }
+                    if !real.cauldron.is_empty() {
+                        parts.push(format!("{}: {}", l10n.t("res-cauldron"), real.cauldron.iter().map(|x| l10n.t(&format!("herb-{x}"))).collect::<Vec<_>>().join(", ")));
+                    }
+                    let st = statuses_line(&l10n, &h.statuses);
+                    if !st.is_empty() {
+                        parts.push(st);
+                    }
+                    parts.join("\n")
                 }
             }),
             Label::Status(UnitRef::Enemy(i)) => shown.enemy(i).map(|e| statuses_line(&l10n, &e.statuses)),

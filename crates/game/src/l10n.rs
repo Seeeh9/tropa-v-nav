@@ -102,6 +102,7 @@ impl L10n {
             Amount::Consumed(m) => scaled(*m, self.t("amount-consumed")),
             Amount::PlayedThisRound(m) => scaled(*m, self.t("amount-played")),
             Amount::Runes(kind, m) => scaled(*m, self.t(&format!("amount-rune-{kind:?}"))),
+            Amount::Curses(_, m) => scaled(*m, self.t("amount-curses")),
         }
     }
 
@@ -178,6 +179,15 @@ impl L10n {
             Effect::Shift => self.t("fx-shift"),
             Effect::Mask(m) => self.tf("fx-mask", &[("m", self.t(&format!("mask-{m:?}")).into())]),
             Effect::Summon(..) | Effect::StealGold(_) | Effect::Flee => String::new(),
+            Effect::ConsumeCurses(t) => self.fx("consumecurses", Some(*t), &[]),
+            Effect::Flag(name, _) => self.t(&format!("flag-{name}")),
+            Effect::Once(_, body) => self.tf("fx-once", &[("body", self.effects(body).into())]),
+            Effect::OncePerTurn(_, body) => self.tf("fx-onceturn", &[("body", self.effects(body).into())]),
+            Effect::MaxHp(a, _) => self.fx("maxhp", None, &[("n", n(a))]),
+            Effect::Echo(t) => self.fx("echo", Some(*t), &[]),
+            Effect::Herb(herb) => self.tf("fx-herb", &[("h", self.t(&format!("herb-{herb}")).into())]),
+            Effect::Brew => self.t("fx-brew"),
+            Effect::Provoke => self.t("fx-provoke"),
             Effect::Hook(name) => self.t(&format!("hook-{name}")),
         }
     }
@@ -231,7 +241,10 @@ impl L10n {
                         walk(a, keys);
                         walk(b, keys);
                     }
-                    Effect::Repeat(_, a) => walk(a, keys),
+                    Effect::Repeat(_, a) | Effect::Once(_, a) | Effect::OncePerTurn(_, a) => walk(a, keys),
+                    Effect::ConsumeCurses(_) => keys.push("kw-Curse".into()),
+                    Effect::Echo(_) => keys.push("kw-Echo".into()),
+                    Effect::Herb(_) | Effect::Brew => keys.push("kw-Brew".into()),
                     _ => {}
                 }
             }

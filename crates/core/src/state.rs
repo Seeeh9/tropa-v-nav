@@ -22,6 +22,9 @@ pub struct Card {
     pub uid: u32,
     pub def: Id,
     pub upgraded: bool,
+    /// An Echo copy: costs nothing and is gone once played.
+    #[serde(default)]
+    pub free: bool,
 }
 
 pub type Statuses = BTreeMap<StatusKind, i32>;
@@ -56,6 +59,8 @@ pub struct Hero {
     pub form: Form,
     pub moon: i32,
     pub mask: Option<MaskKind>,
+    /// Herbs waiting to be brewed.
+    pub cauldron: Vec<Id>,
     pub gold_lost: i32,
     pub flags: BTreeMap<String, i32>,
 }
@@ -174,6 +179,8 @@ pub enum Event {
     EnemyPhase,
     RuneCarved { player: u8, rune: RuneKind },
     RuneFired { player: u8, rune: RuneKind },
+    HerbAdded { player: u8, herb: Id },
+    Brewed { player: u8, recipe: Id },
     Shifted { player: u8, form: Form },
     MaskChanged { player: u8, mask: MaskKind },
     Taunt { player: u8 },

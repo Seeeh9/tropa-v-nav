@@ -157,3 +157,51 @@ mask-Goat = Goat
 mask-Goat-help = Every card you play gives a random ally 2 Block.
 mask-Mara = Mara
 mask-Mara-help = Attacks apply Fear.
+
+fx-consumecurses = Echo: consume every Curse on the target.
+fx-once = Once per combat: { $body }
+fx-onceturn = Once per turn: { $body }
+fx-maxhp = +{ $n } max HP.
+fx-echo = Echo: gain a free copy of the last card an ally played this round. The copy Exhausts.
+fx-echo-AllFriends = Echo: every hero gains a free copy of the last card an ally played this round.
+fx-herb = Into the Cauldron: { $h }.
+fx-brew = Brew everything in the Cauldron.
+fx-provoke = This enemy now aims at you.
+amount-curses = Curse on the target
+status-Chained = Chained
+status-Chained-help = The Volkolak cannot change form.
+
+flag-mor = Rot on enemies triggers twice and does not fade.
+flag-storm = Thunder runes strike all enemies.
+flag-free_rune = Your next rune is free.
+flag-no_hunger = Hunger has no effect in Beast form.
+flag-foresight = You see enemy intents 2 rounds ahead.
+flag-brew_all = Your next brew affects all allies or all enemies.
+flag-first_rune_twice = Your first rune fires twice.
+flag-big_cauldron = The Cauldron holds 4 herbs.
+
+hook-transfer = Remove all debuffs from the heroes and put them on this enemy.
+hook-kolyada = X times: a random rune fires on every hero.
+hook-balagan = Enemies swap targets among themselves.
+hook-misdirect = This enemy's next attack on a hero hits another enemy instead.
+hook-random_herb = Add a random herb to your hand.
+
+kw-Curse = Curse
+kw-Curse-help = Rot, Evil Eye and Muted. Echo cards consume it for a bonus.
+kw-Echo = Echo
+kw-Echo-help = The copy costs 0 and is gone once played. Alone, it copies your own last card.
+kw-Brew = Brew
+kw-Brew-help = Herbs stay in the Cauldron between turns. Brewing turns them into an effect by recipe.
+
+form-Human = Human
+form-Beast = Beast
+res-moon = Moon
+res-mask = Mask
+res-runes = Runes
+res-cauldron = Cauldron
+
+herb-wormwood = Wormwood
+herb-sleep = Sleep-grass
+herb-weep = Weeping-grass
+herb-burst = Burst-grass
+herb-fern = Fern Flower

@@ -1,0 +1,69 @@
+// Скоморох: Личины (Медведь, Коза, Мара) и Эхо.
+[
+    (
+        id: "sk_dance", hero: "skomoroh", kind: Attack, cost: 1, target: Enemy,
+        effects: [Damage(N(5), Target)],
+        up: (effects: [Damage(N(8), Target)]),
+    ),
+    (
+        id: "sk_defend", hero: "skomoroh", kind: Skill, cost: 1,
+        effects: [Block(N(5), Me)],
+        up: (effects: [Block(N(8), Me)]),
+    ),
+    (
+        id: "sk_mask_bear", hero: "skomoroh", kind: Skill, cost: 0,
+        effects: [Mask(Bear)],
+        up: (effects: [Mask(Bear), Draw(N(1))]),
+    ),
+    (
+        id: "sk_mask_goat", hero: "skomoroh", kind: Skill, cost: 0,
+        effects: [Mask(Goat)],
+        up: (effects: [Mask(Goat), Draw(N(1))]),
+    ),
+    (
+        id: "sk_mask_mara", hero: "skomoroh", kind: Skill, rarity: Common, cost: 0,
+        effects: [Mask(Mara)],
+        up: (effects: [Mask(Mara), Draw(N(1))]),
+    ),
+    (
+        id: "sk_echo", hero: "skomoroh", kind: Skill, cost: 1,
+        effects: [Echo(Me)],
+        up: (cost: 0),
+    ),
+    (
+        id: "sk_tumble", hero: "skomoroh", kind: Skill, cost: 1,
+        effects: [Block(N(4), Me), Draw(N(1))],
+        up: (effects: [Block(N(6), Me), Draw(N(1))]),
+    ),
+    (
+        // в одиночку намерения перемешивать не с кем — остаётся щит
+        id: "sk_fairground", hero: "skomoroh", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Hook("balagan"), If(Not(Coop), [Block(N(6), Me)])],
+        up: (cost: 0),
+    ),
+    (
+        id: "sk_crooked_mirror", hero: "skomoroh", kind: Skill, rarity: Rare, cost: 2,
+        effects: [Echo(AllFriends)],
+        up: (cost: 1),
+    ),
+    (
+        id: "sk_switcheroo", hero: "skomoroh", kind: Skill, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Hook("misdirect")],
+        up: (cost: 0),
+    ),
+    (
+        id: "sk_laughter", hero: "skomoroh", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Apply(Weak, N(2), AllFoes)],
+        up: (effects: [Apply(Weak, N(3), AllFoes)]),
+    ),
+    (
+        id: "sk_mummers", hero: "skomoroh", kind: Power, rarity: Rare, cost: 2,
+        passives: [(on: MaskChanged, effects: [OncePerTurn("mummers", [Energy(N(1), AllFriends)])])],
+        up: (cost: 1),
+    ),
+    (
+        id: "sk_death_dance", hero: "skomoroh", kind: Attack, rarity: Rare, cost: 3, target: Enemy,
+        effects: [Damage(PlayedThisRound(3), Target)],
+        up: (effects: [Damage(PlayedThisRound(4), Target)]),
+    ),
+]

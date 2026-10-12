@@ -297,6 +297,136 @@ def kikimora():
     return f.render(303, rim_color=ROTLIGHT)
 
 
+def robed(seed, robe, rim, extra):
+    """Shared body for the slighter heroes: legs, robe, head; `extra` adds what makes them them."""
+    f = Figure(768, 1024)
+    f.limb([(350, 700), (340, 860), (332, 972)], [40, 32, 28], mix(robe, SOOT, 0.4))
+    f.limb([(430, 700), (446, 860), (456, 972)], [40, 32, 28], mix(robe, SOOT, 0.3))
+    f.poly([(300, 330), (480, 330), (540, 900), (250, 900)], robe)
+    f.poly([(318, 320), (462, 320), (476, 640), (306, 640)], mix(robe, BONE, 0.12))
+    extra(f)
+    return f.render(seed, rim_color=rim)
+
+
+def vorozheya():
+    def extra(f):
+        skin = (150, 152, 140)
+        f.oval(390, 230, 62, 76, skin)
+        # wet hair with bird bones, blind white eyes
+        f.poly([(318, 180), (462, 180), (500, 560), (430, 420), (392, 300), (350, 430), (290, 560)], (22, 22, 24))
+        f.oval(390, 236, 44, 52, skin)
+        f.dot(372, 232, 9, (232, 236, 228), glow=True)
+        f.dot(410, 232, 9, (232, 236, 228), glow=True)
+        for (x, y) in ((306, 420), (478, 400), (300, 520)):
+            f.mark([(x, y), (x + 22, y + 12)], BONE, 4)
+        # raised hand pinching a thread, a doll in the other
+        f.limb([(470, 380), (560, 330), (590, 230)], [22, 16, 12], skin)
+        f.mark([(590, 226), (590, 60)], (200, 196, 180), 2)
+        f.limb([(310, 380), (250, 520), (270, 610)], [22, 16, 12], skin)
+        f.oval(270, 640, 26, 34, (150, 136, 108))
+        f.oval(270, 596, 18, 18, (150, 136, 108))
+        # rope belt with motanka dolls, one oozing tar
+        f.mark([(302, 560), (480, 560)], (120, 100, 70), 6)
+        for i, x in enumerate((330, 390, 450)):
+            f.oval(x, 600, 14, 22, (160, 148, 120) if i else (16, 14, 14))
+        f.mark([(330, 620), (326, 700)], (10, 10, 10), 5)
+    return robed(404, (88, 96, 84), ROTLIGHT, extra)
+
+
+def volhv():
+    def extra(f):
+        skin = (150, 128, 108)
+        # wolf pelt, birch-bark mask, long beard with charms
+        f.poly([(250, 300), (530, 300), (580, 620), (200, 620)], (70, 66, 62))
+        f.oval(390, 230, 62, 76, (120, 116, 110))
+        f.poly([(336, 150), (444, 150), (452, 300), (390, 330), (328, 300)], (190, 180, 150))
+        f.mark([(356, 220), (378, 220)], (20, 16, 14), 6)
+        f.mark([(402, 220), (424, 220)], (20, 16, 14), 6)
+        f.poly([(340, 300), (440, 300), (424, 520), (390, 580), (356, 520)], (176, 174, 168))
+        # staff of lightning-split oak, charred top
+        f.limb([(600, 980), (590, 120)], [12, 9], (58, 44, 32))
+        f.limb([(590, 130), (560, 50)], [8, 3], (20, 18, 18))
+        f.limb([(590, 130), (628, 60)], [8, 3], (20, 18, 18))
+        f.limb([(470, 380), (560, 470), (592, 520)], [24, 18, 14], skin)
+        f.limb([(310, 380), (270, 520), (290, 620)], [24, 18, 14], skin)
+        # freshly cut glowing runes on the forearms
+        for (x, y) in ((276, 500), (284, 548), (548, 452)):
+            f.mark([(x, y), (x + 14, y - 16), (x + 22, y + 6)], FROST, 3)
+            f.dot(x + 12, y - 4, 7, FROST, glow=True)
+    return robed(505, (58, 56, 60), FROST, extra)
+
+
+def volkolak():
+    def extra(f):
+        skin = (140, 112, 92)
+        # wolf pelt with the head as a hood
+        f.poly([(270, 250), (510, 250), (560, 540), (220, 540)], (86, 84, 82))
+        f.oval(390, 230, 60, 74, skin)
+        f.poly([(330, 130), (450, 130), (470, 230), (390, 196), (310, 230)], (74, 72, 70))
+        f.poly([(336, 136), (322, 76), (366, 128)], (60, 58, 58))
+        f.poly([(444, 136), (458, 76), (414, 128)], (60, 58, 58))
+        f.dot(370, 236, 6, CANDLE, glow=True)
+        f.dot(410, 236, 6, CANDLE, glow=True)
+        # the silver chain biting into the neck
+        for i in range(9):
+            f.dot(340 + i * 12, 308 + (i % 2) * 4, 5, (200, 204, 210))
+        f.limb([(470, 380), (560, 480), (600, 560)], [26, 20, 15], skin)
+        f.poly([(596, 556), (700, 600), (604, 580)], (150, 150, 156))
+        f.limb([(310, 380), (262, 500), (300, 590)], [26, 20, 15], skin)
+    return robed(606, (70, 54, 42), (150, 150, 170), extra)
+
+
+def znaharka():
+    def extra(f):
+        skin = (160, 124, 100)
+        # herbs on the back, dark headscarf, burn scars
+        for i in range(6):
+            f.limb([(250 + i * 6, 560), (200 + i * 14, 300 - i * 10)], [7, 3], mix(SWAMP, ROTLIGHT, i / 8))
+        f.oval(390, 232, 58, 72, skin)
+        f.poly([(316, 150), (464, 150), (486, 330), (440, 250), (390, 190), (340, 250), (294, 330)], (40, 32, 34))
+        f.mark([(366, 240), (384, 262)], (110, 70, 60), 5)
+        f.mark([(404, 222), (420, 250)], (110, 70, 60), 5)
+        f.poly([(320, 460), (460, 460), (476, 760), (306, 760)], (120, 108, 88))
+        # arms green to the elbow, the birch-bark pot, a sickle, two jugs
+        f.limb([(470, 380), (560, 500), (580, 600)], [24, 18, 14], (70, 96, 60))
+        f.oval(592, 660, 44, 40, (196, 184, 150))
+        f.mark([(552, 626), (632, 626)], (120, 100, 70), 5)
+        f.limb([(310, 380), (262, 500), (252, 600)], [24, 18, 14], (70, 96, 60))
+        for a in range(10):
+            ang = math.pi * (1.1 + a * 0.09)
+            f.dot(252 + math.cos(ang) * 60, 560 + math.sin(ang) * 60, 6, (170, 172, 176))
+        f.oval(350, 590, 20, 28, (150, 96, 70))
+        f.oval(430, 590, 20, 28, (60, 60, 70))
+    return robed(707, (48, 40, 44), CANDLE, extra)
+
+
+def skomoroh():
+    def extra(f):
+        skin = (150, 126, 110)
+        # patchwork kaftan and bells
+        for i, (x, y) in enumerate([(310, 360), (400, 420), (330, 520), (430, 600), (300, 700), (420, 780)]):
+            col = [(120, 60, 90), (150, 120, 50), (60, 90, 80), (130, 50, 40)][i % 4]
+            f.poly([(x, y), (x + 70, y + 6), (x + 62, y + 80), (x - 6, y + 70)], col)
+        for i in range(8):
+            f.dot(300 + i * 26, 640 + (i % 2) * 10, 7, CANDLE, glow=True)
+        # white wooden mask; the sewn grin shows beneath it
+        f.oval(390, 236, 58, 74, skin)
+        f.oval(390, 218, 56, 62, (226, 222, 210))
+        f.dot(370, 212, 9, (10, 8, 8))
+        f.dot(410, 212, 9, (10, 8, 8))
+        f.mark([(340, 284), (366, 300), (414, 300), (440, 284)], RUST, 4)
+        for x in range(348, 438, 14):
+            f.mark([(x, 288), (x, 308)], (30, 24, 22), 2)
+        # tambourine, three masks at the belt
+        f.limb([(470, 380), (560, 330), (600, 260)], [20, 15, 12], skin)
+        f.oval(616, 226, 52, 52, (150, 110, 70))
+        f.oval(616, 226, 38, 38, (214, 200, 170))
+        f.limb([(310, 380), (250, 470), (236, 560)], [20, 15, 12], skin)
+        for i, col in enumerate(((96, 70, 50), (150, 140, 120), (228, 226, 220))):
+            f.oval(330 + i * 60, 720, 22, 28, col)
+    return robed(808, (92, 70, 110), (150, 120, 170), extra)
+
+
 # ---------------------------------------------------------------- backgrounds
 
 def tree(d, x, base_y, height, width, col, py, lean=0.0):
@@ -520,6 +650,10 @@ def main():
         b = bogatyr()
         save(b, "heroes/bogatyr.png", a.force)
         save(portrait(b, (228, 60, 588, 420)), "portraits/bogatyr.png", a.force)
+        for name, make in (("vorozheya", vorozheya), ("volhv", volhv), ("volkolak", volkolak), ("znaharka", znaharka), ("skomoroh", skomoroh)):
+            sheet = make()
+            save(sheet, f"heroes/{name}.png", a.force)
+            save(portrait(sheet, (210, 70, 570, 430)), f"portraits/{name}.png", a.force)
     if want("enemies"):
         save(grey_wolf(), "enemies/grey_wolf.png", a.force)
         save(kikimora(), "enemies/kikimora.png", a.force)

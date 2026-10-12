@@ -1,3 +1,4 @@
+// Шесть героев, раздел 3 дизайн-документа. Стартовая колода у всех — 10 карт.
 [
     (
         id: "bogatyr", max_hp: 85, mechanic: Valor, relic: "father_amulet",
@@ -5,6 +6,46 @@
             "bogatyr_strike", "bogatyr_strike", "bogatyr_strike", "bogatyr_strike",
             "bogatyr_defend", "bogatyr_defend", "bogatyr_defend", "bogatyr_defend",
             "bogatyr_guard", "bogatyr_sweep",
+        ],
+    ),
+    (
+        id: "vorozheya", max_hp: 70, mechanic: Curse, relic: "motanka_doll",
+        deck: [
+            "vor_whisper", "vor_whisper", "vor_whisper", "vor_whisper",
+            "vor_defend", "vor_defend", "vor_defend", "vor_defend",
+            "vor_hex", "vor_blood_doll",
+        ],
+    ),
+    (
+        id: "volhv", max_hp: 72, mechanic: Runes, relic: "thunder_staff",
+        deck: [
+            "vol_staff", "vol_staff", "vol_staff", "vol_staff",
+            "vol_defend", "vol_defend", "vol_defend", "vol_defend",
+            "vol_thunder", "vol_frost",
+        ],
+    ),
+    (
+        id: "volkolak", max_hp: 80, mechanic: Moon, relic: "fang_on_cord",
+        deck: [
+            "wolf_knife", "wolf_knife", "wolf_knife", "wolf_knife",
+            "wolf_dodge", "wolf_dodge", "wolf_dodge", "wolf_dodge",
+            "wolf_shift", "wolf_howl",
+        ],
+    ),
+    (
+        id: "znaharka", max_hp: 68, mechanic: Brew, relic: "birch_pot",
+        deck: [
+            "zn_sickle", "zn_sickle", "zn_sickle",
+            "zn_defend", "zn_defend", "zn_defend",
+            "herb_wormwood", "herb_sleep", "herb_weep", "zn_brew",
+        ],
+    ),
+    (
+        id: "skomoroh", max_hp: 70, mechanic: Masks, relic: "jingle_bells",
+        deck: [
+            "sk_dance", "sk_dance", "sk_dance",
+            "sk_defend", "sk_defend", "sk_defend",
+            "sk_mask_bear", "sk_mask_goat", "sk_echo", "sk_tumble",
         ],
     ),
 ]

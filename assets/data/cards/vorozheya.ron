@@ -1,0 +1,55 @@
+// Ворожея: Порча трёх видов — Гниль, Сглаз, Немота.
+[
+    (
+        id: "vor_whisper", hero: "vorozheya", kind: Attack, cost: 1, target: Enemy,
+        effects: [Damage(N(5), Target), Apply(Rot, N(1), Target)],
+        up: (effects: [Damage(N(7), Target), Apply(Rot, N(2), Target)]),
+    ),
+    (
+        id: "vor_defend", hero: "vorozheya", kind: Skill, cost: 1,
+        effects: [Block(N(5), Me)],
+        up: (effects: [Block(N(8), Me)]),
+    ),
+    (
+        id: "vor_hex", hero: "vorozheya", kind: Skill, cost: 1, target: Enemy,
+        effects: [Apply(Hex, N(2), Target)],
+        up: (effects: [Apply(Hex, N(3), Target)]),
+    ),
+    (
+        id: "vor_blood_doll", hero: "vorozheya", kind: Skill, cost: 0, target: Enemy,
+        effects: [LoseHp(N(3), Me), Apply(Rot, N(6), Target)],
+        up: (effects: [LoseHp(N(3), Me), Apply(Rot, N(8), Target)]),
+    ),
+    (
+        // урон 3 x вся Порча на цели; метки снимаются
+        id: "vor_lift", hero: "vorozheya", kind: Attack, rarity: Rare, cost: 2, target: Enemy,
+        effects: [ConsumeCurses(Target), Damage(Consumed(3), Target)],
+        up: (effects: [ConsumeCurses(Target), Damage(Consumed(4), Target)]),
+    ),
+    (
+        id: "vor_transfer", hero: "vorozheya", kind: Skill, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Hook("transfer")],
+        up: (cost: 0),
+    ),
+    (
+        id: "vor_family_curse", hero: "vorozheya", kind: Skill, rarity: Uncommon, cost: 2,
+        effects: [Apply(Rot, N(3), AllFoes), Apply(Hex, N(1), AllFoes)],
+        up: (effects: [Apply(Rot, N(4), AllFoes), Apply(Hex, N(2), AllFoes)]),
+    ),
+    (
+        id: "vor_pestilence", hero: "vorozheya", kind: Power, rarity: Rare, cost: 3,
+        effects: [Flag("mor", 1)],
+        up: (cost: 2),
+    ),
+    (
+        id: "vor_black_candle", hero: "vorozheya", kind: Skill, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Apply(Hex, Stat(Hex, Target, 1), Target)],
+        up: (cost: 0),
+    ),
+    (
+        // в одиночку энергия достаётся самой Ворожее, но вдвое меньше
+        id: "vor_blood_pact", hero: "vorozheya", kind: Skill, rarity: Uncommon, cost: 0, target: Ally,
+        effects: [LoseHp(N(4), Me), If(Coop, [Energy(N(2), Target)], [Energy(N(1), Me)])],
+        up: (effects: [LoseHp(N(3), Me), If(Coop, [Energy(N(2), Target)], [Energy(N(1), Me)])]),
+    ),
+]

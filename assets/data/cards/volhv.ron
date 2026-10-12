@@ -1,0 +1,53 @@
+// Волхв: Резы. До 5 рез на себе, до 3 на союзнике; срабатывают в конце хода.
+[
+    (
+        id: "vol_staff", hero: "volhv", kind: Attack, cost: 1, target: Enemy,
+        effects: [Damage(N(6), Target)],
+        up: (effects: [Damage(N(9), Target)]),
+    ),
+    (
+        id: "vol_defend", hero: "volhv", kind: Skill, cost: 1,
+        effects: [Block(N(5), Me)],
+        up: (effects: [Block(N(8), Me)]),
+    ),
+    (
+        id: "vol_thunder", hero: "volhv", kind: Skill, cost: 1, target: AnyHero,
+        effects: [Rune(Thunder, Target)],
+        up: (cost: 0),
+    ),
+    (
+        id: "vol_frost", hero: "volhv", kind: Skill, cost: 1, target: AnyHero,
+        effects: [Rune(Frost, Target)],
+        up: (effects: [Rune(Frost, Target), Block(N(4), Target)]),
+    ),
+    (
+        id: "vol_perun", hero: "volhv", kind: Attack, rarity: Rare, cost: 2, target: Enemy,
+        effects: [Damage(Runes(Thunder, 5), Target)],
+        up: (effects: [Damage(Runes(Thunder, 7), Target)]),
+    ),
+    (
+        id: "vol_storm", hero: "volhv", kind: Power, rarity: Rare, cost: 3,
+        effects: [Flag("storm", 1)],
+        up: (cost: 2),
+    ),
+    (
+        id: "vol_invoke", hero: "volhv", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Invoke],
+        up: (cost: 0),
+    ),
+    (
+        id: "vol_ice_cover", hero: "volhv", kind: Skill, rarity: Uncommon, cost: 1, target: AnyHero,
+        effects: [Rune(Frost, Target), Rune(Frost, Target)],
+        up: (effects: [Rune(Frost, Target), Rune(Frost, Target), Block(N(5), Target)]),
+    ),
+    (
+        id: "vol_prophetic_dream", hero: "volhv", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Draw(N(3)), Flag("free_rune", 1)],
+        up: (effects: [Draw(N(4)), Flag("free_rune", 1)]),
+    ),
+    (
+        id: "vol_kolyada", hero: "volhv", kind: Skill, rarity: Rare, x_cost: true,
+        effects: [Hook("kolyada")],
+        up: (keywords: [Retain]),
+    ),
+]

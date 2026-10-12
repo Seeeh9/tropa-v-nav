@@ -1,0 +1,36 @@
+// Рецепты Варева. `herbs` — набор трав в Котле, "*" — любая трава.
+// Точные рецепты проверяются раньше рецептов со звёздочкой, большие — раньше малых.
+// Цвет папоротника ("fern") подменяет любую траву и удваивает варево (в коде).
+[
+    // из дизайн-документа
+    (id: "double_wormwood", herbs: ["wormwood", "wormwood"], effects: [Damage(N(6), AllFoes)]),
+    (id: "sleep_weep", herbs: ["sleep", "weep"], effects: [Heal(N(5), AllFriends)]),
+    (id: "burst_any", herbs: ["burst", "*"], effects: [Damage(N(15), Target)]),
+
+    // три одинаковые — усиленная версия
+    (id: "triple_wormwood", herbs: ["wormwood", "wormwood", "wormwood"], effects: [Damage(N(12), AllFoes), Apply(Rot, N(2), AllFoes)]),
+    (id: "triple_sleep", herbs: ["sleep", "sleep", "sleep"], effects: [Block(N(10), AllFriends), Apply(Weak, N(2), AllFoes)]),
+    (id: "triple_weep", herbs: ["weep", "weep", "weep"], effects: [Heal(N(10), AllFriends), Cleanse(AllFriends)]),
+    (id: "triple_burst", herbs: ["burst", "burst", "burst"], effects: [Damage(N(40), Target)]),
+
+    // пары
+    (id: "wormwood_sleep", herbs: ["wormwood", "sleep"], effects: [Damage(N(5), AllFoes), Apply(Weak, N(1), AllFoes)]),
+    (id: "wormwood_weep", herbs: ["wormwood", "weep"], effects: [Damage(N(4), AllFoes), Heal(N(3), AllFriends)]),
+    (id: "double_sleep", herbs: ["sleep", "sleep"], effects: [Block(N(8), AllFriends)]),
+    (id: "double_weep", herbs: ["weep", "weep"], effects: [Heal(N(7), AllFriends)]),
+    (id: "double_burst", herbs: ["burst", "burst"], effects: [Damage(N(24), Target)]),
+
+    // по одной
+    (id: "single_wormwood", herbs: ["wormwood"], effects: [Damage(N(4), AllFoes)]),
+    (id: "single_sleep", herbs: ["sleep"], effects: [Block(N(6), Me)]),
+    (id: "single_weep", herbs: ["weep"], effects: [Heal(N(4), Me)]),
+    (id: "single_burst", herbs: ["burst"], effects: [Damage(N(10), Target)]),
+
+    // всё остальное
+    (id: "burst_two_any", herbs: ["burst", "*", "*"], effects: [Damage(N(22), Target)]),
+    (id: "burst_three_any", herbs: ["burst", "*", "*", "*"], effects: [Damage(N(30), Target)]),
+    (id: "mix_two", herbs: ["*", "*"], effects: [Damage(N(5), AllFoes), Block(N(3), AllFriends)]),
+    (id: "mix_three", herbs: ["*", "*", "*"], effects: [Damage(N(8), AllFoes), Heal(N(4), AllFriends)]),
+    (id: "mix_four", herbs: ["*", "*", "*", "*"], effects: [Damage(N(12), AllFoes), Heal(N(6), AllFriends), Block(N(6), AllFriends)]),
+    (id: "mix_one", herbs: ["*"], effects: [Damage(N(3), AllFoes)]),
+]

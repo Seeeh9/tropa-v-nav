@@ -51,12 +51,13 @@ data_enum!(StatusKind {
     Valor,
     Stun,
     Mist,
+    Chained,
 });
 
 impl StatusKind {
     /// Counted in rounds and ticked down when the round closes.
     pub fn timed(self) -> bool {
-        matches!(self, StatusKind::Vulnerable | StatusKind::Weak)
+        matches!(self, StatusKind::Vulnerable | StatusKind::Weak | StatusKind::Chained)
     }
     /// Gone when the round closes.
     pub fn round_only(self) -> bool {
@@ -81,6 +82,8 @@ pub enum Amount {
     PlayedThisRound(i32),
     /// Runes of a kind across all heroes, times the multiplier.
     Runes(RuneKind, i32),
+    /// Rot, Hex and Weak stacks together on a unit, times the multiplier.
+    Curses(Tgt, i32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -117,6 +120,8 @@ pub enum Effect {
     Taunt,
     /// Strip all stacks of a status and remember how many there were.
     Consume(StatusKind, Tgt),
+    /// Strip Rot, Hex and Weak together and remember the total.
+    ConsumeCurses(Tgt),
     /// Strip every debuff.
     Cleanse(Tgt),
     If(Cond, Vec<Effect>, #[serde(default)] Vec<Effect>),
@@ -128,6 +133,22 @@ pub enum Effect {
     Summon(Id, #[serde(default = "one")] i32),
     StealGold(i32),
     Flee,
+    /// Adds to a named counter on the source hero (`turn_*` counters reset every round).
+    Flag(String, i32),
+    /// Runs once per combat for this hero, keyed by name.
+    Once(String, Vec<Effect>),
+    /// Runs once per round for this hero, keyed by name.
+    OncePerTurn(String, Vec<Effect>),
+    MaxHp(Amount, Tgt),
+    /// A free, exhausting copy of the last card an ally played this round
+    /// (your own last card when alone) into the hands of these heroes.
+    Echo(Tgt),
+    /// Drops this herb into the source hero's cauldron.
+    Herb(Id),
+    /// Empties the cauldron and resolves its recipe.
+    Brew,
+    /// The targeted enemy now aims its move at the source hero.
+    Provoke,
     /// Escape hatch into named Rust code for one-off mechanics.
     Hook(String),
 }
@@ -295,6 +316,14 @@ fn common() -> Rarity {
     Rarity::Common
 }
 
+/// What a set of herbs brews into. `herbs` is a multiset; `"*"` matches any herb.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RecipeDef {
+    pub id: Id,
+    pub herbs: Vec<Id>,
+    pub effects: Vec<Effect>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MoveDef {
     pub id: Id,
@@ -342,6 +371,8 @@ pub struct Content {
     pub relics: BTreeMap<Id, RelicDef>,
     pub enemies: BTreeMap<Id, EnemyDef>,
     pub encounters: BTreeMap<Id, EncounterDef>,
+    /// Most specific first: the first recipe that matches the cauldron wins.
+    pub recipes: Vec<RecipeDef>,
 }
 
 #[derive(Debug)]
@@ -403,7 +434,14 @@ impl Content {
         Ok(())
     }
 
-    /// Loads every `.ron` under `dir/{cards,heroes,relics,enemies,encounters}`.
+    pub fn add_recipes(&mut self, src: &str) -> Result<(), LoadError> {
+        self.recipes.extend(parse::<RecipeDef>(src, "recipes")?);
+        // exact recipes before wildcard ones, bigger before smaller
+        self.recipes.sort_by_key(|r| (r.herbs.iter().filter(|h| *h == "*").count(), std::cmp::Reverse(r.herbs.len())));
+        Ok(())
+    }
+
+    /// Loads every `.ron` under `dir/{cards,heroes,relics,enemies,encounters,recipes}`.
     pub fn load_dir(dir: &Path) -> Result<Content, LoadError> {
         let mut c = Content::default();
         let each = |sub: &str, f: &mut dyn FnMut(&str) -> Result<(), LoadError>| {
@@ -426,6 +464,7 @@ impl Content {
         each("relics", &mut |s| c.add_relics(s))?;
         each("enemies", &mut |s| c.add_enemies(s))?;
         each("encounters", &mut |s| c.add_encounters(s))?;
+        each("recipes", &mut |s| c.add_recipes(s))?;
         c.validate()?;
         Ok(c)
     }
@@ -441,7 +480,7 @@ impl Content {
                         walk(a, f);
                         walk(b, f);
                     }
-                    Effect::Repeat(_, a) => walk(a, f),
+                    Effect::Repeat(_, a) | Effect::Once(_, a) | Effect::OncePerTurn(_, a) => walk(a, f),
                     _ => {}
                 }
             }
@@ -484,6 +523,9 @@ impl Content {
             if e.pattern.is_empty() {
                 bad.push(format!("{}: empty pattern", e.id));
             }
+        }
+        for r in &self.recipes {
+            check(&mut bad, &r.id, &r.effects);
         }
         for h in self.heroes.values() {
             for c in &h.deck {

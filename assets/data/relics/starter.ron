@@ -1,7 +1,33 @@
+// Стартовые реликвии героев.
 [
     (
         // Отцовский оберег: в начале боя Богатырь получает 6 щита, каждый союзник — 3
         id: "father_amulet", rarity: Starter, hero: "bogatyr",
         passives: [(on: CombatStart, effects: [Block(N(6), Me), Block(N(3), OtherFriends)])],
+    ),
+    (
+        // Куколка-мотанка: в начале боя случайный враг получает 3 Гнили
+        id: "motanka_doll", rarity: Starter, hero: "vorozheya",
+        passives: [(on: CombatStart, effects: [Apply(Rot, N(3), RandomFoe)])],
+    ),
+    (
+        // Посох громового дуба: первая реза в каждом бою срабатывает дважды
+        id: "thunder_staff", rarity: Starter, hero: "volhv",
+        passives: [(on: CombatStart, effects: [Flag("first_rune_twice", 1)])],
+    ),
+    (
+        // Клык на шнурке: при первом обращении в бою доберите 2 карты
+        id: "fang_on_cord", rarity: Starter, hero: "volkolak",
+        passives: [(on: Shifted, effects: [Once("fang", [Draw(N(2))])])],
+    ),
+    (
+        // Берестяной котелок: Котёл вмещает 4 травы
+        id: "birch_pot", rarity: Starter, hero: "znaharka",
+        passives: [(on: CombatStart, effects: [Flag("big_cauldron", 1)])],
+    ),
+    (
+        // Бубенцы: первая смена личины за ход добирает 1 карту
+        id: "jingle_bells", rarity: Starter, hero: "skomoroh",
+        passives: [(on: MaskChanged, effects: [OncePerTurn("bells", [Draw(N(1))])])],
     ),
 ]

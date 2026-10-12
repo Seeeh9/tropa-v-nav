@@ -1,0 +1,61 @@
+// Волколак: Луна. У карт две стороны — Человек / Зверь (поле `beast`).
+[
+    (
+        // Нож / Когти
+        id: "wolf_knife", hero: "volkolak", kind: Attack, cost: 1, target: Enemy,
+        effects: [Damage(N(6), Target)],
+        beast: (effects: [Damage(N(9), Target), Apply(Bleed, N(2), Target)]),
+        up: (effects: [Damage(N(9), Target)]),
+        beast_up: (effects: [Damage(N(12), Target), Apply(Bleed, N(3), Target)]),
+    ),
+    (
+        // Оборона / Прыжок
+        id: "wolf_dodge", hero: "volkolak", kind: Skill, cost: 1,
+        effects: [Block(N(5), Me)],
+        beast: (kind: Attack, target: Enemy, effects: [Damage(N(4), Target), Provoke]),
+        up: (effects: [Block(N(8), Me)]),
+        beast_up: (kind: Attack, target: Enemy, effects: [Damage(N(6), Target), Provoke]),
+    ),
+    (
+        id: "wolf_shift", hero: "volkolak", kind: Skill, cost: 0,
+        effects: [Shift],
+        up: (effects: [Shift, Draw(N(1))]),
+    ),
+    (
+        id: "wolf_howl", hero: "volkolak", kind: Skill, cost: 1,
+        effects: [Apply(TempStrength, N(1), AllFriends)],
+        up: (effects: [Apply(TempStrength, N(2), AllFriends)]),
+    ),
+    (
+        id: "wolf_maul", hero: "volkolak", kind: Attack, rarity: Uncommon, cost: 2, target: Enemy,
+        effects: [Hits(N(4), 4, Target)],
+        beast: (effects: [Hits(N(6), 4, Target)]),
+        up: (effects: [Hits(N(5), 4, Target)]),
+        beast_up: (effects: [Hits(N(7), 4, Target)]),
+    ),
+    (
+        id: "wolf_trail", hero: "volkolak", kind: Skill, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Apply(HuntMark, N(4), Target)],
+        up: (effects: [Apply(HuntMark, N(6), Target)]),
+    ),
+    (
+        id: "wolf_devour", hero: "volkolak", kind: Attack, rarity: Rare, cost: 1, target: Enemy,
+        effects: [Damage(N(10), Target), If(Fatal, [Heal(N(8), Me), MaxHp(N(1), Me)])],
+        up: (effects: [Damage(N(14), Target), If(Fatal, [Heal(N(8), Me), MaxHp(N(1), Me)])]),
+    ),
+    (
+        id: "wolf_blood_moon", hero: "volkolak", kind: Power, rarity: Rare, cost: 2,
+        effects: [Flag("no_hunger", 1)],
+        up: (cost: 1),
+    ),
+    (
+        id: "wolf_silver_chain", hero: "volkolak", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Apply(Chained, N(2), Me), Block(N(12), Me)],
+        up: (effects: [Apply(Chained, N(2), Me), Block(N(16), Me)]),
+    ),
+    (
+        id: "wolf_scent", hero: "volkolak", kind: Skill, rarity: Uncommon, cost: 0,
+        effects: [Flag("foresight", 2)],
+        up: (effects: [Flag("foresight", 2), Draw(N(1))]),
+    ),
+]

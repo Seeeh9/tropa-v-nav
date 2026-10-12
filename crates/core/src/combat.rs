@@ -45,7 +45,7 @@ pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (C
             .iter()
             .map(|(def, upgraded)| {
                 next_uid += 1;
-                Card { uid: next_uid, def: def.clone(), upgraded: *upgraded }
+                Card { uid: next_uid, def: def.clone(), upgraded: *upgraded, free: false }
             })
             .collect();
         rng.shuffle(&mut draw);
@@ -74,6 +74,7 @@ pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (C
             form: Form::Human,
             moon: 0,
             mask: None,
+            cauldron: Vec::new(),
             gold_lost: 0,
             flags: BTreeMap::new(),
         });
@@ -484,6 +485,10 @@ impl<'a> Exec<'a> {
             }
         }
         if let Some(UnitRef::Hero(i)) = src {
+            // Devour: a kill in Beast form feeds the werewolf
+            if self.s.heroes[i as usize].form == Form::Beast {
+                self.heal(UnitRef::Hero(i), 3);
+            }
             self.fire(i, Trigger::Kill);
         }
     }
@@ -517,7 +522,7 @@ impl<'a> Exec<'a> {
 
     pub(crate) fn add_card(&mut self, slot: u8, def: &str, pile: Pile) {
         self.s.next_uid += 1;
-        let card = Card { uid: self.s.next_uid, def: def.to_string(), upgraded: false };
+        let card = Card { uid: self.s.next_uid, def: def.to_string(), upgraded: false, free: false };
         let h = self.hero(slot);
         let pile = if pile == Pile::Hand && h.hand.len() >= HAND_LIMIT { Pile::Discard } else { pile };
         match pile {
@@ -541,7 +546,15 @@ impl<'a> Exec<'a> {
         if view.has(Keyword::Unplayable) {
             return Err(ActionError::Unplayable);
         }
-        let cost = if view.x_cost { h.energy } else { view.cost };
+        let carves = view.effects.iter().any(|e| matches!(e, Effect::Rune(..)));
+        let free_rune = carves && h.flags.get("free_rune").copied().unwrap_or(0) > 0;
+        let cost = if card.free || free_rune {
+            0
+        } else if view.x_cost {
+            h.energy
+        } else {
+            view.cost
+        };
         if h.energy < cost {
             return Err(ActionError::NotEnoughEnergy);
         }
@@ -559,6 +572,9 @@ impl<'a> Exec<'a> {
         let h = self.hero(p);
         h.hand.remove(pos);
         h.energy -= cost;
+        if free_rune {
+            *h.flags.entry("free_rune".into()).or_insert(1) -= 1;
+        }
         self.ev.push(Event::CardPlayed { player: p, card: card.def.clone(), upgraded: card.upgraded, target });
         let mut ctx = Ctx {
             src: UnitRef::Hero(p),
@@ -575,7 +591,7 @@ impl<'a> Exec<'a> {
         let h = self.hero(p);
         if view.kind == CardType::Power {
             h.powers.extend(view.passives.iter().cloned());
-        } else if view.has(Keyword::Exhaust) {
+        } else if view.has(Keyword::Exhaust) || card.free {
             h.exhaust.push(card.clone());
             self.ev.push(Event::Exhausted { player: p, card: card.def.clone() });
         } else {
@@ -625,6 +641,9 @@ impl<'a> Exec<'a> {
     }
 
     fn shift(&mut self, p: u8) {
+        if self.s.status(UnitRef::Hero(p), S::Chained) > 0 {
+            return;
+        }
         let h = self.hero(p);
         h.form = if h.form == Form::Human { Form::Beast } else { Form::Human };
         h.moon = 0;
@@ -659,16 +678,32 @@ impl<'a> Exec<'a> {
     }
 
     fn fire_runes(&mut self, slot: u8) {
+        // the thunder-oak staff: the first rune its bearer carved fires twice
+        let twice = self.s.heroes[slot as usize].flags.contains_key("first_rune_twice");
+        for (i, rune) in self.s.heroes[slot as usize].runes.clone().into_iter().enumerate() {
+            self.fire_rune(slot, rune);
+            if i == 0 && twice {
+                self.fire_rune(slot, rune);
+            }
+        }
+    }
+
+    pub(crate) fn fire_rune(&mut self, slot: u8, rune: RuneKind) {
         let me = UnitRef::Hero(slot);
-        for rune in self.s.heroes[slot as usize].runes.clone() {
+        {
             if self.s.heroes[slot as usize].downed {
-                break;
+                return;
             }
             self.ev.push(Event::RuneFired { player: slot, rune });
             match rune {
                 RuneKind::Thunder => {
                     let foes = self.living();
-                    if let Some(t) = self.s.rng.pick(&foes).copied() {
+                    // Storm: thunder strikes every enemy instead of one
+                    if self.s.heroes.iter().any(|h| !h.downed && h.flags.contains_key("storm")) {
+                        for t in foes {
+                            self.hurt(Some(me), UnitRef::Enemy(t), 6, false);
+                        }
+                    } else if let Some(t) = self.s.rng.pick(&foes).copied() {
                         self.hurt(Some(me), UnitRef::Enemy(t), 6, false);
                     }
                 }
@@ -729,6 +764,10 @@ impl<'a> Exec<'a> {
             }
             Amount::Consumed(m) => ctx.consumed * m,
             Amount::PlayedThisRound(m) => self.s.log.len() as i32 * m,
+            Amount::Curses(who, m) => {
+                let us = self.targets(ctx, *who);
+                us.iter().map(|u| self.s.status(*u, S::Rot) + self.s.status(*u, S::Hex) + self.s.status(*u, S::Weak)).sum::<i32>() * m
+            }
             Amount::Runes(kind, m) => {
                 let n: usize = self.s.heroes.iter().map(|h| h.runes.iter().filter(|r| *r == kind).count()).sum();
                 n as i32 * m
@@ -960,9 +999,158 @@ impl<'a> Exec<'a> {
                         }
                     }
                 }
+                Effect::ConsumeCurses(t) => {
+                    ctx.consumed = 0;
+                    for u in self.targets(ctx, *t) {
+                        for st in [S::Rot, S::Hex, S::Weak] {
+                            ctx.consumed += self.clear_status(u, st);
+                        }
+                    }
+                }
+                Effect::Flag(name, n) => {
+                    if let UnitRef::Hero(i) = ctx.src {
+                        *self.hero(i).flags.entry(name.clone()).or_insert(0) += n;
+                    }
+                }
+                Effect::Once(name, body) | Effect::OncePerTurn(name, body) => {
+                    if let UnitRef::Hero(i) = ctx.src {
+                        // per-round keys live under `turn_`, which the round start wipes
+                        let key = if matches!(e, Effect::OncePerTurn(..)) { format!("turn_{name}") } else { format!("once_{name}") };
+                        if !self.s.heroes[i as usize].flags.contains_key(&key) {
+                            self.hero(i).flags.insert(key, 1);
+                            self.run(body, ctx);
+                        }
+                    }
+                }
+                Effect::MaxHp(a, t) => {
+                    let n = self.amount(ctx, a);
+                    for u in self.targets(ctx, *t) {
+                        if let UnitRef::Hero(i) = u {
+                            let h = self.hero(i);
+                            h.max_hp = (h.max_hp + n).max(1);
+                            h.hp = (h.hp + n.max(0)).min(h.max_hp);
+                        }
+                    }
+                }
+                Effect::Echo(t) => {
+                    let UnitRef::Hero(me) = ctx.src else { continue };
+                    // an ally's last card; alone, your own
+                    let last = self
+                        .s
+                        .log
+                        .iter()
+                        .rev()
+                        .find(|p| p.player != me)
+                        .or_else(|| self.s.log.iter().rev().find(|p| p.player == me))
+                        .map(|p| (p.card.clone(), p.upgraded));
+                    let Some((def, upgraded)) = last else { continue };
+                    for u in self.targets(ctx, *t) {
+                        if let UnitRef::Hero(i) = u {
+                            self.s.next_uid += 1;
+                            let card = Card { uid: self.s.next_uid, def: def.clone(), upgraded, free: true };
+                            let h = self.hero(i);
+                            if h.hand.len() < HAND_LIMIT {
+                                h.hand.push(card);
+                                self.ev.push(Event::CardAdded { player: i, card: def.clone(), pile: Pile::Hand });
+                            }
+                        }
+                    }
+                }
+                Effect::Herb(herb) => {
+                    if let UnitRef::Hero(i) = ctx.src {
+                        let h = self.hero(i);
+                        let room = if h.flags.contains_key("big_cauldron") { 4 } else { 3 };
+                        if h.cauldron.len() < room {
+                            h.cauldron.push(herb.clone());
+                            self.ev.push(Event::HerbAdded { player: i, herb: herb.clone() });
+                        }
+                    }
+                }
+                Effect::Brew => self.brew(ctx),
+                Effect::Provoke => {
+                    if let (UnitRef::Hero(me), Some(UnitRef::Enemy(uid))) = (ctx.src, ctx.target) {
+                        if let Some(idx) = self.enemy_idx(uid) {
+                            if let Some(intent) = &mut self.s.enemies[idx].intent {
+                                if intent.target.is_some() {
+                                    intent.target = Some(me);
+                                    let mv = intent.mv;
+                                    self.ev.push(Event::Intent { enemy: uid, mv, target: Some(me) });
+                                }
+                            }
+                        }
+                    }
+                }
                 Effect::Hook(name) => crate::hooks::run(self, ctx, name),
             }
         }
+    }
+
+    /// Resolves the cauldron: the first recipe whose herbs match is brewed.
+    fn brew(&mut self, ctx: &mut Ctx) {
+        let UnitRef::Hero(me) = ctx.src else { return };
+        let herbs = std::mem::take(&mut self.hero(me).cauldron);
+        if herbs.is_empty() {
+            return;
+        }
+        // fern flower stands in for any herb and doubles the brew
+        let ferns = herbs.iter().filter(|h| *h == "fern").count();
+        let plain: Vec<&Id> = herbs.iter().filter(|h| *h != "fern").collect();
+        let found = self.c.recipes.iter().find(|r| {
+            if r.herbs.len() != herbs.len() {
+                return false;
+            }
+            let mut have = plain.clone();
+            let mut wild = ferns;
+            let mut stars = 0;
+            for need in &r.herbs {
+                if need == "*" {
+                    stars += 1;
+                } else if let Some(i) = have.iter().position(|h| *h == need) {
+                    have.remove(i);
+                } else if wild > 0 {
+                    wild -= 1;
+                } else {
+                    return false;
+                }
+            }
+            have.len() + wild == stars
+        });
+        let Some(recipe) = found else { return };
+        let mut effects = recipe.effects.clone();
+        let id = recipe.id.clone();
+        // "Brew for all": single targets widen to the whole side
+        let wide = self.s.heroes[me as usize].flags.get("brew_all").copied().unwrap_or(0) > 0;
+        if wide {
+            *self.hero(me).flags.entry("brew_all".into()).or_insert(1) -= 1;
+            fn widen(list: &mut [Effect]) {
+                let w = |t: &mut Tgt| {
+                    *t = match *t {
+                        Tgt::Target | Tgt::RandomFoe => Tgt::AllFoes,
+                        Tgt::Me => Tgt::AllFriends,
+                        other => other,
+                    }
+                };
+                for e in list {
+                    match e {
+                        Effect::Damage(_, t) | Effect::Hits(_, _, t) | Effect::Block(_, t) | Effect::Apply(_, _, t) | Effect::Heal(_, t) => w(t),
+                        Effect::If(_, a, b) => {
+                            widen(a);
+                            widen(b);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            widen(&mut effects);
+        }
+        self.ev.push(Event::Brewed { player: me, recipe: id });
+        // brews are potions, not weapon swings
+        let was = ctx.attack;
+        ctx.attack = false;
+        for _ in 0..if ferns > 0 { 2 } else { 1 } {
+            self.run(&effects, ctx);
+        }
+        ctx.attack = was;
     }
 
     // ---- round flow ----
@@ -999,6 +1187,7 @@ impl<'a> Exec<'a> {
             }
             h.energy = BASE_ENERGY;
             h.ready = false;
+            h.flags.retain(|k, _| !k.starts_with("turn_"));
             let hungry = h.form == Form::Beast && !h.flags.contains_key("no_hunger");
             if hungry {
                 self.lose_hp(UnitRef::Hero(slot), 2);
@@ -1083,9 +1272,19 @@ impl<'a> Exec<'a> {
                     target = self.s.rng.pick(&standing).copied();
                 }
                 self.ev.push(Event::EnemyMove { enemy: uid, mv: intent.mv });
+                // Switcheroo: the blow meant for a hero lands on another enemy
+                let mut aim = target.map(UnitRef::Hero);
+                if self.s.enemies[idx].flags.remove("misdirect").is_some() && aim.is_some() {
+                    let others: Vec<u32> = self.living().into_iter().filter(|u| *u != uid).collect();
+                    aim = self.s.rng.pick(&others).copied().map(UnitRef::Enemy);
+                    if aim.is_none() {
+                        self.rot_tick(me);
+                        continue;
+                    }
+                }
                 let mut ctx = Ctx {
                     src: me,
-                    target: target.map(UnitRef::Hero),
+                    target: aim,
                     x: 0,
                     consumed: 0,
                     fatal: false,
@@ -1131,8 +1330,14 @@ impl<'a> Exec<'a> {
     fn rot_tick(&mut self, u: UnitRef) {
         let rot = self.s.status(u, S::Rot);
         if rot > 0 && self.exists(u) {
+            // Pestilence: Rot on enemies bites twice and does not fade
+            let mor = matches!(u, UnitRef::Enemy(_)) && self.s.heroes.iter().any(|h| !h.downed && h.flags.contains_key("mor"));
             self.hurt(None, u, rot, false);
-            self.add_status(u, S::Rot, -1);
+            if mor {
+                self.hurt(None, u, rot, false);
+            } else {
+                self.add_status(u, S::Rot, -1);
+            }
         }
     }
 

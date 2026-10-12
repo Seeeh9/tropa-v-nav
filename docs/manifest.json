@@ -257,5 +257,25 @@
       "enemies/death_oak_chest": "same picture as death_oak",
       "enemies/death_egg_solo": "same picture as death_egg"
     }
+  },
+  "music": {
+    "note": "Generated on 2026-10-12 in Flow Music (flowmusic.app, account maksdndz1), session 5c315021-f260-4cba-a190-6473ff8721a8, one take each, taken as generated. Imported with tools/music_in.py. Nobody on the project side has listened to them: only length, level and decoding were checked. Battle tracks are whole mixes stored as layer one; the site offers 'Split stems', which could give the three adaptive layers, not done yet.",
+    "tracks": [
+      "menu",
+      "village",
+      "map",
+      "rest",
+      "shop",
+      "omen",
+      "end",
+      "battle_act1_l1",
+      "battle_act2_l1",
+      "battle_act3_l1",
+      "elite_l1",
+      "boss_act1_l1",
+      "boss_act2_l1",
+      "boss_act3_l1",
+      "koschei_l1"
+    ]
   }
 }

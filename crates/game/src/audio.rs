@@ -23,6 +23,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, load)
         .add_systems(Update, cue_sounds.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers))
+        .add_systems(Update, (ambient, fade_ambient))
         .add_systems(OnEnter(AppState::Battle), start_battle_music)
         .add_systems(OnExit(AppState::Battle), stop_music)
         .add_observer(|_: On<Activate>, mut commands: Commands, sfx: Res<Sfx>, mixer: Res<Mixer>| sfx.play(&mut commands, "click", &mixer, 1.0));
@@ -91,6 +92,64 @@ fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res
     }
 }
 
+/// A generated track if there is one, else the synthesised stand-in.
+fn music_file(art: &Art, name: &str) -> Option<String> {
+    let stem = format!("music/{name}");
+    art.find(&stem, "ogg", "flow").filter(|p| p.ends_with("-flow.ogg")).or_else(|| art.find(&stem, "wav", "flow"))
+}
+
+// ---- music between battles ----
+
+/// The loop that plays outside battle. One is on its way in; older ones fade out and go.
+#[derive(Component)]
+struct Ambient {
+    track: &'static str,
+    target: f32,
+    level: f32,
+}
+
+/// Which loop belongs to which screen. Battle has its own layered music.
+fn ambient_track(state: AppState) -> Option<&'static str> {
+    Some(match state {
+        AppState::Menu | AppState::Settings | AppState::Coop | AppState::Lobby => "menu",
+        AppState::Village | AppState::Chronicle => "village",
+        AppState::Map | AppState::Reward => "map",
+        AppState::Rest => "rest",
+        AppState::Shop => "shop",
+        AppState::Omen => "omen",
+        AppState::RunEnd => "end",
+        _ => return None,
+    })
+}
+
+fn ambient(mut commands: Commands, state: Res<State<AppState>>, art: Res<Art>, assets: Res<AssetServer>, mut playing: Query<&mut Ambient>) {
+    let want = ambient_track(*state.get());
+    let mut on = false;
+    for mut a in &mut playing {
+        a.target = if Some(a.track) == want { 1.0 } else { 0.0 };
+        on |= Some(a.track) == want;
+    }
+    if let (Some(track), false) = (want, on) {
+        if let Some(path) = music_file(&art, track) {
+            commands.spawn((Ambient { track, target: 1.0, level: 0.0 }, AudioPlayer::<AudioSource>::new(assets.load(path)), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
+        }
+    }
+}
+
+fn fade_ambient(mut commands: Commands, time: Res<Time>, mixer: Res<Mixer>, mut playing: Query<(Entity, &mut Ambient, Option<&mut AudioSink>)>) {
+    for (entity, mut a, sink) in &mut playing {
+        // a second and a half to cross from one place's music to the next
+        let step = time.delta_secs() / 1.5;
+        a.level = if a.level < a.target { (a.level + step).min(a.target) } else { (a.level - step).max(a.target) };
+        if let Some(mut sink) = sink {
+            sink.set_volume(Volume::Linear(a.level * mixer.music * 0.8));
+        }
+        if a.target == 0.0 && a.level == 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 // ---- adaptive battle music ----
 
 /// One of the three stacked layers of a battle track, and how loud it should be now.
@@ -112,7 +171,7 @@ fn start_battle_music(mut commands: Commands, art: Res<Art>, assets: Res<AssetSe
     };
     // all layers start together and stay in step; only their volume moves
     for index in 1..=3u8 {
-        let Some(path) = art.find(&format!("music/{track}_l{index}"), "ogg", "flow") else { continue };
+        let Some(path) = music_file(&art, &format!("{track}_l{index}")) else { continue };
         commands.spawn((
             MusicLayer { index, target: if index == 1 { 1.0 } else { 0.0 }, level: 0.0 },
             AudioPlayer::<AudioSource>::new(assets.load(path)),

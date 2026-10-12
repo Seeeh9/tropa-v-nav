@@ -135,7 +135,6 @@ move-pilfer-desc = Крадёт 15 золота. Убейте её — золо�
 move-vanish-desc = Убегает с награбленным.
 move-delusion-desc = Накладывает Немоту 2.
 move-swell-desc = Получает Силу 2.
-move-evil_eye-desc = Накладывает Надлом 2.
 move-rage-desc = Получает Силу 3 и 10 щита.
 move-call_trees-desc = Призывает двух Древ-стражей.
 move-bark-desc = 20 щита и Сила 1.

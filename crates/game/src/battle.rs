@@ -29,6 +29,8 @@ pub fn plugin(app: &mut App) {
         .init_resource::<RunOutbox>()
         .init_resource::<Cues>()
         .init_resource::<HoverTop>()
+        .init_resource::<Shake>()
+        .insert_resource(Comfort { less_shake: false, ink: false })
         .init_resource::<TooltipText>()
         .add_systems(OnEnter(AppState::Battle), enter)
         .add_systems(OnExit(AppState::Battle), exit)
@@ -38,7 +40,7 @@ pub fn plugin(app: &mut App) {
                 playback,
                 (sync_units, sync_hand, sync_potions, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_bars, update_tooltip),
-                (floaters, dying, style_buttons),
+                (floaters, dying, style_buttons, shake_screen),
             )
                 .chain()
                 .run_if(in_state(AppState::Battle))
@@ -136,6 +138,28 @@ struct Floater {
     life: f32,
 }
 
+/// Screen shake in progress: strength in stage pixels, fading out.
+#[derive(Resource, Default)]
+struct Shake {
+    strength: f32,
+    t: f32,
+}
+
+/// Comfort settings that never touch game state.
+#[derive(Resource)]
+pub struct Comfort {
+    pub less_shake: bool,
+    /// Blood shown as black ink.
+    pub ink: bool,
+}
+
+impl Comfort {
+    /// The colour of a wound: fresh blood, or ink for those who want less gore.
+    pub fn blood(&self) -> Color {
+        if self.ink { Color::srgb(0.03, 0.03, 0.05) } else { theme::FRESH_BLOOD }
+    }
+}
+
 /// The one hovered card that is on top, since fanned cards overlap.
 #[derive(Resource, Default)]
 struct HoverTop(Option<u32>);
@@ -207,7 +231,7 @@ fn enter(
     let act = net.as_ref().and_then(|n| n.node.state.as_ref()).map(|r| r.act.min(3)).unwrap_or(1);
 
     let root = commands
-        .spawn((BattleRoot, layer(), Pickable::IGNORE, ChildOf(*stage)))
+        .spawn((BattleRoot, layer(), UiTransform::IDENTITY, Pickable::IGNORE, ChildOf(*stage)))
         .with_children(|p| {
             // each act has its own backdrop; until it is painted, the forest stands in
             let backdrop = [format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(&assets, s).is_some()).unwrap_or_default();
@@ -522,6 +546,7 @@ fn animate_sprites(
     session: Res<Session>,
     time: Res<Time>,
     speed: Res<AnimSpeed>,
+    comfort: Res<Comfort>,
     mut sprites: Query<(&mut UnitSprite, &mut UiTransform, &mut ImageNode)>,
 ) {
     let dt = time.delta_secs() * speed.0;
@@ -547,7 +572,7 @@ fn animate_sprites(
                     offset.x -= toward * 22.0 * (1.0 - p) * (p * 40.0).cos().abs();
                     scale.x *= 1.0 - 0.04 * (1.0 - p);
                     if p < 0.4 {
-                        tint = s.base.mix(&Color::srgb(1.0, 0.2, 0.15), 0.55);
+                        tint = s.base.mix(&if comfort.ink { Color::srgb(0.1, 0.1, 0.14) } else { Color::srgb(1.0, 0.2, 0.15) }, 0.55);
                     }
                 }
             }
@@ -1114,6 +1139,8 @@ fn cue_effects(
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     mut sprites: Query<&mut UnitSprite>,
+    mut shake: ResMut<Shake>,
+    comfort: Res<Comfort>,
 ) {
     let float = |commands: &mut Commands, unit: UnitRef, text: String, color: Color, size: f32, dx: f32| {
         let Some((foot, sz)) = unit_place(&session.shown, unit) else { return };
@@ -1141,8 +1168,14 @@ fn cue_effects(
                     }
                 }
                 if *lost > 0 {
+                    // the screen shakes with the size of the blow, 12 px at most
+                    let s = (*lost as f32 * 0.5).min(12.0);
+                    if s > shake.strength {
+                        shake.strength = s;
+                        shake.t = 0.0;
+                    }
                     play(*dst, Anim::Hit);
-                    float(&mut commands, *dst, format!("-{lost}"), theme::FRESH_BLOOD, 46.0 + (*lost as f32).min(30.0), 0.0);
+                    float(&mut commands, *dst, format!("-{lost}"), comfort.blood(), 46.0 + (*lost as f32).min(30.0), 0.0);
                 }
                 if *blocked > 0 {
                     float(&mut commands, *dst, format!("-{blocked}"), theme::FROST, 34.0, -70.0);
@@ -1177,6 +1210,21 @@ fn floaters(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut 
             node.top = px(top - speed * dt);
         }
         color.0.set_alpha(((1.0 - p) * 2.2).min(1.0));
+    }
+}
+
+fn shake_screen(time: Res<Time>, comfort: Res<Comfort>, mut shake: ResMut<Shake>, mut root: Single<&mut UiTransform, With<BattleRoot>>) {
+    if shake.strength <= 0.01 {
+        return;
+    }
+    shake.t += time.delta_secs();
+    // a quarter of a second, dying away
+    let left = (1.0 - shake.t / 0.25).max(0.0);
+    let amp = shake.strength * left * if comfort.less_shake { 0.25 } else { 1.0 };
+    root.translation = Val2::px((shake.t * 95.0).sin() * amp, (shake.t * 71.0).cos() * amp * 0.6);
+    if left <= 0.0 {
+        shake.strength = 0.0;
+        root.translation = Val2::ZERO;
     }
 }
 

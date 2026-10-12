@@ -29,6 +29,7 @@ pub enum AppState {
     Boot,
     NoSteam,
     Menu,
+    Settings,
     /// Create or join a party.
     Coop,
     /// Seats, heroes, ready.
@@ -104,6 +105,7 @@ fn main() {
     .insert_resource(profile::Profile::load(account))
     .init_state::<AppState>()
     .add_systems(Startup, (theme::load_fonts, setup_stage))
+    .add_systems(PostStartup, menu::apply_settings)
     .add_systems(Update, fit_stage)
     .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin));
 

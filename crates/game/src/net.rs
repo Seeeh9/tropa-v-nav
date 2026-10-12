@@ -42,6 +42,8 @@ pub struct Net {
     pub bot_me: bool,
     /// The finished run has been written to the profile.
     pub booked: bool,
+    /// A dev shortcut started this run: it is neither saved nor booked.
+    pub ephemeral: bool,
 }
 
 impl Net {
@@ -185,14 +187,14 @@ pub fn start_offline(commands: &mut Commands, db: &nav_core::Content, name: &str
         bot.set_ready(true);
     }
     route(db, &mut node, &mut locals);
-    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false, booked: false });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me: false, booked: false, ephemeral: false });
 }
 
 /// Picks up a saved solo run where it was left.
 pub fn resume_solo(commands: &mut Commands, name: &str, run: nav_core::Run) {
     let hero = run.players.first().map(|p| p.hero.clone()).unwrap_or_default();
     let node = Node::resume(1, name, hero, run);
-    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals: vec![], timer: 0.0, bot_me: false, booked: false });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral: false });
 }
 
 /// Like [`start_offline`], but picks a hero for the host too and sets out at once.
@@ -223,7 +225,7 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
-    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me, booked: false });
+    commands.insert_resource(Net { node, lobby: None, code: String::new(), locals, timer: 0.0, bot_me, booked: false, ephemeral: true });
 }
 
 // ---- systems ----
@@ -249,7 +251,7 @@ fn steam_events(
                 let code = new_code(lobby.raw() ^ time.elapsed().as_nanos() as u64);
                 mm.set_lobby_data(lobby, GAME_KEY, GAME_VALUE);
                 mm.set_lobby_data(lobby, CODE_KEY, &code);
-                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false });
+                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);
@@ -285,7 +287,7 @@ fn steam_events(
                 if let Ok(mut set) = allowed.0.lock() {
                     set.extend(mm.lobby_members(lobby).iter().map(|m| m.raw()));
                 }
-                commands.insert_resource(Net { node: Node::join(me.raw(), &name, host.raw()), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false });
+                commands.insert_resource(Net { node: Node::join(me.raw(), &name, host.raw()), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);
@@ -429,7 +431,7 @@ fn notes(
 ) {
     let notes = net.node.take_notes();
     // a lone player's run is kept on disk as it goes; the autopilot's dev runs are not
-    let solo = net.lobby.is_none() && net.locals.is_empty() && !net.bot_me;
+    let solo = net.lobby.is_none() && net.locals.is_empty() && !net.bot_me && !net.ephemeral;
     if solo && notes.iter().any(|n| matches!(n, Note::Applied { .. } | Note::Started)) {
         match net.node.state.as_ref() {
             Some(run) if matches!(run.stage, Stage::Victory | Stage::Defeat) => profile.clear_run(),

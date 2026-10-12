@@ -627,7 +627,7 @@ fn draw_end(
         net.booked = true;
         // each player books the full sum on their own profile;
         // a run the autopilot played for you (dev build) earns nothing
-        if let Some(pl) = me.and_then(|m| run.players.get(m as usize)).filter(|_| !net.bot_me) {
+        if let Some(pl) = me.and_then(|m| run.players.get(m as usize)).filter(|_| !net.bot_me && !net.ephemeral) {
             *opened = profile.record_run(&pl.hero, run.oberegi(), won, run.circle);
         }
         status.run_dirty = true;

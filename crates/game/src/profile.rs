@@ -7,6 +7,25 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// Comfort and sound choices. None of them changes the rules.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Animation speed: 1.0, 1.5 or 2.0.
+    pub anim_speed: f32,
+    pub less_shake: bool,
+    /// "Ink": blood is drawn as black ink.
+    pub ink: bool,
+    pub music: f32,
+    pub sfx: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8 }
+    }
+}
+
 #[derive(Resource, Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Profile {
@@ -17,6 +36,7 @@ pub struct Profile {
     pub hero_xp: BTreeMap<String, u32>,
     pub runs: u32,
     pub wins: u32,
+    pub settings: Settings,
     #[serde(skip)]
     path: Option<PathBuf>,
 }

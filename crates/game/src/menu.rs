@@ -13,6 +13,7 @@ use bevy::ui_widgets::{observe, Activate, Button};
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), enter_menu)
         .add_systems(OnEnter(AppState::NoSteam), enter_no_steam)
+        .add_systems(OnEnter(AppState::Settings), enter_settings)
         .add_systems(Update, crate::battle::style_buttons.run_if(not(in_state(AppState::Battle))));
 }
 
@@ -114,6 +115,10 @@ fn enter_menu(
                 observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Coop)),
             ),
             (
+                menu_button(l10n.t("menu-settings"), &fonts),
+                observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Settings)),
+            ),
+            (
                 menu_button(l10n.t("menu-lang"), &fonts),
                 observe(|_: On<Activate>, mut l10n: ResMut<L10n>, art: Res<Art>, mut next: ResMut<NextState<AppState>>| {
                     *l10n = L10n::load(art.root(), l10n.lang.other());
@@ -129,6 +134,58 @@ fn enter_menu(
             ),
         ],
     ));
+}
+
+/// Pushes the saved settings into the resources the game reads each frame.
+pub fn apply_settings(
+    profile: Res<crate::profile::Profile>,
+    mut speed: ResMut<crate::session::AnimSpeed>,
+    mut comfort: ResMut<crate::battle::Comfort>,
+    mut mixer: ResMut<crate::audio::Mixer>,
+) {
+    let s = profile.settings;
+    speed.0 = s.anim_speed.clamp(1.0, 2.0);
+    comfort.less_shake = s.less_shake;
+    comfort.ink = s.ink;
+    // an unattended dev run keeps its silence
+    if !(cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok()) {
+        mixer.music = s.music;
+        mixer.sfx = s.sfx;
+    }
+}
+
+fn enter_settings(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, profile: Res<crate::profile::Profile>) {
+    use crate::profile::{Profile, Settings};
+    let s = profile.settings;
+    let on_off = |v: bool| l10n.t(if v { "settings-on" } else { "settings-off" });
+    let pct = |v: f32| format!("{}%", (v * 100.0).round() as i32);
+    // each row: its label with the current value, and how one click changes the settings
+    let rows: Vec<(String, fn(&mut Settings))> = vec![
+        (format!("{}: {}x", l10n.t("settings-speed"), s.anim_speed), |s| s.anim_speed = if s.anim_speed < 1.25 { 1.5 } else if s.anim_speed < 1.75 { 2.0 } else { 1.0 }),
+        (format!("{}: {}", l10n.t("settings-shake"), on_off(s.less_shake)), |s| s.less_shake = !s.less_shake),
+        (format!("{}: {}", l10n.t("settings-ink"), on_off(s.ink)), |s| s.ink = !s.ink),
+        (format!("{}: {}", l10n.t("settings-music"), pct(s.music)), |s| s.music = if s.music >= 0.95 { 0.0 } else { (s.music + 0.2).min(1.0) }),
+        (format!("{}: {}", l10n.t("settings-sfx"), pct(s.sfx)), |s| s.sfx = if s.sfx >= 0.95 { 0.0 } else { (s.sfx + 0.2).min(1.0) }),
+    ];
+    commands.spawn(screen(AppState::Settings, *stage)).with_children(|p| {
+        p.spawn(theme::text(l10n.t("menu-settings"), &fonts.title, 72.0, theme::BONE));
+        for (label, change) in rows {
+            p.spawn((
+                menu_button(label, &fonts),
+                observe(move |_: On<Activate>, mut profile: ResMut<Profile>, mut commands: Commands, mut next: ResMut<NextState<AppState>>| {
+                    change(&mut profile.settings);
+                    profile.save();
+                    commands.run_system_cached(apply_settings);
+                    // redraw with the new value
+                    next.set(AppState::Settings);
+                }),
+            ));
+        }
+        p.spawn((
+            menu_button(l10n.t("coop-back"), &fonts),
+            observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu)),
+        ));
+    });
 }
 
 fn enter_no_steam(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>) {

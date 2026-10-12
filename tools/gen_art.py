@@ -5,7 +5,7 @@ Everything here is a stand-in that the game uses only until a generated
 upper left with a cold rim light (art bible, section 9), then repainted with
 brush strokes so nothing looks like a vector drawing.
 
-    python tools/gen_art.py [--only bg|heroes|enemies|cards|ui] [--force]
+    python tools/gen_art.py [--only bg|heroes|enemies|cards|allcards] [--force]
 """
 import argparse
 import math
@@ -657,6 +657,36 @@ def main():
     if want("enemies"):
         save(grey_wolf(), "enemies/grey_wolf.png", a.force)
         save(kikimora(), "enemies/kikimora.png", a.force)
+    if a.only == "allcards":
+        # every card in the data gets at least a stand-in: motif from its type, hue from its hero
+        import glob
+        import re
+        import zlib
+        hues = {"bogatyr": COPPER, "vorozheya": SWAMP, "volhv": NAVBLUE, "volkolak": RUST, "znaharka": CANDLE, "skomoroh": (122, 92, 143), "": (120, 112, 100)}
+        pattern = re.compile(r'id:\s*"([a-z0-9_]+)",\s*(?:hero:\s*"([a-z]*)",\s*)?kind:\s*([A-Za-z]+)')
+        for path in sorted(glob.glob(os.path.join(ROOT, "data", "cards", "*.ron"))):
+            text = open(path, encoding="utf-8").read()
+            found = list(pattern.finditer(text))
+            for n, m in enumerate(found):
+                card, hero, kind = m.group(1), m.group(2) or "", m.group(3)
+                # the rest of this definition, up to the next one
+                rest = text[m.end(): found[n + 1].start() if n + 1 < len(found) else len(text)]
+                if card in CARDS or (os.path.exists(os.path.join(ROOT, "cards", f"{card}.png")) and not a.force):
+                    continue
+                seed = zlib.crc32(card.encode())
+                if kind == "Attack":
+                    motif = ("mace", "sweep", "fist", "spear")[seed % 4]
+                elif kind == "Power":
+                    motif = ("mail", "sigil")[seed % 2]
+                elif kind in ("Curse", "Status"):
+                    motif = ("sigil", "web", "mire")[seed % 3]
+                elif kind == "Herb":
+                    motif = "mire"
+                elif "Block" in rest or "Guard" in rest:
+                    motif = ("shield", "guard", "wall")[seed % 3]
+                else:
+                    motif = ("sigil", "roar", "burden")[seed % 3]
+                save(card_scene(seed % 100000, hues.get(hero, hues[""]), motif), f"cards/{card}.png", a.force)
     if want("cards"):
         for i, (card, motif) in enumerate(CARDS.items()):
             hue = HERO_HUE["bogatyr"] if card.startswith("bogatyr") else (NAVBLUE if motif == "sigil" else SWAMP)

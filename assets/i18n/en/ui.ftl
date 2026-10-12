@@ -182,3 +182,12 @@ end-circle-opened = Circle of Nav { $n } is open
 menu-profile = Wards: { $oberegi }  ·  wins: { $wins } of { $runs }  ·  Circle { $circle } open
 lobby-level = lv { $n }
 menu-continue = Continue: { $hero }, act { $act }
+
+menu-settings = Settings
+settings-speed = Animation speed
+settings-shake = Less screen shake
+settings-ink = "Ink" mode
+settings-music = Music
+settings-sfx = Sound effects
+settings-on = on
+settings-off = off

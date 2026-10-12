@@ -182,3 +182,12 @@ end-circle-opened = Открыт Круг Нави { $n }
 menu-profile = Обереги: { $oberegi }  ·  побед: { $wins } из { $runs }  ·  открыт Круг { $circle }
 lobby-level = ур. { $n }
 menu-continue = Продолжить: { $hero }, акт { $act }
+
+menu-settings = Настройки
+settings-speed = Скорость анимаций
+settings-shake = Меньше тряски
+settings-ink = Режим «Чернила»
+settings-music = Музыка
+settings-sfx = Звуки
+settings-on = вкл.
+settings-off = выкл.

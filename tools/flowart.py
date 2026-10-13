@@ -3,6 +3,7 @@
     python tools/flowart.py <card id> [...]            # 1000x750 -> assets/cards/<id>-gemini.png
     python tools/flowart.py --relic <relic id> [...]   # 256x256   -> assets/relics/<id>-gemini.png
     python tools/flowart.py --list                     # what is waiting, oldest first
+    python tools/flowart.py --match [--relic] <id> [...] # pair waiting files with these ids by their titles
     python tools/flowart.py --packs                    # take in every tropa-pack-*.bin and tropa-<kind>-<id>.jpg
 
 A pack is what the page helper `flowPack` saves: several full-size pictures in one file, each
@@ -75,8 +76,50 @@ def packs():
         shutil.move(f, os.path.join(inbox, f"{name}_f.jpg"))
 
 
+def words(text):
+    return {w[:5] for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in {"the", "and", "with", "slavic", "peasant", "old", "dark", "background"}}
+
+
+def match(ids, relic):
+    """Pairs each waiting file with one of `ids` by the words its title shares with the prompt."""
+    import json
+
+    files = waiting()
+    prompts = {}
+    for f in glob.glob(os.path.join(ROOT, "docs", "prompts", "plots", "*.json")):
+        for k, v in json.load(open(f, encoding="utf-8")).items():
+            if isinstance(v, str):
+                prompts[k.split(":", 1)[-1]] = v.split("Game item icon: ", 1)[-1].split(". A single object", 1)[0]
+    left = list(ids)
+    pairs = []
+    for f in files:
+        title = words(os.path.basename(f))
+        best = max(left, key=lambda i: len(title & (words(i) | words(prompts.get(i, "")))), default=None)
+        score = len(title & (words(best) | words(prompts.get(best, "")))) if best else 0
+        if best is None or score == 0:
+            pairs.append((f, None))
+            continue
+        left.remove(best)
+        pairs.append((f, best))
+    for f, i in pairs:
+        print(f"{os.path.basename(f)[:44]:<44} -> {i}")
+    if left:
+        print("no picture for:", " ".join(left))
+    inbox = os.path.join(ROOT, "_inbox")
+    os.makedirs(inbox, exist_ok=True)
+    for f, i in pairs:
+        if i is None:
+            continue
+        place(Image.open(f).convert("RGB"), i, relic)
+        shutil.move(f, os.path.join(inbox, f"{'relic_' if relic else ''}{i}_f.jpg"))
+
+
 def main():
     args = sys.argv[1:]
+    if args[:1] == ["--match"]:
+        relic = args[1:2] == ["--relic"]
+        match(args[2:] if relic else args[1:], relic)
+        return
     if args[:1] == ["--packs"]:
         packs()
         return

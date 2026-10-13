@@ -213,7 +213,25 @@ fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fon
         Pickable::IGNORE,
         ChildOf(*stage),
     ));
-    commands.spawn(screen(AppState::Village, *stage)).with_children(|p| {
+    // the list keeps to the left, so the stockade it rebuilds stays in view
+    commands
+        .spawn((
+            DespawnOnExit(AppState::Village),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(60),
+                width: px(880),
+                height: px(STAGE_H),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                row_gap: px(22),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(*stage),
+        ))
+        .with_children(|p| {
         p.spawn(theme::text(l10n.t("village-title"), &fonts.title, 64.0, theme::BONE));
         p.spawn(theme::text(l10n.n("village-oberegi", profile.oberegi as i32), &fonts.num, 34.0, theme::CANDLE));
         for (id, max) in BUILDINGS {
@@ -230,7 +248,7 @@ fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fon
                 Button,
                 Hovered::default(),
                 Btn(base),
-                Node { width: px(980), padding: UiRect::axes(px(18), px(8)), border: UiRect::all(px(2)), ..default() },
+                Node { width: px(860), padding: UiRect::axes(px(18), px(8)), border: UiRect::all(px(2)), ..default() },
                 BackgroundColor(base.with_alpha(0.92)),
                 BorderColor::all(if can { theme::CANDLE } else { Color::srgb(0.32, 0.26, 0.20) }),
                 children![theme::text(label, &fonts.body, 19.0, if price.is_none() { theme::ROTLIGHT } else if can { theme::BONE } else { theme::DIM })],

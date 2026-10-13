@@ -291,13 +291,40 @@ fn enter(
         return;
     };
     let layer = || Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() };
-    let act = net.as_ref().and_then(|n| n.node.state.as_ref()).map(|r| r.act.min(3)).unwrap_or(1);
+    let run = net.as_ref().and_then(|n| n.node.state.as_ref());
+    let act = run.map(|r| r.act.min(3)).unwrap_or(1);
+    // where this fight is: a boss has an arena of its own, an elite a lair, and ordinary fights
+    // walk through the act's places in turn, so that two in a row never look alike.
+    // It is read from the run alone, so every player sees the same place
+    let place: Vec<String> = {
+        let real_act = run.map(|r| r.act).unwrap_or(1);
+        let step = run.map(|r| r.floors_cleared as usize).unwrap_or(0);
+        let mut want = Vec::new();
+        // a foe with a haunt of its own is met there: the drowned by the mill pond, the Leshy
+        // in the heart of the forest. The first such foe in the fight decides
+        for e in &session.truth.enemies {
+            want.push(format!("bg/at_{}", e.def));
+        }
+        match run.and_then(|r| r.fighting) {
+            Some(nav_core::NodeKind::Boss) if real_act >= 4 => want.push("bg/koschei".to_string()),
+            Some(nav_core::NodeKind::Boss) => want.push(format!("bg/boss_act{act}")),
+            Some(nav_core::NodeKind::Elite) => want.push(format!("bg/elite_act{act}")),
+            _ => {}
+        }
+        let painted: Vec<String> = ["", "_b", "_c", "_d", "_e"].iter().map(|v| format!("bg/act{act}_battle{v}")).filter(|s| art.image(&assets, s).is_some()).collect();
+        if !painted.is_empty() {
+            want.push(painted[step % painted.len()].clone());
+        }
+        want.push(format!("bg/act{act}_battle"));
+        want.push("bg/act1_battle".to_string());
+        want
+    };
 
     let root = commands
         .spawn((BattleRoot, layer(), UiTransform::IDENTITY, Pickable::IGNORE, ChildOf(*stage)))
         .with_children(|p| {
-            // each act has its own backdrop; until it is painted, the forest stands in
-            let backdrop = [format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(&assets, s).is_some()).unwrap_or_default();
+            // until a place is painted, the act's first backdrop stands in, and the forest for that
+            let backdrop = place.iter().find(|s| art.image(&assets, s).is_some()).cloned().unwrap_or_default();
             // every backdrop is painted with its open ground at about three quarters of its height;
             // units stand higher than that to leave room for the hand, so the picture is lifted
             // until that ground lies under their feet, and the strip it leaves is the hand's dark apron

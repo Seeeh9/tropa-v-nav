@@ -67,6 +67,12 @@ struct UnitLayer;
 struct HandLayer;
 #[derive(Component)]
 struct PotionBelt;
+/// One of the player's relics in the row under the party list; hovering it says what it does.
+#[derive(Component)]
+struct RelicChip {
+    id: String,
+    at: Vec2,
+}
 /// A potion on the belt: click to drink, drag onto a unit to throw.
 #[derive(Component)]
 struct PotionChip {
@@ -342,6 +348,42 @@ fn enter(
                     ));
                 }
             });
+
+            // what the player carries, under the party list: a picture where one is painted,
+            // else the first letters of its name
+            let mine = session.my_hero();
+            let row_top = 16.0 + 28.0 + session.truth.heroes.len() as f32 * 40.0 + 4.0;
+            for (i, id) in mine.relics.iter().enumerate() {
+                let at = Vec2::new(16.0 + (i % 8) as f32 * 46.0, row_top + (i / 8) as f32 * 46.0);
+                let picture = art.image(&assets, &format!("relics/{id}"));
+                let mut chip = p.spawn((
+                    RelicChip { id: id.clone(), at },
+                    Hovered::default(),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(at.x),
+                        top: px(at.y),
+                        width: px(42),
+                        height: px(42),
+                        border: UiRect::all(px(2)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    BackgroundColor(theme::SOOT.with_alpha(0.88)),
+                    BorderColor::all(theme::CANDLE.with_alpha(0.7)),
+                ));
+                match picture {
+                    Some(h) => {
+                        chip.with_child((ImageNode::new(h), Node { width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE));
+                    }
+                    None => {
+                        let short: String = l10n.t(&format!("relic-{id}")).chars().filter(|c| c.is_alphabetic()).take(2).collect();
+                        chip.with_child(theme::text(short, &fonts.title, 17.0, theme::BONE));
+                    }
+                }
+            }
 
             p.spawn((
                 Label::Timer,
@@ -1323,6 +1365,7 @@ fn update_tooltip(
     top: Res<HoverTop>,
     cards: Query<&CardWidget>,
     units: Query<(&UnitWidget, &Hovered)>,
+    relics: Query<(&RelicChip, &Hovered)>,
     mut tip: ResMut<TooltipText>,
     mut panel: Single<(&mut Node, &mut Visibility), With<Tooltip>>,
 ) {
@@ -1337,6 +1380,9 @@ fn update_tooltip(
                 at.x = w.pos.x - 350.0;
             }
         }
+    } else if let Some((chip, _)) = relics.iter().find(|(_, hov)| hov.get()) {
+        lines.push((l10n.t(&format!("relic-{}", chip.id)), l10n.t(&format!("relic-{}-desc", chip.id))));
+        at = chip.at + Vec2::new(0.0, 50.0);
     } else if let Some((w, _)) = units.iter().find(|(_, hov)| hov.get()) {
         let statuses = match w.unit {
             UnitRef::Hero(i) => session.shown.hero(i).map(|x| &x.statuses),

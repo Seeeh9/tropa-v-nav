@@ -1142,7 +1142,29 @@ impl Run {
 pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
     let p = player as usize;
     match &run.stage {
-        Stage::Map { votes } => votes.get(p)?.is_none().then_some(RunAction::Vote(0)),
+        Stage::Map { votes } => {
+            if votes.get(p)?.is_some() {
+                return None;
+            }
+            // the road is chosen by how much blood is left: the hurt look for a fire,
+            // the hale for a fight worth a trophy
+            let pl = run.players.get(p)?;
+            let hale = pl.hp * 4 >= pl.max_hp * 3;
+            let hurt = pl.hp * 2 < pl.max_hp;
+            let worth = |kind: NodeKind| match kind {
+                NodeKind::Chest => 6,
+                NodeKind::Rest => if hurt { 7 } else if hale { 3 } else { 5 },
+                NodeKind::Shop => if pl.gold >= 80 { 4 } else { 2 },
+                NodeKind::Event => 3,
+                NodeKind::Fight => if hurt { 1 } else { 3 },
+                NodeKind::Elite => if hale { 4 } else { 0 },
+                NodeKind::Boss => 0,
+            };
+            let choices = run.choices();
+            // the first of the best, so that every seat of a party of autopilots votes alike
+            let best = choices.iter().enumerate().max_by_key(|(i, (_, kind))| (worth(*kind), std::cmp::Reverse(*i))).map(|(i, _)| i as u8).unwrap_or(0);
+            Some(RunAction::Vote(best))
+        }
         Stage::Combat => {
             let combat = run.combat.as_ref()?;
             let h = combat.hero(player)?;

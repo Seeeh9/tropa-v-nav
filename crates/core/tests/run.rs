@@ -726,3 +726,55 @@ fn report_stuck_fights() {
     }
     println!("{found} stuck runs");
 }
+
+/// Not a pass/fail check: how solo autopilots meet the first boss and how that fight goes.
+#[test]
+#[ignore]
+fn report_first_boss() {
+    let c = content();
+    for hero in SIX {
+        let (mut met, mut won, mut hp_in, mut deck, mut rounds, mut left, mut relics) = (0, 0, 0, 0, 0, 0, 0);
+        for seed in 0..40u64 {
+            let mut run = Run::new(&c, &[hero.to_string()], seed, 0).unwrap();
+            let mut inside = false;
+            for _ in 0..60_000 {
+                if matches!(run.stage, Stage::Victory | Stage::Defeat) || run.act > 1 {
+                    break;
+                }
+                let boss = run.stage == Stage::Combat && run.fighting == Some(NodeKind::Boss);
+                if boss && !inside {
+                    inside = true;
+                    met += 1;
+                    hp_in += run.players[0].hp * 100 / run.players[0].max_hp;
+                    deck += run.players[0].deck.len();
+                    relics += run.players[0].relics.len();
+                }
+                if boss {
+                    let k = run.combat.as_ref().unwrap();
+                    rounds = rounds.max(0) + 0;
+                    let _ = k;
+                }
+                let before = run.combat.as_ref().filter(|_| boss).map(|k| (k.round, k.enemies.iter().find(|e| e.def == "leshy").map(|e| e.hp * 100 / e.max_hp).unwrap_or(0)));
+                let Some(a) = run_bot(&c, &run, 0) else { break };
+                run.apply(&c, 0, &a).unwrap();
+                if let Some((r, l)) = before {
+                    if run.stage == Stage::Defeat {
+                        rounds += r;
+                        left += l;
+                    } else if run.stage != Stage::Combat {
+                        won += 1;
+                    }
+                }
+            }
+        }
+        let lost = (met - won).max(1);
+        println!(
+            "{hero:<10} met {met}/40, won {won}; arrives at {}% hp, deck {}, relics {:.1}; when lost: round {}, leshy at {}%",
+            hp_in / met.max(1),
+            deck / met.max(1) as usize,
+            relics as f32 / met.max(1) as f32,
+            rounds / lost as u32,
+            left / lost
+        );
+    }
+}

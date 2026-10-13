@@ -88,6 +88,22 @@ pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
         .or_else(|| s.living_enemies().filter(|e| !e.flags.contains_key("immortal") && !(others_out && e.flags.contains_key("hiding"))).min_by_key(|e| e.hp + e.block))
         .or_else(|| s.living_enemies().filter(|e| !(others_out && e.flags.contains_key("hiding"))).min_by_key(|e| e.hp + e.block))
         .map(|e| UnitRef::Enemy(e.uid));
+    // a draught is for a bad hour: when half the blood is gone, or the foe is a big one
+    let hard_fight = s.enemies.iter().map(|e| e.max_hp).sum::<i32>() >= 100 * s.heroes.len() as i32;
+    if h.hp * 2 <= h.max_hp || hard_fight {
+        for (i, id) in h.potions.iter().enumerate() {
+            let Some(def) = c.potions.get(id) else { continue };
+            let target = match def.target {
+                CardTarget::None => Some(None),
+                CardTarget::Enemy => weakest.map(Some),
+                CardTarget::Ally | CardTarget::AnyHero => Some(None),
+                CardTarget::Downed => s.heroes.iter().find(|a| a.downed).map(|a| Some(UnitRef::Hero(a.slot))),
+            };
+            if let Some(target) = target {
+                return CombatAction::UsePotion { slot: i as u8, target };
+            }
+        }
+    }
     // the needle ends Koschei's deathlessness: nothing matters more
     if let Some((card, _)) = playable.iter().find(|(c, _)| c.def == "koschei_needle") {
         return CombatAction::Play { card: card.uid, target: None };
@@ -110,7 +126,10 @@ pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
         }
     };
 
-    let threatened = incoming(c, s, slot) > h.block;
+    // a shield for every scratch loses the race: small blows are taken on the chin while
+    // there is blood to spare, and only a real wound, or a thin thread of life, is worth guarding
+    let wound = incoming(c, s, slot) - h.block;
+    let threatened = wound > 0 && (wound * 5 >= h.hp || h.hp * 2 <= h.max_hp);
     let pick = |want: &dyn Fn(&CardView) -> bool| {
         playable.iter().filter(|(_, v)| want(v)).find_map(|(card, v)| {
             target_for(v).map(|target| CombatAction::Play { card: card.uid, target })

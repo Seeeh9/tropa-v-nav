@@ -852,6 +852,16 @@ impl Run {
         self.stage = Stage::Combat;
         ev.push(RunEvent::CombatStarted);
         ev.extend(events.into_iter().map(RunEvent::Combat));
+        // a fight can be over before anyone acts: a curse or a relic that bites at the start
+        // may fell the last hero standing, and then nobody is left to make the move that ends it
+        match self.combat.as_ref().map(|k| k.phase) {
+            Some(Phase::Lost) => {
+                self.stage = Stage::Defeat;
+                ev.push(RunEvent::Ended { won: false });
+            }
+            Some(Phase::Won) => self.after_fight(c, ev),
+            _ => {}
+        }
     }
 
     /// Puts the party straight into a fight with exactly these enemies.

@@ -690,3 +690,39 @@ fn the_shrine_lets_a_hero_start_with_another_relic() {
     assert_eq!(run.players[1].relics, ids(&["thunder_staff"]));
     assert_eq!(run.players[2].relics, ids(&["birch_pot"]), "a choice that does not exist falls back to the hero's own");
 }
+
+/// Not a pass/fail check: prints the fight in which the autopilot finds no move at all.
+#[test]
+#[ignore]
+fn report_stuck_fights() {
+    let c = content();
+    let mut found = 0;
+    for hero in SIX {
+        for seed in 0..40u64 {
+            let mut run = Run::new(&c, &[hero.to_string()], seed, 0).unwrap();
+            for _ in 0..60_000 {
+                if matches!(run.stage, Stage::Victory | Stage::Defeat) {
+                    break;
+                }
+                let Some(a) = run_bot(&c, &run, 0) else {
+                    let k = run.combat.as_ref();
+                    println!(
+                        "{hero} seed {seed}: stage {:?}, act {}, phase {:?}, hero flags {:?}, ready {:?}, downed {:?}, hand {:?}, enemies {:?}",
+                        run.stage,
+                        run.act,
+                        k.map(|k| k.phase),
+                        k.map(|k| k.heroes[0].flags.clone()),
+                        k.map(|k| k.heroes[0].ready),
+                        k.map(|k| k.heroes[0].downed),
+                        k.map(|k| k.heroes[0].hand.iter().map(|x| x.def.clone()).collect::<Vec<_>>()),
+                        k.map(|k| k.enemies.iter().map(|e| (e.def.clone(), e.hp, e.alive, e.flags.clone())).collect::<Vec<_>>()),
+                    );
+                    found += 1;
+                    break;
+                };
+                run.apply(&c, 0, &a).unwrap();
+            }
+        }
+    }
+    println!("{found} stuck runs");
+}

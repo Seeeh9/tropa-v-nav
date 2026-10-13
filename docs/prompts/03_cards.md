@@ -49,3 +49,19 @@ Focus on one clear action, dramatic composition, dark background fading to the e
 ## Модель
 
 В Gemini рисовать моделью Flash (не Flash-Lite: та дала плашку и слабую живопись). Метка модели — справа в поле ввода.
+
+## Лимит, 13.10.2026
+
+Flash и Pro кончились после ~215 картинок за день (сброс 13.10 в 17:07); остаётся только Flash-Lite — им не рисуем.
+Третий набор: Богатырь нарисован весь (60), Ворожея — 48 из 60. Не нарисованы у Ворожеи:
+`vor_thrice_cursed`, `vor_plague_mother`, `vor_last_rites`, `vor_bargain`, `vor_wailing`, `vor_death_mask`,
+`vor_ill_star`, `vor_unmake`, `vor_witch_mark`, `vor_coven`, `vor_common_grief`, и весь третий набор Волхва,
+Волколака, Знахарки, Скомороха и нейтральные.
+
+## Конвейер в браузере
+
+Чтобы не слать длинный текст в каждую вкладку, на `gemini.google.com` в `localStorage` лежат:
+`tropaH` (начало), `tropaT` (хвост), `tropaB/V/O/W/Z/S` (облики героев), `tropaP` (JSON «id → сюжет»),
+`tropaGo` (проверить модель, вставить, отправить), `tropaRun` (то же по id из `tropaP`), `tropaDl` (скачать последнюю картинку).
+Цикл на четыре вкладки: клик по пустому месту → `eval(localStorage.tropaDl)()` → новая страница → `eval(localStorage.tropaRun)('<id>')`.
+`tropaGo` возвращает `LITE` и ничего не отправляет, если выбрана Flash-Lite.

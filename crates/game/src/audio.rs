@@ -23,7 +23,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, load)
         .add_systems(Update, cue_sounds.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers))
+        .init_resource::<BattleTrack>()
         .add_systems(Update, (ambient, fade_ambient))
+        .add_systems(Update, koschei_movements.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(OnEnter(AppState::Battle), start_battle_music)
         .add_systems(OnExit(AppState::Battle), stop_music)
         .add_observer(|_: On<Activate>, mut commands: Commands, sfx: Res<Sfx>, mixer: Res<Mixer>| sfx.play(&mut commands, "click", &mixer, 1.0));
@@ -103,35 +105,55 @@ fn music_file(art: &Art, name: &str) -> Option<String> {
 /// The loop that plays outside battle. One is on its way in; older ones fade out and go.
 #[derive(Component)]
 struct Ambient {
-    track: &'static str,
+    track: String,
     target: f32,
     level: f32,
 }
 
-/// Which loop belongs to which screen. Battle has its own layered music.
-fn ambient_track(state: AppState) -> Option<&'static str> {
-    Some(match state {
-        AppState::Menu | AppState::Settings | AppState::Coop | AppState::Lobby => "menu",
-        AppState::Village | AppState::Chronicle => "village",
-        AppState::Map | AppState::Reward => "map",
-        AppState::Rest => "rest",
-        AppState::Shop => "shop",
-        AppState::Omen => "omen",
-        AppState::RunEnd => "end",
-        _ => return None,
-    })
+/// Which piece belongs to which screen, most fitting first: the first one that exists plays.
+/// The flag marks a piece that sounds once and is not looped (the boss fanfare, the lament of defeat).
+/// Battle has its own layered music.
+fn ambient_tracks(state: AppState, run: Option<&nav_core::Run>) -> (Vec<String>, bool) {
+    let act = run.map(|r| r.act).unwrap_or(1).clamp(1, 3);
+    let one = |name: &str| (vec![name.to_string()], false);
+    match state {
+        AppState::Menu | AppState::Settings => one("menu"),
+        AppState::Coop | AppState::Lobby => (vec!["lobby".into(), "menu".into()], false),
+        AppState::Village | AppState::Chronicle => one("village"),
+        // the fanfare for a fallen boss sounds once over the spoils
+        AppState::Reward if run.is_some_and(|r| r.fighting == Some(NodeKind::Boss)) => (vec!["victory".into()], true),
+        AppState::Map | AppState::Reward => (vec![format!("map_act{act}"), "map_act1".into(), "map".into()], false),
+        AppState::Rest => one("rest"),
+        AppState::Shop => one("shop"),
+        AppState::Omen => one("omen"),
+        AppState::RunEnd if run.is_some_and(|r| r.stage == nav_core::Stage::Victory) => (vec!["credits".into(), "end".into()], false),
+        AppState::RunEnd => (vec!["defeat".into(), "end".into()], true),
+        _ => (vec![], false),
+    }
 }
 
-fn ambient(mut commands: Commands, state: Res<State<AppState>>, art: Res<Art>, assets: Res<AssetServer>, mut playing: Query<&mut Ambient>) {
-    let want = ambient_track(*state.get());
-    let mut on = false;
+fn ambient(
+    mut commands: Commands,
+    state: Res<State<AppState>>,
+    net: Option<Res<crate::net::Net>>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    mut playing: Query<&mut Ambient>,
+    mut last: Local<Option<String>>,
+) {
+    let run = net.as_ref().and_then(|n| n.node.state.as_ref());
+    let (names, once) = ambient_tracks(*state.get(), run);
+    let found = names.iter().find_map(|n| music_file(&art, n).map(|path| (n.clone(), path)));
+    let want = found.as_ref().map(|(n, _)| n.clone());
     for mut a in &mut playing {
-        a.target = if Some(a.track) == want { 1.0 } else { 0.0 };
-        on |= Some(a.track) == want;
+        a.target = if Some(&a.track) == want.as_ref() { 1.0 } else { 0.0 };
     }
-    if let (Some(track), false) = (want, on) {
-        if let Some(path) = music_file(&art, track) {
-            commands.spawn((Ambient { track, target: 1.0, level: 0.0 }, AudioPlayer::<AudioSource>::new(assets.load(path)), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
+    // a one-shot is started once per visit, not again when it has run out
+    if *last != want {
+        *last = want.clone();
+        if let Some((track, path)) = found {
+            let settings = if once { PlaybackSettings::DESPAWN } else { PlaybackSettings::LOOP };
+            commands.spawn((Ambient { track, target: 1.0, level: 0.0 }, AudioPlayer::<AudioSource>::new(assets.load(path)), settings.with_volume(Volume::Linear(0.0))));
         }
     }
 }
@@ -160,7 +182,28 @@ struct MusicLayer {
     level: f32,
 }
 
-fn start_battle_music(mut commands: Commands, art: Res<Art>, assets: Res<AssetServer>, net: Option<Res<crate::net::Net>>) {
+/// The battle track playing now, by name.
+#[derive(Resource, Default)]
+struct BattleTrack(String);
+
+/// Starts the layers of `track` together, so they stay in step; only their volume moves.
+fn spawn_layers(commands: &mut Commands, art: &Art, assets: &AssetServer, track: &str) {
+    // a generated track never shares the stage with stand-in layers: they were not written together.
+    // Until its own stems are in place it simply plays whole, as layer one
+    let generated = |index: u8| art.find(&format!("music/{track}_l{index}"), "ogg", "flow").filter(|p| p.ends_with("-flow.ogg"));
+    let real = generated(1).is_some();
+    for index in 1..=3u8 {
+        let path = if real { generated(index) } else { music_file(art, &format!("{track}_l{index}")) };
+        let Some(path) = path else { continue };
+        commands.spawn((
+            MusicLayer { index, target: if index == 1 { 1.0 } else { 0.0 }, level: 0.0 },
+            AudioPlayer::<AudioSource>::new(assets.load(path)),
+            PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0)),
+        ));
+    }
+}
+
+fn start_battle_music(mut commands: Commands, art: Res<Art>, assets: Res<AssetServer>, net: Option<Res<crate::net::Net>>, mut now: ResMut<BattleTrack>) {
     let run = net.as_ref().and_then(|n| n.node.state.as_ref());
     let act = run.map(|r| r.act).unwrap_or(1);
     let track = match run.and_then(|r| r.fighting) {
@@ -169,19 +212,31 @@ fn start_battle_music(mut commands: Commands, art: Res<Art>, assets: Res<AssetSe
         Some(NodeKind::Elite) => "elite".to_string(),
         _ => format!("battle_act{act}"),
     };
-    // all layers start together and stay in step; only their volume moves
-    // a generated track never shares the stage with stand-in layers: they were not written together.
-    // Until its own stems are in place it simply plays whole, as layer one
-    let generated = |index: u8| art.find(&format!("music/{track}_l{index}"), "ogg", "flow").filter(|p| p.ends_with("-flow.ogg"));
-    let real = generated(1).is_some();
-    for index in 1..=3u8 {
-        let path = if real { generated(index) } else { music_file(&art, &format!("{track}_l{index}")) };
-        let Some(path) = path else { continue };
-        commands.spawn((
-            MusicLayer { index, target: if index == 1 { 1.0 } else { 0.0 }, level: 0.0 },
-            AudioPlayer::<AudioSource>::new(assets.load(path)),
-            PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0)),
-        ));
+    spawn_layers(&mut commands, &art, &assets, &track);
+    now.0 = track;
+}
+
+/// Koschei's fight has three movements: on his throne, risen once the needle drops,
+/// and the last breath after it is broken. The music follows him from one to the next.
+fn koschei_movements(mut commands: Commands, session: Res<Session>, art: Res<Art>, assets: Res<AssetServer>, mut now: ResMut<BattleTrack>, layers: Query<Entity, With<MusicLayer>>) {
+    if !now.0.starts_with("koschei") {
+        return;
+    }
+    let Some(k) = session.truth.enemies.iter().find(|e| e.def == "koschei" && e.alive) else { return };
+    let want = if !k.flags.contains_key("immortal") {
+        "koschei3"
+    } else if k.flags.contains_key("risen") {
+        "koschei2"
+    } else {
+        "koschei"
+    };
+    // a movement nobody has written yet leaves the previous one playing
+    if now.0 != want && music_file(&art, &format!("{want}_l1")).is_some() {
+        for e in &layers {
+            commands.entity(e).despawn();
+        }
+        spawn_layers(&mut commands, &art, &assets, want);
+        now.0 = want.to_string();
     }
 }
 

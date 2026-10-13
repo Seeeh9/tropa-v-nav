@@ -76,8 +76,13 @@ def packs():
         shutil.move(f, os.path.join(inbox, f"{name}_f.jpg"))
 
 
+# words too common in titles and prompts to say which picture is which
+STOP = {"the", "and", "with", "slavic", "peasant", "old", "dark", "background", "over", "from", "into", "near", "woman", "man",
+        "hand", "hands", "holding", "game", "icon", "painting", "digital", "oil", "item", "her", "his", "through", "for"}
+
+
 def words(text):
-    return {w[:5] for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in {"the", "and", "with", "slavic", "peasant", "old", "dark", "background"}}
+    return {w[:5] for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in STOP}
 
 
 def match(ids, relic):

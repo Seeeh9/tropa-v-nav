@@ -16,7 +16,10 @@ use nav_core::Event;
 
 pub const CARD_W: f32 = 220.0;
 pub const CARD_H: f32 = 310.0;
-const HAND_TOP: f32 = 762.0;
+/// Where the hand rests: low, with only the top of each card showing, so the field stays clear.
+const HAND_TOP: f32 = 955.0;
+/// How far the card under the cursor rises out of the hand; its neighbours rise by a share of this.
+const HAND_LIFT: f32 = 205.0;
 const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
 const ENEMY_SIZE: Vec2 = Vec2::new(230.0, 345.0);
 /// Room above a unit's sprite for its intent.
@@ -29,6 +32,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<RunOutbox>()
         .init_resource::<Cues>()
         .init_resource::<HoverTop>()
+        .init_resource::<HandReach>()
         .init_resource::<Shake>()
         .init_resource::<TimerText>()
         .insert_resource(Comfort { less_shake: false, ink: false })
@@ -199,6 +203,10 @@ impl Comfort {
 #[derive(Resource, Default)]
 struct HoverTop(Option<u32>);
 
+/// The cursor's x over the hand, in stage pixels, while the player is reaching into it.
+#[derive(Resource, Default)]
+struct HandReach(Option<f32>);
+
 // ---- layout ----
 
 /// How far a backdrop is lifted, in stage pixels, so that its ground meets the units' feet.
@@ -244,8 +252,12 @@ fn widget_origin(foot: Vec2, size: Vec2) -> Vec2 {
     Vec2::new(foot.x - UNIT_W / 2.0, foot.y - size.y - HEAD_ROOM)
 }
 
+fn hand_spacing(n: usize) -> f32 {
+    (1040.0 / n.max(1) as f32).min(CARD_W * 0.78)
+}
+
 fn hand_slot(i: usize, n: usize) -> Vec2 {
-    let spacing = (1040.0 / n.max(1) as f32).min(CARD_W * 0.78);
+    let spacing = hand_spacing(n);
     let total = spacing * (n.max(1) - 1) as f32;
     let x = STAGE_W / 2.0 - total / 2.0 + spacing * i as f32 - CARD_W / 2.0;
     // a shallow arc: the ends of the fan sit a little lower
@@ -1110,16 +1122,49 @@ fn sync_potions(
     }
 }
 
-fn pick_hover(session: Res<Session>, cards: Query<(&CardWidget, &Hovered)>, mut top: ResMut<HoverTop>) {
+/// Where the mouse is on the stage. Taken from the picking pointer, so it is the same point
+/// that hovering and dragging use.
+fn stage_pointer(pointers: &Query<(&bevy::picking::pointer::PointerId, &bevy::picking::pointer::PointerLocation)>, window: &Window, scale: f32) -> Option<Vec2> {
+    let at = pointers.iter().find(|(id, _)| id.is_mouse()).and_then(|(_, l)| l.location.as_ref()).map(|l| l.position)?;
+    let origin = Vec2::new(window.width() - STAGE_W * scale, window.height() - STAGE_H * scale) / 2.0;
+    Some((at - origin) / scale)
+}
+
+/// The hand lies low until the cursor comes down to it. Then the card nearest the cursor is
+/// the one in focus, and it stays so while the cursor travels up over the risen card.
+fn pick_hover(
+    session: Res<Session>,
+    cards: Query<&CardWidget>,
+    pointers: Query<(&bevy::picking::pointer::PointerId, &bevy::picking::pointer::PointerLocation)>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    scale: Res<UiScale>,
+    mut top: ResMut<HoverTop>,
+    mut reach: ResMut<HandReach>,
+    mut reaching: Local<bool>,
+) {
     let hand = &session.my_hero().hand;
-    let dragging = cards.iter().find(|(w, _)| w.dragging).map(|(w, _)| w.uid);
+    let n = hand.len();
+    let dragging = cards.iter().find(|w| w.dragging).map(|w| w.uid);
+    let cursor = stage_pointer(&pointers, &window, scale.0);
+    let span = hand_spacing(n) * (n.max(1) - 1) as f32 / 2.0 + CARD_W * 0.6;
+    *reaching = match cursor {
+        Some(c) if n > 0 && (c.x - STAGE_W / 2.0).abs() <= span => {
+            // reaching in starts at the visible strip; once in, the whole risen card keeps it
+            c.y >= HAND_TOP - 20.0 || (*reaching && c.y >= HAND_TOP - HAND_LIFT - 20.0)
+        }
+        _ => false,
+    };
+    let x = cursor.filter(|_| *reaching && dragging.is_none()).map(|c| c.x);
+    if reach.0 != x {
+        reach.0 = x;
+    }
     let best = dragging.or_else(|| {
-        cards
-            .iter()
-            .filter(|(_, h)| h.get())
-            .filter_map(|(w, _)| hand.iter().position(|c| c.uid == w.uid).map(|i| (i, w.uid)))
-            .max()
-            .map(|(_, uid)| uid)
+        let x = x?;
+        (0..n).min_by(|a, b| {
+            let d = |i: usize| (hand_slot(i, n).x + CARD_W / 2.0 - x).abs();
+            d(*a).total_cmp(&d(*b))
+        })
+        .map(|i| hand[i].uid)
     });
     if top.0 != best {
         top.0 = best;
@@ -1131,6 +1176,7 @@ fn layout_hand(
     db: Res<Db>,
     time: Res<Time>,
     top: Res<HoverTop>,
+    reach: Res<HandReach>,
     mut cards: Query<(&mut CardWidget, &mut Node, &mut UiTransform, &mut ZIndex, &mut BackgroundColor)>,
 ) {
     let h = session.my_hero();
@@ -1138,17 +1184,35 @@ fn layout_hand(
     let k = (time.delta_secs() * 14.0).min(1.0);
     for (mut w, mut node, mut tf, mut z, mut bg) in &mut cards {
         let Some(i) = h.hand.iter().position(|c| c.uid == w.uid) else { continue };
-        let mut target = hand_slot(i, n);
+let rest = hand_slot(i, n);
+        let mut target = rest;
         let lifted = top.0 == Some(w.uid);
-        if lifted && !w.dragging {
-            target.y = HAND_TOP - 70.0;
+        // the nearer the cursor, the higher the card: full height under it, falling away
+        // smoothly over the next two or three cards to either side
+        let centre = rest.x + CARD_W / 2.0;
+        let pull = if w.dragging {
+            1.0
+        } else {
+            reach.0.map_or(0.0, |x| {
+                let d = (x - centre).abs() / (hand_spacing(n) * 2.6);
+                if d < 1.0 { (1.0 + (d * std::f32::consts::PI).cos()) / 2.0 } else { 0.0 }
+            })
+        };
+        target.y -= HAND_LIFT * pull;
+        // neighbours lean away a little, so the card in focus is not half covered
+        if let (Some(x), false) = (reach.0, lifted) {
+            target.x += (centre - x).signum() * 46.0 * (pull * (1.0 - pull) * 4.0).min(1.0);
         }
         w.pos = w.pos.lerp(target, k);
         let p = w.pos + w.drag;
         node.left = px(p.x);
         node.top = px(p.y);
-        let scale = if w.dragging { 0.86 } else if lifted { 1.1 } else { 1.0 };
+        // how far it has actually risen drives size and tilt, so they move with it
+        let risen = ((rest.y - w.pos.y) / HAND_LIFT).clamp(0.0, 1.0);
+        let scale = if w.dragging { 0.86 } else { 1.0 + 0.10 * risen };
         tf.scale = tf.scale.lerp(Vec2::splat(scale), k);
+        let mid = (n as f32 - 1.0) / 2.0;
+        tf.rotation = Rot2::radians((i as f32 - mid) * 0.035 * (1.0 - risen) * if w.dragging { 0.0 } else { 1.0 });
         let want_z = if lifted { 100 } else { i as i32 };
         if z.0 != want_z {
             z.0 = want_z;
@@ -1268,7 +1332,7 @@ fn update_tooltip(
     if let Some(w) = top.0.and_then(|uid| cards.iter().find(|w| w.uid == uid && !w.dragging && !w.hidden)) {
         if let Some((card, def)) = h.hand.iter().find(|c| c.uid == w.uid).and_then(|c| db.0.cards.get(&c.def).map(|d| (c, d))) {
             lines = l10n.card_glossary(&def.view(card.upgraded, h.form));
-            at = Vec2::new(w.pos.x + CARD_W * 1.08 + 14.0, HAND_TOP - 260.0);
+            at = Vec2::new(w.pos.x + CARD_W * 1.12 + 14.0, HAND_TOP - HAND_LIFT);
             if at.x + 340.0 > STAGE_W {
                 at.x = w.pos.x - 350.0;
             }

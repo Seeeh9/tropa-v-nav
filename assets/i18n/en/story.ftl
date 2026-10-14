@@ -4,6 +4,7 @@
 
 story-next = Onward
 story-skip = Skip
+story-votes = Ready:
 story-close = Set out
 story-end = The tale ends
 chronicle-endings = Endings: { $n } of { $all }

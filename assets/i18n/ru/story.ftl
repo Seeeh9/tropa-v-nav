@@ -4,6 +4,7 @@
 
 story-next = Дальше
 story-skip = Пропустить
+story-votes = Решили:
 story-close = В путь
 story-end = Конец сказа
 chronicle-endings = Концовки: { $n } из { $all }

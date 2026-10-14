@@ -4,6 +4,7 @@
 
 story-next = Далее
 story-skip = Минути
+story-votes = Изволили:
 story-close = Гряди
 story-end = Конец сказанию
 

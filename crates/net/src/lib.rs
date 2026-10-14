@@ -88,6 +88,8 @@ pub enum Msg {
     Snapshot { n: u32, lobby: Lobby, state: Box<Run> },
     /// Quick signal without chat, pinned to a unit.
     Ping { kind: u8, at: UnitRef },
+    /// Everyone: my vote on the story page `page` (its text key): read on, or skip the scene.
+    StoryVote { page: String, skip: bool },
 }
 
 impl Msg {
@@ -117,6 +119,8 @@ pub enum Note {
     /// State was replaced wholesale; redraw without animation.
     Resynced,
     Ping { from: u8, kind: u8, at: UnitRef },
+    /// A player voted on a story page, this player included.
+    StoryVote { from: u8, page: String, skip: bool },
     HostChanged,
 }
 
@@ -354,6 +358,14 @@ impl Node {
         }
     }
 
+    /// Votes to turn the story page everyone is reading, or to skip the rest of the scene.
+    pub fn story_vote(&mut self, page: &str, skip: bool) {
+        if let Some(from) = self.my_slot() {
+            self.out.push((To::All, Msg::StoryVote { page: page.into(), skip }));
+            self.notes.push(Note::StoryVote { from, page: page.into(), skip });
+        }
+    }
+
     // ---- membership ----
 
     /// The transport saw this peer leave the lobby.
@@ -436,6 +448,11 @@ impl Node {
             Msg::Ping { kind, at } => {
                 if let Some(slot) = self.lobby.slot_of(from) {
                     self.notes.push(Note::Ping { from: slot, kind, at });
+                }
+            }
+            Msg::StoryVote { page, skip } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::StoryVote { from: slot, page, skip });
                 }
             }
 

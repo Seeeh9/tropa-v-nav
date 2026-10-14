@@ -3,14 +3,16 @@
 //! and every ending leads back to the gate: the next run opens with a page that remembers it.
 //!
 //! A page's id is both its picture (`assets/story/<id>-gemini.png`) and its text (`story-<id>`).
-//! Pages are drawn over whatever screen is open and swallow its input until read or skipped;
-//! each player reads at their own pace, nothing here touches the shared run.
+//! Pages are drawn over whatever screen is open and swallow its input until read or skipped.
+//! In a party the scenes of the run (the opening, each act) are read together: pressing a button
+//! is a vote, and the page turns for everyone once every player has voted; if all of them voted
+//! to skip, the scene is dropped. Endings differ from player to player and are read alone.
 
 use crate::art::Art;
 use crate::audio::{Mixer, Narration};
 use crate::l10n::L10n;
 use crate::battle::Btn;
-use crate::net::Net;
+use crate::net::{Net, NetStatus};
 use crate::profile::Profile;
 use crate::theme::{self, Fonts};
 use crate::{Stage as Canvas, STAGE_H, STAGE_W};
@@ -19,7 +21,7 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
 use nav_core::{CardType, Run, Stage};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 /// Every ending there is, in the order the chronicle lists them.
 pub const ENDINGS: [&str; 8] = ["fall_forest", "fall_village", "fall_nav", "fall_koschei", "win_dawn", "win_scarred", "win_throne", "win_circle"];
@@ -28,7 +30,7 @@ pub const ENDINGS: [&str; 8] = ["fall_forest", "fall_village", "fall_nav", "fall
 const THRONE_CURSES: usize = 3;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, show_page).chain());
+    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page).chain());
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
 }
@@ -67,6 +69,8 @@ pub struct Tale {
     /// How many pages the scene being read had when it began, for "2 / 3".
     total: usize,
     shown: Option<Entity>,
+    /// Votes cast on each page, by its text key: player slot -> wants to skip.
+    votes: HashMap<String, HashMap<u8, bool>>,
 }
 
 impl Tale {
@@ -129,6 +133,17 @@ struct Told {
     ended: bool,
 }
 
+/// Players who read the tale together: connected people, not the in-process bots.
+fn readers(net: &Net) -> Vec<u8> {
+    let bots: Vec<_> = net.locals.iter().map(|n| n.me).collect();
+    net.node.lobby.players.iter().enumerate().filter(|(_, p)| p.connected && !bots.contains(&p.peer)).map(|(i, _)| i as u8).collect()
+}
+
+/// The page is read together, and turned by vote.
+fn shared(net: &Net, page: &Page) -> bool {
+    !page.closes && readers(net).len() > 1
+}
+
 fn silent(net: &Net) -> bool {
     // the autopilot does not read, and a screenshot run must not be covered by a page
     net.bot_me || (cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok() && std::env::var("TROPA_STORY").is_err())
@@ -145,7 +160,10 @@ fn watch_run(net: Option<Res<Net>>, db: Res<crate::session::Db>, mut tale: ResMu
         // a run picked up from a save has had its opening already
         let fresh = run.act <= 1 && run.floors_cleared == 0 && run.at.is_none();
         if fresh && !silent(&net) {
+            // read together, the opening must be the same page for all: a party always hears the prologue
+            let party = readers(&net).len() > 1;
             match profile.last_ending.clone() {
+                _ if party => tale.tell(vec![page("pro_1"), page("pro_2"), page("pro_3")]),
                 Some(last) if profile.prologue_seen => {
                     tale.tell(vec![Page { picture: "story/again".into(), text: format!("story-again-{last}"), title: None, closes: false }]);
                 }
@@ -212,20 +230,71 @@ fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res
     }
 }
 
-fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, speaking: Query<Entity, With<Narration>>) {
+fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, net: Option<ResMut<Net>>, speaking: Query<Entity, With<Narration>>) {
+    let skip = matches!(*turn, Turn::Skip);
+    // in a party the button is a vote; the page turns once everyone has voted
+    if let (Some(mut net), Some(page)) = (net, tale.pages.front()) {
+        if shared(&net, page) {
+            let key = page.text.clone();
+            net.node.story_vote(&key, skip);
+            return;
+        }
+    }
+    advance(&mut commands, &mut tale, &speaking, skip);
+}
+
+fn advance(commands: &mut Commands, tale: &mut Tale, speaking: &Query<Entity, With<Narration>>, skip: bool) {
     // the storyteller stops mid-word when the page is turned
-    for e in &speaking {
+    for e in speaking {
         commands.entity(e).despawn();
     }
-    match *turn {
-        Turn::Next => {
-            tale.pages.pop_front();
-        }
-        Turn::Skip => tale.pages.clear(),
+    if skip {
+        tale.pages.clear();
+    } else {
+        tale.pages.pop_front();
     }
     if let Some(e) = tale.shown.take() {
         commands.entity(e).despawn();
     }
+}
+
+/// The "who has voted" line on a shared page.
+#[derive(Component)]
+struct VoteLabel;
+
+/// Counts the party's votes on the page being read and turns it when everyone has voted.
+fn tally_votes(
+    mut commands: Commands,
+    mut tale: ResMut<Tale>,
+    net: Option<Res<Net>>,
+    status: Option<ResMut<NetStatus>>,
+    l10n: Res<L10n>,
+    speaking: Query<Entity, With<Narration>>,
+    mut labels: Query<&mut Text, With<VoteLabel>>,
+) {
+    if let Some(mut status) = status {
+        for (from, page, skip) in status.story_votes.drain(..) {
+            tale.votes.entry(page).or_default().insert(from, skip);
+        }
+    }
+    let Some(net) = net else { return };
+    let Some(page) = tale.pages.front() else { return };
+    if !shared(&net, page) {
+        return;
+    }
+    let readers = readers(&net);
+    let cast = tale.votes.get(&page.text).cloned().unwrap_or_default();
+    let voted: Vec<bool> = readers.iter().filter_map(|r| cast.get(r).copied()).collect();
+    for mut text in &mut labels {
+        text.0 = format!("{} {} / {}", l10n.t("story-votes"), voted.len(), readers.len());
+    }
+    if voted.len() < readers.len() {
+        return;
+    }
+    let skip = voted.iter().all(|s| *s);
+    let key = page.text.clone();
+    tale.votes.remove(&key);
+    advance(&mut commands, &mut tale, &speaking, skip);
 }
 
 fn show_page(
@@ -239,6 +308,7 @@ fn show_page(
     assets: Res<AssetServer>,
     mixer: Res<Mixer>,
     profile: Res<Profile>,
+    net: Option<Res<Net>>,
 ) {
     if !*hooked {
         *hooked = true;
@@ -253,6 +323,7 @@ fn show_page(
     if mixer.narrator > 0.0 && art.root().join(&spoken).is_file() {
         commands.spawn((Narration, AudioPlayer::new(assets.load::<AudioSource>(spoken)), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.narrator))));
     }
+    let together = net.as_ref().is_some_and(|n| shared(n, page));
     let left = tale.pages.len();
     let at = tale.total.saturating_sub(left) + 1;
     let last = left == 1;
@@ -313,7 +384,14 @@ fn show_page(
                 Node { width: px(STAGE_W - 300.0), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() },
                 Pickable::IGNORE,
                 children![
-                    theme::text(format!("{at} / {}", tale.total.max(at)), &fonts.num, 26.0, theme::DIM),
+                    (
+                        Node { column_gap: px(30), align_items: AlignItems::Center, ..default() },
+                        Pickable::IGNORE,
+                        children![
+                            theme::text(format!("{at} / {}", tale.total.max(at)), &fonts.num, 26.0, theme::DIM),
+                            (theme::text("", &fonts.body, 26.0, theme::CANDLE), VoteLabel, if together { Visibility::Inherited } else { Visibility::Hidden }),
+                        ],
+                    ),
                     (
                         Node { column_gap: px(24), ..default() },
                         Pickable::IGNORE,

@@ -64,6 +64,8 @@ pub struct NetStatus {
     pub run_dirty: bool,
     /// Pings not yet shown: `(player slot, kind, unit)`.
     pub pings: Vec<(u8, u8, nav_core::UnitRef)>,
+    /// Story votes not yet counted: `(player slot, page text key, skip)`.
+    pub story_votes: Vec<(u8, String, bool)>,
 }
 
 enum SteamEv {
@@ -513,6 +515,7 @@ fn notes(
                 }
             }
             Note::Ping { from, kind, at } => status.pings.push((from, kind, at)),
+            Note::StoryVote { from, page, skip } => status.story_votes.push((from, page, skip)),
         }
     }
 }

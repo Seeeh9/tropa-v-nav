@@ -44,7 +44,9 @@ def main():
     s = score(lines(lang)[key], heard)
     if s < ENOUGH.get(lang, 0.85):
         print(f"BAD {key}: {seconds:.1f}s heard {s:.0%}\n    heard: {heard}")
-        os.remove(joined)
+        # the parts go too, so the page can simply be read again
+        for f in files + [joined]:
+            os.remove(f)
         return
     out = os.path.join(ROOT, "assets", "voice", lang, f"{key}.wav")
     save_levelled(joined, out)

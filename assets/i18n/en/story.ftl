@@ -1,5 +1,6 @@
 # The tale: illustrated pages at the start of a run, between acts and at its end.
 # A page's key matches its picture: assets/story/<page>-gemini.png
+# The tone is a horror fairy tale: a storyteller's cadence, dread that builds page by page, at times foul.
 
 story-next = Onward
 story-skip = Skip
@@ -9,55 +10,55 @@ chronicle-endings = Endings: { $n } of { $all }
 chronicle-ending-unknown = ? ? ?
 
 ## Prologue (the first run)
-story-pro_1 = Koschei the Deathless grew tired of waiting for the living to come to him. He took hold of the edge of the world and pulled — and the border between Yav and Nav tore like old canvas.
-story-pro_2 = The unclean poured through the rent. Villages emptied in a single night: stoves were lit at dusk, and by morning the ones sitting in the huts were those who ought to lie in the ground.
-story-pro_3 = One stockade is left — the last. From its gate a path runs into the Black Forest, and nobody has come back along it. They say that at its end — in a chest, in a hare, in a duck, in an egg — lies a needle. Break the needle and Koschei ends.
+story-pro_1 = Once there was Koschei, and he had no death. He took his death out of his chest while still young and hid it in a needle, and the needle in an egg, and stayed on his throne to dry. He dried for a thousand years. Then he grew bored. He took the world by its edge and tore it, the way a shirt is torn off a corpse.
+story-pro_2 = Through the rent crawled what lives on the underside. The first night the dogs howled in every village. The second night they fell silent. On the third the dead rose from the graveyard and went home: a knock, and a voice — "Will you let me in, dear one?" Those who did were found at the table in the morning. Fed. With earth in their mouths.
+story-pro_3 = One stockade is left. Behind it they burn their own huts for firewood and do not sleep: in sleep their own dead come to them. From the gate a path runs into the Black Forest. They say that at its end — in a chest, in a hare, in a duck, in an egg — lies that very needle. They also say the path is fond of walkers. It eats them.
 
 ## At the gate again: depends on how the last run ended
-story-again = The stockade. The gate. The path. You have walked it before — and here you stand again.
-story-again-fall_forest = They found you at the gate at dawn: moss in your mouth, bark under your nails. The forest chewed you and spat you out. And the path beyond the stockade lies as it lay — as if waiting.
-story-again-fall_village = The bell of the dead village tolled for you — and you woke by your own fire, behind the stockade. Nav does not keep those who fall short. The path is open again.
-story-again-fall_nav = Your shadow stayed on the bank of the Smorodina. You came to the gate without it and cast nothing until noon. The path calls you to fetch what is yours.
-story-again-fall_koschei = "Come again," he said to your back. You remember his voice better than your mother's face. The gate creaks. The path waits.
-story-again-win_dawn = The needle was broken. You heard the snap yourself. Yet by autumn the unclean are scratching at the stockade again, and in the chest under the oak, they say, something rattles once more.
-story-again-win_throne = You dream of an iron throne and of your own hands on its arms. You wake at the gate. Somebody must walk the path — before the one on the throne remembers your name.
-story-again-win_scarred = Scars ache before rain and before the unclean. Tonight they ache too much for sleep. So it is time: the path is open and the debts are unpaid.
-story-again-win_circle = You know how it ends. You know it does not end at all. You tighten your belt anyway: the path will not walk itself.
+story-again = The stockade. The gate. The path. You have walked it before. It remembers you. It is licking its lips.
+story-again-fall_forest = They found you at the gate at dawn. Moss was growing out of your mouth, bark under your nails, and when they turned you over a beetle climbed out of your ear and went about its business. The forest chewed you and spat you out. It liked the chewing.
+story-again-fall_village = It took you three days to dig the earth out from under your tongue. It still grits between your teeth — graveyard earth, rich and greasy. At night a bell tolls in the dead village and you count the strokes. They are calling you to table.
+story-again-fall_nav = Your shadow stayed on the far bank. Without it you are cold even by the fire, and the dogs behind the stockade give you a wide berth and whine. Yesterday you cut your finger. Nothing came out.
+story-again-fall_koschei = "Come again," he said to your back. "Your fear tastes good." You scrubbed yourself raw in the bathhouse and the smell of his gold will not come off. The gate creaks. The path waits.
+story-again-win_dawn = The needle was broken; you heard the snap yourself. But your palm festers where you held it, and under the skin something thin and iron is working its way towards your heart. And there is scratching at the stockade again.
+story-again-win_throne = You dream of the throne. In the dream it is warm and wet like an inside, and will not let go. You wake at the gate with the marks of its arms on your palms. Go, before the one who sits on it opens your eyes.
+story-again-win_scarred = The stump itches when the unclean are near. Tonight it itches so that you have torn off the bandages. Something stirred beneath them — as if what stayed in Nav were pulling the rest of you after it.
+story-again-win_circle = You know what lies in the chest. You know whose face is there. And you know that if you do not go, he will — from the other side of the mirror. Tighten your belt.
 
 ## Between acts
-story-act2 = The forest ends not in a meadow but in a graveyard. Beyond it, a village: shutters closed, smoke from the chimneys, not a soul in the street. Or rather, souls are exactly what there is.
-story-act3 = Past the last fence the ground falls away. Below runs the Smorodina, black and hot, and over it the Kalinov bridge, glowing red. On the far bank the sky hangs upside down. That is Nav.
-story-act4 = An iron gate, and on either side empty helmets on stakes. One stake is free. Cold and old gold breathe from within. He knows you have come. He always knows.
+story-act2 = The forest ends in a graveyard. The graves have been dug open — from inside. Beyond it, a village: shutters closed, and from the chimneys a smell of smoke and roasting. There has been no livestock in that village for a long time. Do not ask what is roasting.
+story-act3 = Past the last fence the ground ends as if bitten off. Below runs the Smorodina, black and hot, reeking of singed hair. Across it lies the Kalinov bridge, glowing red; baked onto its rails is what remains of those who walked before you. On the far bank the sky hangs upside down. That is Nav.
+story-act4 = An iron gate. On either side, helmets on stakes — and not all of them empty: in some, something still blinks. One stake is free, and freshly sharpened. From within comes cold and the sweet rot of old gold. He knows you have come. He has laid the table.
 
 ## Endings. Every one of them leads back to the gate.
-story-name-fall_forest = Spat Out by the Forest
-story-fall_forest_1 = You lie down in the moss — only to catch your breath. The moss is warm. Roots tuck it in around you like a blanket, and someone large and old says above you: "This one is not grown yet. Let him walk some more."
-story-fall_forest_2 = The forest carries you to the stockade the way a river carries a chip of wood. The sentries are not even surprised. The path beyond the gate is whole: not a footprint, not a broken twig. As if you had never walked it.
+story-name-fall_forest = Brought Up by the Forest
+story-fall_forest_1 = You lay down in the moss — only to catch your breath. The moss is warm as a belly. Roots slip under your skin quietly, almost tenderly, and drink. Someone enormous bends over you, sniffs, and says in a voice that shakes the bark loose: "Lean. Let it fatten."
+story-fall_forest_2 = The forest carries you to the stockade and brings you up at the gate — in slime, in needles, with mushroom thread in your hair. The sentries are not surprised: you are not the first. They only watch to see whether anything moves under your shirt. Not today. And the path beyond the gate is clean, as if licked.
 
-story-name-fall_village = A Guest of the Dead Village
-story-fall_village_1 = The dead village had a hut ready for you: the table laid, the bed made. The hosts are glad — it has been long since they had guests who stay. Above the roofs a bell begins to toll.
-story-fall_village_2 = At the third stroke you open your eyes by the fire behind the stockade. There is no bell here and never was. But somewhere in that village your bowl is going cold — and nobody will clear it away until you return.
+story-name-fall_village = Called to Table
+story-fall_village_1 = The dead village had a hut ready for you: the table laid, the bed made. The hosts are smiling — they have no lips, there is nothing else left to do with their mouths. "Eat, dear guest." The bowl holds earth, half of it worms, and the worst of it is that you are hungry. Above the roofs a bell begins to toll.
+story-fall_village_2 = At the third stroke you open your eyes by the fire behind the stockade. There is no bell here and never was. Your mouth is full of earth. You spit — and something in the spittle moves. Somewhere in that village your bowl is going cold. Nobody will clear it away. They are waiting for you to finish.
 
 story-name-fall_nav = Shadowless
-story-fall_nav_1 = Nobody dies in Nav — in Nav one stays. You stand on the grey shore among pale lights, and one of them is yours. It is brighter than the rest: there is still anger in it.
-story-fall_nav_2 = The anger is what lifts you, like a cork out of water. At the gate you stand up without a shadow. It stayed on the far bank to keep your place. You will have to go down for it.
+story-fall_nav_1 = Nobody dies in Nav. In Nav one stays. You stand on the grey shore and the flesh slides off you quietly, like a wet shirt, and floats away on the black water. Around you tremble pale lights — those from whom everything has already come off. One light is yours. There is still anger in it.
+story-fall_nav_2 = The anger is what lifts you, like a cork out of a bog. At the gate you stand up whole — to look at. Only there is no shadow. It stayed on the far bank and is already trying on your face. You will have to go down for it before it comes by itself.
 
-story-name-fall_koschei = "Come Again"
-story-fall_koschei_1 = He did not even rise from the throne. "Which time is this?" asked Koschei, and bent a bony finger himself. "I do not mind. I have eternity, you have stubbornness. Let us see which runs out first."
-story-fall_koschei_2 = He lets you go — that is the worst of it. You walk back in your own footprints all the way to the stockade, and far behind you a chain rattles on a chest. He is locking it again. For you.
+story-name-fall_koschei = "Crawl Some More"
+story-fall_koschei_1 = He did not even rise from the throne. You crawled to him across the gold, and the gold stuck to your palms: it is not gold, it is teeth, thousands upon thousands of teeth. "Which time is this?" asked Koschei, and bent a finger. The finger cracked and fell off. He set it back in place. "I do not mind. Crawl some more."
+story-fall_koschei_2 = He lets you go — that is the worst of it. First he takes something small and warm out from under your ribs and puts it in the chest: "A keepsake." Then he lets you go. You trudge back to the stockade in your own footprints and cannot remember what is missing from you. Behind you a chain rattles.
 
 story-name-win_dawn = The Splinter
-story-win_dawn_1 = The needle snapped like a dry twig. Koschei looked at his hands, said "At last" — and fell into grey ash. The sky of Nav cracked, and dawn came crawling through the cracks.
-story-win_dawn_2 = You reached the stockade before dark. That night a splinter was drawn out of your palm — iron, thin, with an eye. Needles do not break for good. They knit. By spring the path will open again.
+story-win_dawn_1 = The needle snapped like a chicken bone. Koschei looked at his hands: the skin was coming off them in ribbons, and under the skin there was nothing. "At last," he said, and vomited ash. The sky of Nav burst like a boil, and dawn ran out of it.
+story-win_dawn_2 = You reached the stockade before dark. That night your palm swelled, and the healer drew a splinter out of the pus — iron, thin, with an eye. It was warm, and it thrashed in the tweezers like a little fish. Needles do not break for good. They knit. Inside somebody.
 
 story-name-win_throne = The New Koschei
-story-win_throne_1 = The needle lay in your palm, and it was warm. The curse you had gathered along the way whispered: "Why break it? He ruled badly. You will do better." The throne had not yet gone cold.
-story-win_throne_2 = The unclean left the stockade that same night — you ordered it so. A year later new heroes came down the path: to break the needle, to kill Koschei. You wait for them on the throne. One of them is you, as you were. He is already tightening his belt.
+story-win_throne_1 = The needle lay in your palm, warm as a living thing. The curse you had gorged on along the way turned over in your guts and said with your own mouth: "Why break it? He ruled badly. We will do better." The throne had not gone cold. The throne was glad of you.
+story-win_throne_2 = You sat — and it grew into you from below, unhurried, while you watched. The unclean left the stockade: you ordered it so. Now you dry, and wait. New ones are already coming down the path — to break the needle, to kill Koschei. One of them is you, as you were. You remember how he smells. Your mouth is watering.
 
-story-name-win_scarred = What Nav Is Owed
-story-win_scarred_1 = The needle was broken, but not everyone reached the dawn — or not all of them did. One left a hand in Nav, one a name, one the companion they came with. Koschei's ash was still warm when you began counting what was missing.
-story-win_scarred_2 = Nav gives everything back, if you come and take it yourself. So say the old women by the stockade, and old women lie every other time. You look at the path and count: one — truth, two — lie. It comes out truth.
+story-name-win_scarred = Paid in Pieces
+story-win_scarred_1 = The needle was broken, but not everyone reached the dawn — and not all of anyone. Nav takes its payment in pieces: from one an arm to the elbow, from another a name, from a third the one he came with. What it took has stayed there. It is still warm. It calls to you in your own voices.
+story-win_scarred_2 = "Nav gives it all back, if you come and take it yourself," say the old women by the stockade, and laugh with empty gums. Only it does not give back the way it took: what is sewn on rots, and what is called by another's name answers. You look at the path. The stump aches. There, in the dark, someone is moving your fingers.
 
 story-name-win_circle = The Path Is the Needle
-story-win_circle_1 = On the tenth circle the chest held neither duck nor egg. It held a mirror. Koschei stood beside you and said wearily: "Do you see at last? The needle is the path. My death is whoever walks it. While you keep walking, I am mortal. Stop — and I am eternal."
-story-win_circle_2 = So there will be no end. There will be a stockade, a gate and a path that someone walks to its end every time, so that evil dies every time. You come out into the dawn, sleep until evening — and get up. Your belt hangs on its nail.
+story-win_circle_1 = On the tenth circle the chest held neither duck nor egg. It held a mirror, and in the mirror was you, a thousand years stale. Koschei stood beside you. He smelled the same as you. "Do you see at last? The needle is the path. My death is whoever walks it. I remember the taste of every one of you."
+story-win_circle_2 = So there will be no end. There will be a stockade, a gate, and a path that devours walkers so that evil dies every time — and every time gets up. You come out into the dawn, sleep until evening, and rise. Your belt hangs on its nail. There is ash under your fingernails. The path is licking its lips.

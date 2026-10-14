@@ -29,10 +29,10 @@ window.tropaStyle=(who,lang)=>barkVoice[who].persona+' '+TROPA_LANG[lang]+' Spea
 window.tropaSet=(text)=>{ const t=[...document.querySelectorAll('textarea')].find(x=>(x.getAttribute('aria-label')||'')==='Speech block text'); const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set; set.call(t,text); t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); return t; };
 window.tropaDone=()=>{ try { return JSON.parse(localStorage.tropaDone||'[]'); } catch(e) { return []; } };
 window.tropaTodo=(who,only)=>{ const done=new Set(tropaDone()); const out=[]; for(const lang of (only?[only]:['ru-old','ru','en'])) for(const k of Object.keys(barkQ[lang]||{})) if(k.split('-')[1]===who && !done.has(lang+'/'+k)) out.push([lang,k]); return out; };
-window.tropaRecord=async (who,n,lang)=>{
+window.tropaRecord=async (who,n,only)=>{
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const log=[];
-  for(const [lang,key] of tropaTodo(who,lang).slice(0,n)){
+  for(const [lang,key] of tropaTodo(who,only).slice(0,n)){
     if(/Quota limit/.test(document.body.innerText)) { log.push('QUOTA'); break; }
     // a run that hangs shows Stop instead of Run: give it time, then stop it
     const runButton=()=>[...document.querySelectorAll('button')].find(b=>/^Run/.test(b.textContent.trim()));
@@ -66,7 +66,7 @@ window.tropaRecord=async (who,n,lang)=>{
     log.push(lang+' '+key);
     await sleep(800);
   }
-  return log.join(' | ')+' || left '+tropaTodo(who,lang).length;
+  return log.join(' | ')+' || left '+tropaTodo(who,only).length;
 };
 """
 

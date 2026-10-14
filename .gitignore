@@ -2,3 +2,4 @@
 /_inbox
 *.pdb
 __pycache__/
+.secrets/

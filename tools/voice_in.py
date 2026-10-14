@@ -1,6 +1,10 @@
 """Takes voice clips downloaded from Google AI Studio into the game and checks them by ear.
 
     python tools/voice_in.py <ru-old|ru|en> <text key> [...]   # -> assets/voice/<lang>/<key>.wav
+    python tools/voice_in.py --named                          # every tropa__<lang>__<key>.wav waiting
+
+A clip the page helper saved under its own name (`tropa__<lang>__<key>.wav`) says which line it
+is, so clips from several tabs at once can be taken in whatever order they arrived.
 
 AI Studio saves every clip as `Generated Audio <date>.wav`; the waiting ones are taken in the
 order they arrived, one per key. Each clip is then heard by a local Whisper (tools/hear.py) and
@@ -103,7 +107,45 @@ def loudness(path):
     return [int(np.sqrt((a[i * n:(i + 1) * n] ** 2).mean())) for i in range(5)]
 
 
+def take(f, lang, key, text, reject_name):
+    """Checks one clip against its line; a good one goes into the game, a bad one is set aside."""
+    heard, seconds = hear(f, lang.split("-")[0])
+    s = score(text[key], heard)
+    # a short battle cry gives Whisper little to go on: ask less of it
+    ok = s >= ENOUGH.get(lang, 0.85) * (0.6 if key.startswith("bark-") else 1.0)
+    # one or two words: Whisper cannot judge them, a clip of the right length will do
+    if len(text[key].split()) <= 2:
+        ok = seconds >= 0.8
+    # a clip cut short is also much shorter than its text takes to say
+    ok = ok and seconds * FASTEST.get(lang, 17) >= len(text[key])
+    if ok:
+        out_dir = os.path.join(ROOT, "assets", "voice", lang)
+        os.makedirs(out_dir, exist_ok=True)
+        out = os.path.join(out_dir, f"{key}.wav")
+        save_levelled(f, out)
+        print(f"ok  {lang} {key}: {seconds:.1f}s heard {s:.0%}")
+        os.makedirs(os.path.join(ROOT, "_inbox", "voice"), exist_ok=True)
+        shutil.move(f, os.path.join(ROOT, "_inbox", "voice", f"{lang}_{key}_take.wav"))
+    else:
+        print(f"BAD {lang} {key}: {seconds:.1f}s heard {s:.0%}    heard: {heard}")
+        shutil.move(f, os.path.join(DOWNLOADS, reject_name))
+    return ok
+
+
 def main():
+    if sys.argv[1:2] == ["--named"]:
+        texts = {}
+        files = sorted(glob.glob(os.path.join(DOWNLOADS, "tropa__*__*.wav")), key=os.path.getmtime)
+        good = 0
+        for f in files:
+            m = re.match(r"tropa__([a-z-]+)__([a-z0-9-]+)(?: \(\d+\))?\.wav$", os.path.basename(f))
+            if not m:
+                continue
+            lang, key = m.groups()
+            texts.setdefault(lang, lines(lang))
+            good += take(f, lang, key, texts[lang], f"REJECTED {lang} {key}.wav")
+        print(f"{good} of {len(files)} taken in")
+        return
     lang, keys = sys.argv[1], sys.argv[2:]
     files = sorted(glob.glob(os.path.join(DOWNLOADS, "Generated Audio*.wav")), key=os.path.getmtime)
     if len(files) < len(keys):
@@ -111,28 +153,8 @@ def main():
     # the oldest ones are these keys; any newer clips wait for the next call
     files = files[:len(keys)]
     text = lines(lang)
-    out_dir = os.path.join(ROOT, "assets", "voice", lang)
-    os.makedirs(out_dir, exist_ok=True)
     for f, key in zip(files, keys):
-        heard, seconds = hear(f, lang.split("-")[0])
-        s = score(text[key], heard)
-        # a short battle cry gives Whisper little to go on: ask less of it
-        ok = s >= ENOUGH.get(lang, 0.85) * (0.6 if key.startswith("bark-") else 1.0)
-        # one or two words: Whisper cannot judge them, a clip of the right length will do
-        if len(text[key].split()) <= 2:
-            ok = seconds >= 0.8
-        # a clip cut short is also much shorter than its text takes to say
-        ok = ok and seconds * FASTEST.get(lang, 17) >= len(text[key])
-        if ok:
-            out = os.path.join(out_dir, f"{key}.wav")
-            save_levelled(f, out)
-            print(f"ok  {key}: {seconds:.1f}s heard {s:.0%} loud {loudness(f)} -> {loudness(out)}")
-            os.makedirs(os.path.join(ROOT, "_inbox", "voice"), exist_ok=True)
-            shutil.move(f, os.path.join(ROOT, "_inbox", "voice", f"{lang}_{key}_take.wav"))
-        else:
-            print(f"BAD {key}: {seconds:.1f}s heard {s:.0%} loud {loudness(f)}")
-            print("    heard:", heard)
-            shutil.move(f, os.path.join(DOWNLOADS, f"REJECTED {key}.wav"))
+        take(f, lang, key, text, f"REJECTED {key}.wav")
 
 
 if __name__ == "__main__":

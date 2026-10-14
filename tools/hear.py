@@ -8,11 +8,24 @@ that drops the end of a long line shows up here as a low score, without anyone l
 Needs `pip install faster-whisper`; the model is fetched on first use.
 """
 import difflib
+import os
 import re
 import sys
 import wave
 
 import numpy as np
+# the CUDA libraries come as pip wheels (nvidia-cublas-cu12, nvidia-cudnn-cu12): let Windows find them
+try:
+    import nvidia
+    for _root in nvidia.__path__:
+        for _lib in os.listdir(_root):
+            _bin = os.path.join(_root, _lib, "bin")
+            if os.path.isdir(_bin):
+                os.add_dll_directory(_bin)
+                os.environ["PATH"] = _bin + os.pathsep + os.environ["PATH"]
+except ImportError:
+    pass
+
 from faster_whisper import WhisperModel
 
 MODEL = None
@@ -25,7 +38,11 @@ def words(text):
 def hear(path, lang):
     global MODEL
     if MODEL is None:
-        MODEL = WhisperModel("small", device="cpu", compute_type="int8")
+        # the graphics card when it can take it, else the processor
+        try:
+            MODEL = WhisperModel("small", device="cuda", compute_type="int8_float16")
+        except Exception:
+            MODEL = WhisperModel("small", device="cpu", compute_type="int8")
     # decoded here rather than by the library: plain PCM wav, resampled to the 16 kHz Whisper wants
     with wave.open(path) as w:
         rate, channels, n = w.getframerate(), w.getnchannels(), w.getnframes()

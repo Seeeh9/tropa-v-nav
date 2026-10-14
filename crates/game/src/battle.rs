@@ -24,6 +24,8 @@ const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
 const ENEMY_SIZE: Vec2 = Vec2::new(230.0, 345.0);
 /// Room above a unit's sprite for its intent.
 const HEAD_ROOM: f32 = 62.0;
+/// Side of the picture that says what an enemy is about to do.
+const INTENT_ICON: f32 = 60.0;
 const UNIT_W: f32 = 280.0;
 
 pub fn plugin(app: &mut App) {
@@ -44,7 +46,7 @@ pub fn plugin(app: &mut App) {
             (
                 playback,
                 (sync_units, sync_hand, sync_potions, cue_effects).chain(),
-                (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_bars, update_tooltip),
+                (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_intent_icons, update_bars, update_tooltip),
                 (floaters, fly_ghosts, dying, style_buttons, shake_screen, turn_timer, send_pings, show_pings),
             )
                 .chain()
@@ -63,6 +65,9 @@ pub fn plugin(app: &mut App) {
 struct BattleRoot;
 #[derive(Component)]
 struct UnitLayer;
+/// The picture of an enemy's intent; the number and target beside it are `Label::Intent`.
+#[derive(Component)]
+struct IntentIcon(u32);
 #[derive(Component)]
 struct HandLayer;
 #[derive(Component)]
@@ -607,12 +612,19 @@ fn sync_units(
                     // text is never hidden by a sprite, this unit's or a neighbour's
                     GlobalZIndex(20),
                     Pickable::IGNORE,
-                    children![match unit {
-                        UnitRef::Enemy(uid) => (Label::Intent(uid), theme::text("", &fonts.num, 26.0, theme::BONE)),
-                        // heroes show nothing overhead; the slot keeps both sides aligned
-                        UnitRef::Hero(_) => (Label::Intent(0), theme::text("", &fonts.num, 26.0, theme::BONE)),
-                    }],
-                ));
+                ))
+                .with_children(|head| {
+                    // heroes show nothing overhead; the slot keeps both sides aligned
+                    if let UnitRef::Enemy(uid) = unit {
+                        head.spawn((
+                            IntentIcon(uid),
+                            ImageNode::default(),
+                            Node { width: px(INTENT_ICON), height: px(INTENT_ICON), margin: UiRect::right(px(4)), ..default() },
+                            Visibility::Hidden,
+                        ));
+                        head.spawn((Label::Intent(uid), theme::text("", &fonts.num, 26.0, theme::BONE)));
+                    }
+                });
                 // the feet are painted a little above the bottom edge of the picture
                 u.spawn((
                     Node {
@@ -874,6 +886,42 @@ fn statuses_line(l10n: &L10n, map: &Statuses) -> String {
     map.iter().map(|(k, v)| format!("{} {}", l10n.t(&format!("status-{k:?}")), v)).collect::<Vec<_>>().join(" · ")
 }
 
+/// Shows each enemy's intent as its picture (`assets/intents/<kind>`), hidden while it has none.
+/// Under the Sirin's song every intent is the unknown one.
+fn update_intent_icons(
+    session: Res<Session>,
+    db: Res<Db>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    mut pictures: Local<std::collections::HashMap<String, Option<Handle<Image>>>>,
+    mut icons: Query<(&IntentIcon, &mut ImageNode, &mut Visibility)>,
+) {
+    let shown = &session.shown;
+    let sung = session.my_hero().flags.contains_key("no_intents");
+    for (icon, mut image, mut vis) in &mut icons {
+        let kind = shown
+            .enemy(icon.0)
+            .and_then(|e| Some((e, e.intent.as_ref()?)))
+            .and_then(|(e, i)| db.0.enemies.get(&e.def)?.moves.get(i.mv))
+            .map(|mv| if sung { IntentKind::Unknown } else { mv.intent });
+        let picture = kind.and_then(|k| {
+            let stem = format!("intents/{k:?}");
+            pictures.entry(stem.clone()).or_insert_with(|| art.image(&assets, &stem)).clone()
+        });
+        match picture {
+            Some(h) => {
+                if image.image != h {
+                    image.image = h;
+                }
+                vis.set_if_neq(Visibility::Inherited);
+            }
+            None => {
+                vis.set_if_neq(Visibility::Hidden);
+            }
+        }
+    }
+}
+
 fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<TooltipText>, clock: Res<TimerText>, mut labels: Query<(&Label, &mut Text)>) {
     let (shown, truth) = (&session.shown, &session.truth);
     for (label, mut text) in &mut labels {
@@ -935,13 +983,13 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
                 let Some(intent) = &e.intent else { return String::new() };
                 // the Sirin's song: nobody can tell what is coming
                 if session.my_hero().flags.contains_key("no_intents") {
-                    return "?".into();
+                    return String::new();
                 }
-                let Some(mv) = db.0.enemies.get(&e.def).and_then(|d| d.moves.get(intent.mv)) else { return String::new() };
+                // the icon says what kind of move it is; the text only adds how hard and at whom
                 let mut s = match bot::intent_damage(&db.0, shown, e) {
-                    Some((d, 1)) => format!("{} {d}", l10n.t(&format!("intent-{:?}", mv.intent))),
-                    Some((d, k)) => format!("{} {d}×{k}", l10n.t(&format!("intent-{:?}", mv.intent))),
-                    None => l10n.t(&format!("intent-{:?}", mv.intent)),
+                    Some((d, 1)) => d.to_string(),
+                    Some((d, k)) => format!("{d}×{k}"),
+                    None => String::new(),
                 };
                 // in a party the target matters; alone it is always you
                 if let (Some(t), true) = (intent.target, shown.is_coop()) {
@@ -1421,7 +1469,9 @@ fn update_tooltip(
                 if let Some(mv) = e.intent.as_ref().filter(|_| !sung).and_then(|i| db.0.enemies.get(&e.def)?.moves.get(i.mv)) {
                     let key = format!("move-{}", mv.id);
                     let desc = format!("{key}-desc");
-                    lines.push((l10n.t(&key), if l10n.has(&desc) { l10n.t(&desc) } else { l10n.t(&format!("intent-{:?}", mv.intent)) }));
+                    // the kind first: it names the picture over the enemy's head
+                    let kind = l10n.t(&format!("intent-{:?}", mv.intent));
+                    lines.push((format!("{kind} · {}", l10n.t(&key)), if l10n.has(&desc) { l10n.t(&desc) } else { kind }));
                 }
             }
         }

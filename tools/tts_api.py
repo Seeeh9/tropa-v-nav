@@ -57,7 +57,14 @@ def speak(key, model, voice, prompt):
         data = json.load(r)
     part = data["candidates"][0]["content"]["parts"][0]["inlineData"]
     rate = int(re.search(r"rate=(\d+)", part.get("mimeType", "")).group(1)) if "rate=" in part.get("mimeType", "") else 24000
-    return base64.b64decode(part["data"]), rate
+    raw = base64.b64decode(part["data"])
+    # the 3.8 models send a whole wav file, not bare samples: unwrap it, or its header clicks at
+    # the start and its trailing chunks hiss at the end
+    if raw[:4] == b"RIFF":
+        import io
+        with wave.open(io.BytesIO(raw)) as w:
+            return w.readframes(w.getnframes()), w.getframerate()
+    return raw, rate
 
 
 # best first; each has its own quota on each key

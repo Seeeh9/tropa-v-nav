@@ -1,10 +1,12 @@
-"""Cuts the burst of noise some speech models leave at the very end of a clip.
+"""Cuts the noise some speech models leave at the ends of a clip.
 
     python tools/trim_tail.py <file.wav|folder> [...]   # rewrites the clips that have it
 
 The 3.8 speech models end a clip with about a tenth of a second of loud hiss straight after the
-silence that follows the last word. A clip has it when its last stretch is many times louder than
-the quiet before it; everything from the start of the burst on is cut away.
+silence that follows the last word, and a click at the start: these were the wav header and
+trailing chunks, written as sound before tts_api.py unwrapped the 3.8 models' wav replies.
+The hiss is a last stretch many times louder than the quiet before it; the click is a first five
+milliseconds far louder than what follows.
 """
 import glob
 import os
@@ -37,19 +39,31 @@ def burst_start(a, rate):
     return i * hop
 
 
+def click_end(a, rate):
+    """Samples to drop at the start when the clip opens on a click before its leading silence."""
+    hop = int(rate * 0.005)
+    if len(a) < hop * 4:
+        return 0
+    first = np.sqrt((a[:hop].astype(float) ** 2).mean())
+    after = np.sqrt((a[hop:hop * 4].astype(float) ** 2).mean())
+    return hop if first > 1000 and first > 20 * max(after, 10) else 0
+
+
 def trim(path):
     with wave.open(path) as w:
         params = w.getparams()
         a = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
     if params.nchannels != 1:
         return False
-    cut = burst_start(a, params.framerate)
-    if cut is None:
+    head = click_end(a, params.framerate)
+    burst = burst_start(a, params.framerate)
+    if not head and burst is None:
         return False
+    a = a[head:burst]
     with wave.open(path, "wb") as w:
         w.setparams(params)
-        w.writeframes(a[:cut].tobytes())
-    print(f"trimmed {os.path.basename(path)}: {(len(a) - cut) / params.framerate:.2f}s")
+        w.writeframes(a.tobytes())
+    print(f"trimmed {os.path.basename(path)}:{' click' if head else ''}{' hiss' if burst is not None else ''}")
     return True
 
 

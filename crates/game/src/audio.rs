@@ -133,15 +133,71 @@ struct Lines {
     /// Heroes who have already complained of a heavy blow this fight.
     hurt: Vec<u8>,
     quiet: f32,
+    /// The take each line last played, so the same words do not come twice running.
+    last_take: HashMap<String, usize>,
+    /// Which takes of a line are on disk, looked up once.
+    takes: HashMap<String, Vec<String>>,
+    seed: u32,
+}
+
+/// Up to this many takes of each line: `bark-<who>-<event>.wav`, then `-2.wav` and so on.
+const TAKES: usize = 5;
+
+impl Lines {
+    fn roll(&mut self, n: usize) -> usize {
+        if self.seed == 0 {
+            self.seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(1) | 1;
+        }
+        // xorshift: enough to vary which words are said
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 17;
+        self.seed ^= self.seed << 5;
+        self.seed as usize % n.max(1)
+    }
+
+    /// One of the recorded takes of `bark-<who>-<what>`, never the one that played last.
+    fn pick(&mut self, art: &Art, lang: &str, who: &str, what: &str) -> Option<String> {
+        let key = format!("{lang}/{who}-{what}");
+        let takes = self
+            .takes
+            .entry(key.clone())
+            .or_insert_with(|| {
+                (1..=TAKES)
+                    .map(|k| if k == 1 { format!("voice/{lang}/bark-{who}-{what}.wav") } else { format!("voice/{lang}/bark-{who}-{what}-{k}.wav") })
+                    .filter(|f| art.root().join(f).is_file())
+                    .collect()
+            })
+            .clone();
+        if takes.is_empty() {
+            return None;
+        }
+        let last = self.last_take.get(&key).copied();
+        let mut k = self.roll(takes.len());
+        if takes.len() > 1 && Some(k) == last {
+            k = (k + 1 + self.roll(takes.len() - 1)) % takes.len();
+        }
+        self.last_take.insert(key, k);
+        Some(takes[k].clone())
+    }
 }
 
 /// Picks the line an event deserves: `(speaker id, event, always)`; lesser lines wait their turn.
-fn line_for(e: &Event, shown: &nav_core::Combat, me: u8, st: &mut Lines) -> Option<(String, &'static str, bool)> {
+///
+/// Besides the fight's turns, a hero speaks when playing one of their own rare cards or powers,
+/// and now and then when their gift works (the bogatyr taunts, the witch's hex grows heavy, a rune
+/// fires, the wolf turns, a brew is made, a mask changes). A master gloats when a hero falls.
+fn line_for(e: &Event, shown: &nav_core::Combat, db: &nav_core::Content, me: u8, st: &mut Lines) -> Option<(String, &'static str, bool)> {
     let hero = |slot: u8| shown.hero(slot).map(|h| h.def.to_string());
     let master = |uid: u32| shown.enemy(uid).map(|e| e.def.to_string()).filter(|d| MASTERS.contains(&d.as_str()));
+    let living_master = || shown.living_enemies().map(|e| e.def.to_string()).find(|d| MASTERS.contains(&d.as_str()));
+    // a gift works many times a fight: only now and then is it remarked on
+    let gift = |st: &mut Lines, slot: u8, what: &'static str| if st.roll(3) == 0 { hero(slot).map(|h| (h, what, false)) } else { None };
     match e {
         Event::RoundStart(1) => {
-            *st = Lines::default();
+            // a new fight forgets who struck whom, but not which takes were heard
+            st.struck_by.clear();
+            st.hurt.clear();
+            st.quiet = 0.0;
             match shown.living_enemies().map(|e| e.def.to_string()).find(|d| MASTERS.contains(&d.as_str())) {
                 Some(m) => Some((m, "start", true)),
                 None => hero(me).map(|h| (h, "start", true)),
@@ -163,7 +219,26 @@ fn line_for(e: &Event, shown: &nav_core::Combat, me: u8, st: &mut Lines) -> Opti
             None => st.struck_by.get(enemy).and_then(|s| hero(*s)).map(|h| (h, "kill", false)),
         },
         Event::Phase2 { enemy } => master(*enemy).map(|m| (m, "phase2", true)),
-        Event::Downed { player } => hero(*player).map(|h| (h, "down", true)),
+        // a master standing over a fallen hero has the last word half the time
+        Event::Downed { player } => match living_master() {
+            Some(m) if st.roll(2) == 0 => Some((m, "gloat", true)),
+            _ => hero(*player).map(|h| (h, "down", true)),
+        },
+        Event::CardPlayed { player, card, .. } => {
+            let c = db.cards.get(card)?;
+            let own = shown.hero(*player).is_some_and(|h| h.def == c.hero);
+            (own && (c.rarity == nav_core::Rarity::Rare || c.kind == nav_core::CardType::Power)).then(|| hero(*player)).flatten().map(|h| (h, "rare", false))
+        }
+        Event::Taunt { player } => gift(st, *player, "taunt"),
+        Event::RuneFired { player, .. } => gift(st, *player, "rune"),
+        Event::Shifted { player, .. } => gift(st, *player, "shift"),
+        Event::Brewed { player, .. } => gift(st, *player, "brew"),
+        Event::MaskChanged { player, .. } => gift(st, *player, "mask"),
+        // the witch remarks once on each enemy her hex has grown heavy on
+        Event::Status { unit: UnitRef::Enemy(_), status: nav_core::StatusKind::Hex, delta, total } if *delta > 0 && *total >= 10 && *total - *delta < 10 => {
+            let slot = shown.heroes.iter().find(|h| h.def.as_str() == "vorozheya")?.slot;
+            hero(slot).map(|h| (h, "hex", false))
+        }
         Event::Raised { player, .. } => hero(*player).map(|h| (h, "raise", true)),
         Event::Ended { won: true } => hero(me).map(|h| (h, "win", true)),
         _ => None,
@@ -180,6 +255,7 @@ fn speak_lines(
     assets: Res<AssetServer>,
     l10n: Res<crate::l10n::L10n>,
     profile: Res<crate::profile::Profile>,
+    db: Res<crate::session::Db>,
     talking: Query<(), Or<(With<Line>, With<Narration>)>>,
     mut st: Local<Lines>,
 ) {
@@ -187,14 +263,11 @@ fn speak_lines(
     let lang = l10n.lang.voice(profile.settings.voice_lang).code();
     let mut busy = !talking.is_empty();
     for e in &cues.0 {
-        let Some((who, what, always)) = line_for(e, &session.shown, session.me, &mut st) else { continue };
+        let Some((who, what, always)) = line_for(e, &session.shown, &db.0, session.me, &mut st) else { continue };
         if busy || mixer.voices <= 0.0 || (!always && st.quiet > 0.0) {
             continue;
         }
-        let file = format!("voice/{lang}/bark-{who}-{what}.wav");
-        if !art.root().join(&file).is_file() {
-            continue;
-        }
+        let Some(file) = st.pick(&art, lang, &who, what) else { continue };
         commands.spawn((Line, AudioPlayer::new(assets.load::<AudioSource>(file)), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.voices))));
         busy = true;
         st.quiet = BETWEEN_LINES;

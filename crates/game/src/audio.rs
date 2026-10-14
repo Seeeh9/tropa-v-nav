@@ -452,3 +452,24 @@ fn fade_layers(time: Res<Time>, mixer: Res<Mixer>, mut layers: Query<(&mut Music
         sink.set_volume(Volume::Linear(layer.level * mixer.music * mixer.duck));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With several takes recorded, the same one never plays twice in a row, and all get heard.
+    #[test]
+    fn takes_never_repeat() {
+        let art = Art::new(crate::art::assets_dir());
+        let mut st = Lines::default();
+        let mut seen = std::collections::HashSet::new();
+        let mut last = None;
+        for _ in 0..200 {
+            let take = st.pick(&art, "ru-old", "bogatyr", "start").expect("the bogatyr's opening line is recorded");
+            assert_ne!(Some(&take), last.as_ref(), "the same take twice running");
+            seen.insert(take.clone());
+            last = Some(take);
+        }
+        assert!(seen.len() > 1, "only one take was ever chosen");
+    }
+}

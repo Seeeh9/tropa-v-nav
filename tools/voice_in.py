@@ -106,15 +106,21 @@ def loudness(path):
 def main():
     lang, keys = sys.argv[1], sys.argv[2:]
     files = sorted(glob.glob(os.path.join(DOWNLOADS, "Generated Audio*.wav")), key=os.path.getmtime)
-    if len(files) != len(keys):
+    if len(files) < len(keys):
         raise SystemExit(f"{len(files)} clips waiting but {len(keys)} keys given; nothing moved")
+    # the oldest ones are these keys; any newer clips wait for the next call
+    files = files[:len(keys)]
     text = lines(lang)
     out_dir = os.path.join(ROOT, "assets", "voice", lang)
     os.makedirs(out_dir, exist_ok=True)
     for f, key in zip(files, keys):
         heard, seconds = hear(f, lang.split("-")[0])
         s = score(text[key], heard)
-        ok = s >= ENOUGH.get(lang, 0.85)
+        # a short battle cry gives Whisper little to go on: ask less of it
+        ok = s >= ENOUGH.get(lang, 0.85) * (0.6 if key.startswith("bark-") else 1.0)
+        # one or two words: Whisper cannot judge them, a clip of the right length will do
+        if len(text[key].split()) <= 2:
+            ok = seconds >= 0.8
         # a clip cut short is also much shorter than its text takes to say
         ok = ok and seconds * FASTEST.get(lang, 17) >= len(text[key])
         if ok:

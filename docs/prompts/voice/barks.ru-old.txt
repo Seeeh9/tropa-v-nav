@@ -1,0 +1,60 @@
+# Battle lines in old Russian, as given to the speech model: stressed vowels in capitals, no «ё».
+# On screen and in voice_in.py checks the text of assets/i18n/ru-old/voice.ftl is used.
+
+bark-bogatyr-start = Ну, нЕчисть. ПодходИ по едИному.
+bark-bogatyr-kill = ЛежИ.
+bark-bogatyr-hurt = ПустОе. ЦарАпина Есть.
+bark-bogatyr-down = МАти сЫра землЯ… приимИ мя…
+bark-bogatyr-raise = РАно мя погребАти.
+bark-bogatyr-win = ВедИ инЫх.
+
+bark-vorozheya-start = ХУдо леглИ жрЕбии. Тем гОрше вам.
+bark-vorozheya-kill = СЕ вИдех Аз вчерА.
+bark-vorozheya-hurt = Ох ты… мертвечИна.
+bark-vorozheya-down = НИть… прервАся…
+bark-vorozheya-raise = ПАки свЯзана нИть.
+bark-vorozheya-win = ВсЯ по гадАнию.
+
+bark-volhv-start = БОзи зрЯт. Не посрамИте.
+bark-volhv-kill = ИдИ ко ЧернобОгу.
+bark-volhv-hurt = ПлОть немОщна. ДУх же — нИ.
+bark-volhv-down = ПерУне… бУди свидЕтель…
+bark-volhv-raise = Не всЯ ещЕ речЕна.
+bark-volhv-win = ТрИзну сотворИм пОсле.
+
+bark-volkolak-start = ЧУю плОть.
+bark-volkolak-kill = СлАдко.
+bark-volkolak-hurt = КусАешися? И Аз тАко.
+bark-volkolak-down = ЛунА… гАснет…
+bark-volkolak-raise = ЗвЕрь не тАко умирАет.
+bark-volkolak-win = ПАки. ХощУ пАки.
+
+bark-znaharka-start = Ну-ка, дАйте узрЮ, чИм недУгуете.
+bark-znaharka-kill = СИе не врачУется.
+bark-znaharka-hurt = Ох, бАтюшки…
+bark-znaharka-down = ЗЕлия… мнЕ бы зЕлия…
+bark-znaharka-raise = ОтпоИли мя, родИмии.
+bark-znaharka-win = ОбвЯзывайтеся, дОндеже теплЫ.
+
+bark-skomoroh-start = ЧестнЕйшие зрИтели! НачинАем!
+bark-skomoroh-kill = ПоклОн! ЗавЕса!
+bark-skomoroh-hurt = Ай! Не смешнО бЫсть!
+bark-skomoroh-down = ШУтка… не удАся…
+bark-skomoroh-raise = СЕ Аз! Не чАяли?
+bark-skomoroh-win = ИзрЯдно! ПАки! ЕщЕ нЕчисти!
+
+bark-leshy-start = КтО в лЕс мой без вопрошАния?
+bark-leshy-phase2 = ЛЕс вЕтше вАс. ЛЕс Алчнее вАс.
+bark-leshy-death = КорЕние… пОмнит…
+
+bark-bolotnik-start = ТонУ-у-уть… всИ тонУ-уть…
+bark-bolotnik-phase2 = БлАто не отпущАет. БлАто поглощАет.
+bark-bolotnik-death = ВодА… отхОдит…
+
+bark-mara-start = ЗимА приидЕ по вАс.
+bark-mara-phase2 = УжЕ Есте замЕрзли. ТОкмо не вЕсте.
+bark-mara-death = ВеснА… проклЯтая…
+
+bark-koschei-start = А, сЕ и вЫ. ТрапЕзу уготОвах.
+bark-koschei-phase2 = СмЕрти нЕсть у менЕ. У вАс же — Есть.
+bark-koschei-death = СЕ, наконЕц.

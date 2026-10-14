@@ -1,0 +1,14 @@
+# Who speaks the battle lines: AI Studio gemini-3.1-flash-tts-preview voice and the scene given with it.
+# The scene names the language: "Old Russian, read in the solemn Church Slavonic manner; a capital letter
+# inside a word marks its stressed vowel", "modern Russian" or "English with a faint Slavic weight".
+
+bogatyr = Alnilam | A huge Slavic warrior knight in battle. Deep, strong, booming chest voice of a man of forty; calm, scornful confidence; short soldier's phrases spoken firmly and loudly. Not theatrical.
+vorozheya = Gacrux | A middle-aged village witch who reads fate in bones and cards. Low, husky, knowing female voice; cold and mocking; she speaks in a quiet hiss full of contempt. Not a whisper: every word clear.
+volhv = Orus | An old pagan priest of the thunder god in battle. Grave, resonant, commanding elder's voice, slow and solemn as a prayer, with iron under it.
+volkolak = Fenrir | A man half turned into a wolf, mid-fight. Rough, hungry, growling voice through bared teeth, panting between words, barely holding back the beast. Every word still understandable.
+znaharka = Sulafat | A kindly but grim old village healer woman, about seventy. Warm, cracked, folksy grandmother's voice; dry black humour; brisk and practical.
+skomoroh = Puck | A wandering Slavic jester and buffoon performing even in battle. Quick, nasal, mocking, theatrical showman's voice; he laughs at death; loud and bright.
+leshy = Algieba | The ancient forest spirit Leshy. Enormous, slow, creaking, deep voice like an old tree groaning in the wind; inhuman and patient.
+bolotnik = Enceladus | The swamp master Bolotnik. Thick, wet, gurgling, drawling voice rising from under black water; slow and hungry.
+mara = Kore | Mara, the goddess of winter and death. Cold, flat, clear, icy female voice; utterly calm and merciless; every word like frost.
+koschei = Charon | Koschei the Deathless, an ancient skeletal king. Dry, rasping, aristocratic old voice, amused and bored, slow; a voice that has not breathed for a thousand years.

@@ -142,6 +142,11 @@ def main():
             if not m:
                 continue
             lang, key = m.groups()
+            # a line already in the game is never replaced by a stray take
+            if os.path.exists(os.path.join(ROOT, "assets", "voice", lang, f"{key}.wav")):
+                print(f"has {lang} {key}: kept the old take")
+                shutil.move(f, os.path.join(DOWNLOADS, f"SPARE {lang} {key}.wav"))
+                continue
             texts.setdefault(lang, lines(lang))
             good += take(f, lang, key, texts[lang], f"REJECTED {lang} {key}.wav")
         print(f"{good} of {len(files)} taken in")

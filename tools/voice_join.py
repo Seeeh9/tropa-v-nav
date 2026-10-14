@@ -48,6 +48,7 @@ def main():
         for f in files + [joined]:
             os.remove(f)
         return
+    os.makedirs(os.path.join(ROOT, "assets", "voice", lang), exist_ok=True)
     out = os.path.join(ROOT, "assets", "voice", lang, f"{key}.wav")
     save_levelled(joined, out)
     print(f"ok  {key}: {seconds:.1f}s heard {s:.0%} from {parts} parts, loud {loudness(out)}")

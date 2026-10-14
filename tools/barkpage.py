@@ -30,11 +30,17 @@ window.tropaRecord=async (who,n)=>{
   const log=[];
   for(const [lang,key] of tropaTodo(who).slice(0,n)){
     if(/Quota limit/.test(document.body.innerText)) { log.push('QUOTA'); break; }
+    // a run that hangs shows Stop instead of Run: give it time, then stop it
+    const runButton=()=>[...document.querySelectorAll('button')].find(b=>/^Run/.test(b.textContent.trim()));
+    for(let i=0;i<60 && !runButton();i++){
+      await sleep(1000);
+      if(i===40){ const stop=[...document.querySelectorAll('button')].find(b=>/^Stop/.test(b.textContent.trim())); if(stop) stop.click(); }
+    }
+    if(!runButton()){ log.push('STUCK'); break; }
     const a=document.querySelector('audio'); const before=a?a.src:'';
     tropaSet(barkQ[lang][key]);
     await sleep(300);
-    const run=[...document.querySelectorAll('button')].find(b=>/^Run/.test(b.textContent.trim()));
-    run.click();
+    runButton().click();
     // the clip streams in: it is done when it is new, longer than a bare header, the Run button is
     // back, and it has stopped growing for a second and a half
     let ok=false, last=-1, still=0;

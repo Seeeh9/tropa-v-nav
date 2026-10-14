@@ -61,8 +61,9 @@ def speak(key, model, voice, prompt):
 
 
 # best first; each has its own quota on each key
-MODELS = ["gemini-3.1-flash-tts-preview", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-preview-tts"]
-# the lite model reads the whole prompt aloud, style and all: it is only usable on the page, with its Style box
+MODELS = ["gemini-3.1-flash-tts-preview", "gemini-3.8-flash-tts", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-preview-tts", "gemini-3.8-flash-lite-tts"]
+# the 3.8 models read a plain prompt aloud, style and all; they take it as "## Style:" over "## Transcript:"
+MARKDOWN = {"gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"}
 SPEAKERS = ["volhv", "bogatyr", "vorozheya", "volkolak", "znaharka", "skomoroh", "leshy", "bolotnik", "mara", "koschei"]
 
 
@@ -84,7 +85,8 @@ def main():
             todo = [(k, v) for k, v in re.findall(r"^(bark-[a-z0-9-]+) = (.*)$", script, re.M)
                     if k.split("-")[1] == who and not os.path.exists(os.path.join(ROOT, "assets", "voice", lang, f"{k}.wav"))][:count]
             for name, line in todo:
-                prompt = f"{persona} {STYLE[lang]} Say only this line, once, in character: {line}"
+                plain = f"{persona} {STYLE[lang]} Say only this line, once, in character: {line}"
+                laid_out = f"## Style:\n{persona} {STYLE[lang]}\n\n## Transcript:\n{line}"
                 pcm = None
                 for tries in range(40):
                     now = time.time()
@@ -97,7 +99,7 @@ def main():
                         continue
                     model, key = live[0]
                     try:
-                        pcm, rate = speak(key, model, voice, prompt)
+                        pcm, rate = speak(key, model, voice, laid_out if model in MARKDOWN else plain)
                         break
                     except urllib.error.HTTPError as e:
                         raw = e.read().decode(errors="replace")

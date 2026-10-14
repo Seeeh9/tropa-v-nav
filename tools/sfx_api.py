@@ -5,7 +5,7 @@
 
 The key is read from `.secrets/elevenlabs_key.txt` (gitignored). Each sound is generated `--takes`
 times; every take is cut to its sound (silence trimmed from both ends, with a short fade so the cut
-does not click) and kept as `_inbox/sfx/<name>_<take>.wav`. The first take goes into the game as
+does not click) and kept as `_inbox/sfx/<name>_<take>.wav`, the untouched take as `raw/<name>_<take>.mp3`. The first take goes into the game as
 `assets/sfx/<name>-flow.wav`, which the game prefers over its synthesised stand-in.
 """
 import json
@@ -71,8 +71,9 @@ def to_samples(mp3_path):
     return np.frombuffer(raw, dtype=np.int16)
 
 
-def cut_silence(a, rate=44100, floor=0.02):
-    """The sound alone: quiet below `floor` of its peak is cut from both ends, with soft edges."""
+def cut_silence(a, rate=44100, floor=0.004):
+    """The sound alone: quiet below `floor` of its peak (about -48 dB) is cut from both ends, with
+    soft edges; the floor is low so reverb tails and soft decays survive."""
     if not len(a):
         return a
     x = np.abs(a.astype(np.float32))
@@ -83,7 +84,7 @@ def cut_silence(a, rate=44100, floor=0.02):
     if not len(loud):
         return a
     start = max(0, loud[0] * hop - rate // 200)
-    end = min(len(a), (loud[-1] + 1) * hop + rate // 50)
+    end = min(len(a), (loud[-1] + 1) * hop + rate // 20)
     out = a[start:end].astype(np.float32)
     fade_in, fade_out = min(len(out), rate // 500), min(len(out), rate // 50)
     out[:fade_in] *= np.linspace(0, 1, fade_in)
@@ -120,10 +121,11 @@ def main():
             except urllib.error.HTTPError as e:
                 print(name, t, e.code, e.read().decode(errors="replace")[:200])
                 return
-            src = os.path.join(INBOX, f"{name}_{t}.mp3")
+            # the untouched take is kept, so it can be cut again differently
+            os.makedirs(os.path.join(INBOX, "raw"), exist_ok=True)
+            src = os.path.join(INBOX, "raw", f"{name}_{t}.mp3")
             open(src, "wb").write(mp3)
             a = cut_silence(to_samples(src))
-            os.remove(src)
             dst = os.path.join(INBOX, f"{name}_{t}.wav")
             save(dst, a)
             print(f"{name} take {t}: {len(a) / 44100:.2f}s")

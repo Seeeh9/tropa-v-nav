@@ -434,3 +434,11 @@ building-shrine = The Shrine
 building-shrine-desc = In the lobby you may pick another starting relic for your hero: one more per level.
 building-palisade = The Palisade
 building-palisade-desc = The stockade is rebuilt before your eyes. It changes nothing in a run.
+
+settings-narrator = Storyteller
+settings-voices = Spoken lines
+settings-voice-lang = Voice
+settings-voice-lang-0 = as the text
+settings-voice-lang-1 = Old Russian
+settings-voice-lang-2 = Russian
+settings-voice-lang-3 = English

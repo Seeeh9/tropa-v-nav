@@ -17,12 +17,20 @@ pub struct Settings {
     /// "Ink": blood is drawn as black ink.
     pub ink: bool,
     pub music: f32,
+    /// Every sound that is not music or speech.
     pub sfx: f32,
+    /// The storyteller reading the tale.
+    pub narrator: f32,
+    /// Heroes' and enemies' spoken lines.
+    pub voices: f32,
+    /// Language of the spoken word, chosen apart from the text's:
+    /// 0 follows the text, 1 old Russian, 2 Russian, 3 English.
+    pub voice_lang: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8 }
+        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, voice_lang: 0 }
     }
 }
 

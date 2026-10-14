@@ -434,3 +434,11 @@ building-shrine = Капище
 building-shrine-desc = В лобби можно выбрать другую стартовую реликвию героя: по одной новой за уровень.
 building-palisade = Частокол
 building-palisade-desc = Острог отстраивается на глазах. На забег не влияет.
+
+settings-narrator = Рассказчик
+settings-voices = Реплики
+settings-voice-lang = Озвучка
+settings-voice-lang-0 = как текст
+settings-voice-lang-1 = старинная речь
+settings-voice-lang-2 = русский
+settings-voice-lang-3 = английский

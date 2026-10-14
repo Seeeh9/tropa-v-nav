@@ -66,4 +66,5 @@ def main():
             shutil.move(f, os.path.join(DOWNLOADS, f"REJECTED {key}.wav"))
 
 
-main()
+if __name__ == "__main__":
+    main()

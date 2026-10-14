@@ -158,6 +158,8 @@ pub fn apply_settings(
     if !(cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok()) {
         mixer.music = s.music;
         mixer.sfx = s.sfx;
+        mixer.narrator = s.narrator;
+        mixer.voices = s.voices;
     }
 }
 
@@ -172,12 +174,18 @@ fn enter_settings(mut commands: Commands, stage: Single<Entity, With<Stage>>, fo
         (format!("{}: {}", l10n.t("settings-shake"), on_off(s.less_shake)), |s| s.less_shake = !s.less_shake),
         (format!("{}: {}", l10n.t("settings-ink"), on_off(s.ink)), |s| s.ink = !s.ink),
         (format!("{}: {}", l10n.t("settings-music"), pct(s.music)), |s| s.music = if s.music >= 0.95 { 0.0 } else { (s.music + 0.2).min(1.0) }),
+        (format!("{}: {}", l10n.t("settings-narrator"), pct(s.narrator)), |s| s.narrator = if s.narrator >= 0.95 { 0.0 } else { (s.narrator + 0.2).min(1.0) }),
+        (format!("{}: {}", l10n.t("settings-voices"), pct(s.voices)), |s| s.voices = if s.voices >= 0.95 { 0.0 } else { (s.voices + 0.2).min(1.0) }),
         (format!("{}: {}", l10n.t("settings-sfx"), pct(s.sfx)), |s| s.sfx = if s.sfx >= 0.95 { 0.0 } else { (s.sfx + 0.2).min(1.0) }),
+        (format!("{}: {}", l10n.t("settings-voice-lang"), l10n.t(&format!("settings-voice-lang-{}", s.voice_lang.min(3)))), |s| s.voice_lang = (s.voice_lang.min(3) + 1) % 4),
     ];
     commands.spawn(screen(AppState::Settings, *stage)).with_children(|p| {
         p.spawn(theme::text(l10n.t("menu-settings"), &fonts.title, 72.0, theme::BONE));
         for (label, change) in rows {
             p.spawn((
+                // nine rows and a title have to fit the screen
+                Node { margin: UiRect::vertical(px(-9)), ..default() },
+                children![(
                 menu_button(label, &fonts),
                 observe(move |_: On<Activate>, mut profile: ResMut<Profile>, mut commands: Commands, mut next: ResMut<NextState<AppState>>| {
                     change(&mut profile.settings);
@@ -186,6 +194,7 @@ fn enter_settings(mut commands: Commands, stage: Single<Entity, With<Stage>>, fo
                     // redraw with the new value
                     next.set(AppState::Settings);
                 }),
+                )],
             ));
         }
         p.spawn((

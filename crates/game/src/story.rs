@@ -7,12 +7,14 @@
 //! each player reads at their own pace, nothing here touches the shared run.
 
 use crate::art::Art;
+use crate::audio::{Mixer, Narration};
 use crate::l10n::L10n;
 use crate::battle::Btn;
 use crate::net::Net;
 use crate::profile::Profile;
 use crate::theme::{self, Fonts};
 use crate::{Stage as Canvas, STAGE_H, STAGE_W};
+use bevy::audio::Volume;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
@@ -210,7 +212,11 @@ fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res
     }
 }
 
-fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>) {
+fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, speaking: Query<Entity, With<Narration>>) {
+    // the storyteller stops mid-word when the page is turned
+    for e in &speaking {
+        commands.entity(e).despawn();
+    }
     match *turn {
         Turn::Next => {
             tale.pages.pop_front();
@@ -231,6 +237,8 @@ fn show_page(
     l10n: Res<L10n>,
     art: Res<Art>,
     assets: Res<AssetServer>,
+    mixer: Res<Mixer>,
+    profile: Res<Profile>,
 ) {
     if !*hooked {
         *hooked = true;
@@ -240,6 +248,11 @@ fn show_page(
         return;
     }
     let Some(page) = tale.pages.front() else { return };
+    // the page read aloud, in the language chosen for speech; a page with no recording is silent
+    let spoken = format!("voice/{}/{}.wav", l10n.lang.voice(profile.settings.voice_lang).code(), page.text);
+    if mixer.narrator > 0.0 && art.root().join(&spoken).is_file() {
+        commands.spawn((Narration, AudioPlayer::new(assets.load::<AudioSource>(spoken)), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.narrator))));
+    }
     let left = tale.pages.len();
     let at = tale.total.saturating_sub(left) + 1;
     let last = left == 1;

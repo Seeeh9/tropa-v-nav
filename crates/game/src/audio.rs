@@ -19,7 +19,8 @@ const SFX: &[&str] = &[
 pub fn plugin(app: &mut App) {
     // unattended screenshot runs (dev) stay silent
     let quiet = cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok();
-    app.insert_resource(if quiet { Mixer { music: 0.0, sfx: 0.0 } } else { Mixer { music: 0.6, sfx: 0.8 } })
+    app.insert_resource(if quiet { Mixer { music: 0.0, sfx: 0.0, narrator: 0.0, voices: 0.0, duck: 1.0 } } else { Mixer { music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, duck: 1.0 } })
+        .add_systems(Update, duck_music)
         .add_systems(Startup, load)
         .add_systems(Update, cue_sounds.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers))
@@ -36,6 +37,27 @@ pub fn plugin(app: &mut App) {
 pub struct Mixer {
     pub music: f32,
     pub sfx: f32,
+    pub narrator: f32,
+    pub voices: f32,
+    /// What is left of the music while the storyteller speaks: 1.0 when he is silent.
+    pub duck: f32,
+}
+
+/// The storyteller's voice. While one plays, the music steps back.
+#[derive(Component)]
+pub struct Narration;
+
+/// Share of the music's volume kept under the storyteller.
+const DUCKED: f32 = 0.3;
+
+fn duck_music(time: Res<Time>, mut mixer: ResMut<Mixer>, speaking: Query<(), With<Narration>>) {
+    let want = if speaking.is_empty() { 1.0 } else { DUCKED };
+    if (mixer.duck - want).abs() > 1e-3 {
+        // down quickly so the first word is heard, back up slowly
+        let rate = if want < mixer.duck { 2.5 } else { 0.8 };
+        let step = rate * time.delta_secs();
+        mixer.duck = if want < mixer.duck { (mixer.duck - step).max(want) } else { (mixer.duck + step).min(want) };
+    }
 }
 
 #[derive(Resource, Default)]
@@ -164,7 +186,7 @@ fn fade_ambient(mut commands: Commands, time: Res<Time>, mixer: Res<Mixer>, mut 
         let step = time.delta_secs() / 1.5;
         a.level = if a.level < a.target { (a.level + step).min(a.target) } else { (a.level - step).max(a.target) };
         if let Some(mut sink) = sink {
-            sink.set_volume(Volume::Linear(a.level * mixer.music * 0.8));
+            sink.set_volume(Volume::Linear(a.level * mixer.music * mixer.duck * 0.8));
         }
         if a.target == 0.0 && a.level == 0.0 {
             commands.entity(entity).despawn();
@@ -269,6 +291,6 @@ fn fade_layers(time: Res<Time>, mixer: Res<Mixer>, mut layers: Query<(&mut Music
         // about a bar to come in or go out, never a hard cut
         let step = time.delta_secs() / 2.0;
         layer.level = if layer.level < layer.target { (layer.level + step).min(layer.target) } else { (layer.level - step).max(layer.target) };
-        sink.set_volume(Volume::Linear(layer.level * mixer.music));
+        sink.set_volume(Volume::Linear(layer.level * mixer.music * mixer.duck));
     }
 }

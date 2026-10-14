@@ -29,6 +29,15 @@ impl Lang {
     fn base(self) -> Option<Lang> {
         (self == Lang::Old).then_some(Lang::Ru)
     }
+    /// The language speech is played in: the player's own choice, or else the text's.
+    pub fn voice(self, choice: u8) -> Lang {
+        match choice {
+            1 => Lang::Old,
+            2 => Lang::Ru,
+            3 => Lang::En,
+            _ => self,
+        }
+    }
     /// The next language the menu button switches to.
     pub fn other(self) -> Lang {
         match self {

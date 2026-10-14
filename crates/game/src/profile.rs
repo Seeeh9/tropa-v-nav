@@ -55,6 +55,12 @@ pub struct Profile {
     pub bestiary: BTreeMap<String, u32>,
     /// The most recent runs, newest last.
     pub history: Vec<RunRecord>,
+    /// The opening of the tale has been shown once.
+    pub prologue_seen: bool,
+    /// How the last run ended; the next one opens by remembering it.
+    pub last_ending: Option<String>,
+    /// Endings reached, by id, and how many times.
+    pub endings: BTreeMap<String, u32>,
     pub settings: Settings,
     #[serde(skip)]
     path: Option<PathBuf>,
@@ -154,6 +160,13 @@ impl Profile {
 }
 
 impl Profile {
+    /// Remembers the ending a run came to.
+    pub fn note_ending(&mut self, id: &str) {
+        *self.endings.entry(id.to_string()).or_insert(0) += 1;
+        self.last_ending = Some(id.to_string());
+        self.save();
+    }
+
     fn run_path(&self) -> Option<PathBuf> {
         self.path.as_ref().map(|p| p.with_extension("run.ron"))
     }

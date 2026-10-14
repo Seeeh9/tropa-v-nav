@@ -310,6 +310,22 @@ fn enter_chronicle(mut commands: Commands, stage: Single<Entity, With<Stage>>, f
                 grid.spawn((theme::text(line, &fonts.body, 18.0, if r.won { theme::ROTLIGHT } else { theme::BONE }), Node { width: px(530), ..default() }));
             }
         });
+        let reached = crate::story::ENDINGS.iter().filter(|id| profile.endings.contains_key(**id)).count();
+        p.spawn(theme::text(
+            l10n.tf("chronicle-endings", &[("n", (reached as i32).into()), ("all", (crate::story::ENDINGS.len() as i32).into())]),
+            &fonts.body,
+            22.0,
+            theme::CANDLE,
+        ));
+        p.spawn(Node { width: px(1640), flex_wrap: FlexWrap::Wrap, column_gap: px(20), row_gap: px(4), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
+            for id in crate::story::ENDINGS {
+                let (label, color) = match profile.endings.get(id) {
+                    Some(n) => (format!("{}  ·  ×{n}", l10n.t(&format!("story-name-{id}"))), if id.starts_with("win") { theme::ROTLIGHT } else { theme::BONE }),
+                    None => (l10n.t("chronicle-ending-unknown"), theme::DIM),
+                };
+                grid.spawn((theme::text(label, &fonts.body, 18.0, color), Node { width: px(390), ..default() }));
+            }
+        });
         p.spawn((
             menu_button(l10n.t("coop-back"), &fonts),
             observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Village)),

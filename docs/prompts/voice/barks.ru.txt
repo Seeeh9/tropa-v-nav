@@ -84,7 +84,7 @@ bark-bogatyr-rare-5 = За Русь-матушку!
 bark-bogatyr-taunt = Сюда смотри!
 bark-bogatyr-taunt-2 = Меня бей, не их!
 bark-bogatyr-taunt-3 = Ко мне, падаль!
-bark-bogatyr-taunt-4 = Я здесь, уродина!
+bark-bogatyr-taunt-4 = Сюда, уродина!
 bark-bogatyr-taunt-5 = Что, боишься?
 
 bark-vorozheya-start-2 = Я знаю, чем это кончится.

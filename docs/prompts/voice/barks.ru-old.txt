@@ -94,7 +94,7 @@ bark-bogatyr-rare-5 = За РУсь-мАтушку!
 bark-bogatyr-taunt = СемО зрИ!
 bark-bogatyr-taunt-2 = МенЕ бИй, не Их!
 bark-bogatyr-taunt-3 = КО мне, мертвечИна!
-bark-bogatyr-taunt-4 = Аз зде, урОде!
+bark-bogatyr-taunt-4 = СемО, урОде!
 bark-bogatyr-taunt-5 = ЧтО, убоЯлся?
 
 bark-vorozheya-start-2 = ВЕм, чИм сЕ скончАется.

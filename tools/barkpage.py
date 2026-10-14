@@ -6,8 +6,11 @@ The script carries every line not yet recorded (docs/prompts/voice/barks.<lang>.
 in assets/voice/<lang>/), the casting, and an in-page loop. Load it into the page (a file input and
 the browser tool's upload), then:
 
-    tropaStyle('volkolak')            // the text to type into the speech block's Style box
-    await tropaRecord('volkolak', 6)  // the next six missing lines of that speaker, any language
+    tropaStyle('volkolak', 'ru')            // the style (Scene) text for that speaker in that language
+    await tropaRecord('volkolak', 6, 'ru')  // the next six missing lines of that speaker in that language
+
+One language per run: each language needs its own style, or the accents bleed into each other
+(modern Russian read the old way, English without its Slavic accent).
 
 Each finished clip is saved straight from the page as `tropa__<lang>__<key>.wav`, so several tabs
 can record at once; take them in with `python tools/voice_in.py --named`. Pick the speaker's voice
@@ -21,14 +24,15 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 VOICE = os.path.join(ROOT, "docs", "prompts", "voice")
 
 LOOP = r"""
-window.tropaStyle=(who)=>barkVoice[who].persona+' The line may be modern Russian, old Russian or English. Old Russian is read in the solemn old manner, every vowel as written, E never as YO; a capital letter inside a word marks its stressed vowel. English with a faint Slavic weight. Speak only the line, once.';
+window.TROPA_LANG={'ru-old':'The line is in Old Russian, read in the solemn old manner: every vowel as written, unstressed O stays a round O, E never read as YO; a capital letter inside a word marks its stressed vowel.','ru':'The line is in plain modern Russian: ordinary present-day pronunciation and natural stress, nothing archaic or churchly. The capital letters are only the start of sentences.','en':'The line is in English, spoken by a Slav: a clear, noticeable Russian accent, rolled R, heavy consonants.'};
+window.tropaStyle=(who,lang)=>barkVoice[who].persona+' '+TROPA_LANG[lang]+' Speak only the line, once.';
 window.tropaSet=(text)=>{ const t=[...document.querySelectorAll('textarea')].find(x=>(x.getAttribute('aria-label')||'')==='Speech block text'); const set=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set; set.call(t,text); t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); return t; };
 window.tropaDone=()=>{ try { return JSON.parse(localStorage.tropaDone||'[]'); } catch(e) { return []; } };
-window.tropaTodo=(who)=>{ const done=new Set(tropaDone()); const out=[]; for(const lang of ['ru-old','ru','en']) for(const k of Object.keys(barkQ[lang]||{})) if(k.split('-')[1]===who && !done.has(lang+'/'+k)) out.push([lang,k]); return out; };
-window.tropaRecord=async (who,n)=>{
+window.tropaTodo=(who,only)=>{ const done=new Set(tropaDone()); const out=[]; for(const lang of (only?[only]:['ru-old','ru','en'])) for(const k of Object.keys(barkQ[lang]||{})) if(k.split('-')[1]===who && !done.has(lang+'/'+k)) out.push([lang,k]); return out; };
+window.tropaRecord=async (who,n,lang)=>{
   const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const log=[];
-  for(const [lang,key] of tropaTodo(who).slice(0,n)){
+  for(const [lang,key] of tropaTodo(who,lang).slice(0,n)){
     if(/Quota limit/.test(document.body.innerText)) { log.push('QUOTA'); break; }
     // a run that hangs shows Stop instead of Run: give it time, then stop it
     const runButton=()=>[...document.querySelectorAll('button')].find(b=>/^Run/.test(b.textContent.trim()));
@@ -62,7 +66,7 @@ window.tropaRecord=async (who,n)=>{
     log.push(lang+' '+key);
     await sleep(800);
   }
-  return log.join(' | ')+' || left '+tropaTodo(who).length;
+  return log.join(' | ')+' || left '+tropaTodo(who,lang).length;
 };
 """
 

@@ -8,7 +8,7 @@ use crate::AppState;
 use bevy::audio::Volume;
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
-use nav_core::{Event, IntentKind, NodeKind};
+use nav_core::{Event, IntentKind, NodeKind, UnitRef};
 use std::collections::HashMap;
 
 const SFX: &[&str] = &[
@@ -23,6 +23,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, duck_music)
         .add_systems(Startup, load)
         .add_systems(Update, cue_sounds.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
+        .add_systems(Update, speak_lines.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers))
         .init_resource::<BattleTrack>()
         .add_systems(Update, (ambient, fade_ambient))
@@ -113,6 +114,90 @@ fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res
             played.push(name);
             sfx.play(&mut commands, name, &mixer, gain);
         }
+    }
+}
+
+/// A hero's or a master's spoken line. Lines never talk over each other or over the storyteller.
+#[derive(Component)]
+pub struct Line;
+
+/// The masters of the acts, who speak when a fight with them begins, turns and ends.
+const MASTERS: [&str; 4] = ["leshy", "bolotnik", "mara", "koschei"];
+/// Seconds between two of the lesser lines (a kill, a heavy blow), so a fight is not all talk.
+const BETWEEN_LINES: f32 = 7.0;
+
+#[derive(Default)]
+struct Lines {
+    /// Who last struck each enemy: the one who speaks when it dies.
+    struck_by: HashMap<u32, u8>,
+    /// Heroes who have already complained of a heavy blow this fight.
+    hurt: Vec<u8>,
+    quiet: f32,
+}
+
+/// Picks the line an event deserves: `(speaker id, event, always)`; lesser lines wait their turn.
+fn line_for(e: &Event, shown: &nav_core::Combat, me: u8, st: &mut Lines) -> Option<(String, &'static str, bool)> {
+    let hero = |slot: u8| shown.hero(slot).map(|h| h.def.to_string());
+    let master = |uid: u32| shown.enemy(uid).map(|e| e.def.to_string()).filter(|d| MASTERS.contains(&d.as_str()));
+    match e {
+        Event::RoundStart(1) => {
+            *st = Lines::default();
+            match shown.living_enemies().map(|e| e.def.to_string()).find(|d| MASTERS.contains(&d.as_str())) {
+                Some(m) => Some((m, "start", true)),
+                None => hero(me).map(|h| (h, "start", true)),
+            }
+        }
+        Event::Damage { src: Some(UnitRef::Hero(s)), dst: UnitRef::Enemy(uid), .. } => {
+            st.struck_by.insert(*uid, *s);
+            None
+        }
+        Event::Damage { dst: UnitRef::Hero(s), lost, hp, .. } if *hp > 0 && (*lost >= 12 || shown.hero(*s).is_some_and(|h| *hp * 3 <= h.max_hp)) => {
+            if st.hurt.contains(s) {
+                return None;
+            }
+            st.hurt.push(*s);
+            hero(*s).map(|h| (h, "hurt", false))
+        }
+        Event::EnemyDied { enemy } => match master(*enemy) {
+            Some(m) => Some((m, "death", true)),
+            None => st.struck_by.get(enemy).and_then(|s| hero(*s)).map(|h| (h, "kill", false)),
+        },
+        Event::Phase2 { enemy } => master(*enemy).map(|m| (m, "phase2", true)),
+        Event::Downed { player } => hero(*player).map(|h| (h, "down", true)),
+        Event::Raised { player, .. } => hero(*player).map(|h| (h, "raise", true)),
+        Event::Ended { won: true } => hero(me).map(|h| (h, "win", true)),
+        _ => None,
+    }
+}
+
+fn speak_lines(
+    mut commands: Commands,
+    time: Res<Time>,
+    cues: Res<Cues>,
+    session: Res<Session>,
+    mixer: Res<Mixer>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    l10n: Res<crate::l10n::L10n>,
+    profile: Res<crate::profile::Profile>,
+    talking: Query<(), Or<(With<Line>, With<Narration>)>>,
+    mut st: Local<Lines>,
+) {
+    st.quiet = (st.quiet - time.delta_secs()).max(0.0);
+    let lang = l10n.lang.voice(profile.settings.voice_lang).code();
+    let mut busy = !talking.is_empty();
+    for e in &cues.0 {
+        let Some((who, what, always)) = line_for(e, &session.shown, session.me, &mut st) else { continue };
+        if busy || mixer.voices <= 0.0 || (!always && st.quiet > 0.0) {
+            continue;
+        }
+        let file = format!("voice/{lang}/bark-{who}-{what}.wav");
+        if !art.root().join(&file).is_file() {
+            continue;
+        }
+        commands.spawn((Line, AudioPlayer::new(assets.load::<AudioSource>(file)), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.voices))));
+        busy = true;
+        st.quiet = BETWEEN_LINES;
     }
 }
 

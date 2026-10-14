@@ -25,6 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hear import hear, score  # noqa: E402
+from trim_tail import trim  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -113,6 +114,8 @@ def take(f, lang, key, text, reject_name):
     With TROPA_NO_HEAR=1 Whisper is not run (it takes the graphics card): only the length is
     checked, and the clip is noted in _inbox/voice/unheard.txt to be heard later.
     """
+    # some speech models end with a burst of hiss: cut it before anything else
+    trim(f)
     if os.environ.get("TROPA_NO_HEAR"):
         with wave.open(f) as w:
             seconds = w.getnframes() / w.getframerate()

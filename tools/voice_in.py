@@ -108,9 +108,21 @@ def loudness(path):
 
 
 def take(f, lang, key, text, reject_name):
-    """Checks one clip against its line; a good one goes into the game, a bad one is set aside."""
-    heard, seconds = hear(f, lang.split("-")[0])
-    s = score(text[key], heard)
+    """Checks one clip against its line; a good one goes into the game, a bad one is set aside.
+
+    With TROPA_NO_HEAR=1 Whisper is not run (it takes the graphics card): only the length is
+    checked, and the clip is noted in _inbox/voice/unheard.txt to be heard later.
+    """
+    if os.environ.get("TROPA_NO_HEAR"):
+        with wave.open(f) as w:
+            seconds = w.getnframes() / w.getframerate()
+        heard, s = "(not heard)", 1.0
+        os.makedirs(os.path.join(ROOT, "_inbox", "voice"), exist_ok=True)
+        with open(os.path.join(ROOT, "_inbox", "voice", "unheard.txt"), "a", encoding="utf-8") as u:
+            u.write(f"{lang} {key}\n")
+    else:
+        heard, seconds = hear(f, lang.split("-")[0])
+        s = score(text[key], heard)
     # a short battle cry gives Whisper little to go on: ask less of it
     ok = s >= ENOUGH.get(lang, 0.85) * (0.6 if key.startswith("bark-") else 1.0)
     # one or two words: Whisper cannot judge them, a clip of the right length will do

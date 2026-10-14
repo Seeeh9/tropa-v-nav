@@ -61,7 +61,8 @@ def speak(key, model, voice, prompt):
 
 
 # best first; each has its own quota on each key
-MODELS = ["gemini-3.1-flash-tts-preview", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-preview-tts", "gemini-3.8-flash-lite-tts"]
+MODELS = ["gemini-3.1-flash-tts-preview", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-preview-tts"]
+# the lite model reads the whole prompt aloud, style and all: it is only usable on the page, with its Style box
 SPEAKERS = ["volhv", "bogatyr", "vorozheya", "volkolak", "znaharka", "skomoroh", "leshy", "bolotnik", "mara", "koschei"]
 
 
@@ -73,6 +74,7 @@ def main():
     keys = [k.strip() for k in open(KEYS, encoding="utf-8") if k.strip() and not k.startswith("#")]
     pairs = [(m, k) for m in MODELS for k in keys]
     spent = set()
+    cool = {}
     roster = cast()
     for lang in langs:
         text = lines(lang)
@@ -84,22 +86,34 @@ def main():
             for name, line in todo:
                 prompt = f"{persona} {STYLE[lang]} Say only this line, once, in character: {line}"
                 pcm = None
-                for tries in range(3):
-                    live = [p for p in pairs if p not in spent]
+                for tries in range(40):
+                    now = time.time()
+                    live = [p for p in pairs if p not in spent and cool.get(p, 0) <= now]
                     if not live:
-                        print("every model on every key is out of quota")
-                        return
+                        if all(p in spent for p in pairs):
+                            print("every model on every key is out of quota for the day")
+                            return
+                        time.sleep(max(1.0, min(cool[p] for p in pairs if p not in spent) - now))
+                        continue
                     model, key = live[0]
                     try:
                         pcm, rate = speak(key, model, voice, prompt)
                         break
                     except urllib.error.HTTPError as e:
-                        body = e.read().decode(errors="replace")[:200]
-                        if e.code in (429, 403, 404) or "quota" in body.lower():
-                            print(f"{model} key {keys.index(key) + 1}: {e.code} {body[:80]!r}")
+                        raw = e.read().decode(errors="replace")
+                        if e.code == 429:
+                            # a minute's limit cools off; a day's limit is done with
+                            if "PerDay" in raw:
+                                print(f"{model} key {keys.index(key) + 1}: done for the day")
+                                spent.add((model, key))
+                            else:
+                                m = re.search(r'"retryDelay":\s*"(\d+)', raw)
+                                cool[(model, key)] = time.time() + (int(m.group(1)) if m else 60) + 1
+                            continue
+                        if e.code in (403, 404):
                             spent.add((model, key))
                             continue
-                        print(f"{model}: {e.code} {body!r}")
+                        print(f"{model}: {e.code} {raw[:200]!r}")
                         time.sleep(5)
                     except (KeyError, IndexError, urllib.error.URLError, TimeoutError) as e:
                         print(f"{model}: no audio ({e!r})")

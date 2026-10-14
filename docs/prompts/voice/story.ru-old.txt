@@ -3,10 +3,15 @@
 # the way it should sound (no ё: the old reading says е).
 # The text on screen stays in assets/i18n/ru-old/story.ftl; keep the two in step.
 # Voice: Google AI Studio, gemini-3.1-flash-tts-preview, speaker Algenib. Scene:
-#   A grim old village storyteller tells a horror fairy tale to grown men by the fire. A low, hoarse,
-#   dry, weathered male voice. He speaks in a full, firm voice at the same loudness from the first word
-#   to the very last: he never whispers, never trails off, never fades out. Unhurried but steady pace.
-#   Cold, flat menace: he states horrible things calmly, as plain facts, with a faint grim smile.
+#   VOICE, identical in every take: a man about seventy, an old village storyteller. Low bass-baritone,
+#   chest voice. Timbre hoarse, dry, gravelly, slightly cracked; not breathy, not soft, not theatrical.
+#   LOUDNESS: firm and constant from the first syllable to the very last one. The last sentence is spoken
+#   exactly as loudly and as fully voiced as the first. He never whispers, never trails off, never fades,
+#   never drops his voice at the end of a sentence or of the text.
+#   PACE: slow and even, a short pause at each full stop, no speeding up, no long silences.
+#   MANNER: cold, flat, grave menace. He tells horrible things calmly, as plain facts. No laughter, no
+#   sighs, no audible breaths, no acting out of other voices.
+#   SETTING: he tells a horror fairy tale to grown men by a fire at night.
 #   The text is Old Russian, read in the solemn Church Slavonic manner of an old deacon: every vowel
 #   is pronounced clearly as it is written, unstressed O stays a round O, E is never read as YO.
 #   A capital letter inside a word marks its stressed vowel.

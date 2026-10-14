@@ -20,7 +20,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hear as ear  # noqa: E402
-from voice_in import ENOUGH, lines  # noqa: E402
+from voice_in import ENOUGH, level, lines  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -105,7 +105,7 @@ def main():
     out_dir = os.path.join(ROOT, "assets", "voice", lang)
     os.makedirs(out_dir, exist_ok=True)
     for key, start, end in pieces:
-        frames = raw.reshape(-1, channels)[int(start * rate):int(end * rate)]
+        frames = level(raw.reshape(-1, channels)[int(start * rate):int(end * rate)], rate)
         with wave.open(os.path.join(out_dir, f"{key}.wav"), "wb") as w:
             w.setnchannels(channels)
             w.setsampwidth(width)

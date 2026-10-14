@@ -23,7 +23,7 @@ bark-volhv-win = Тризну сотворим после.
 
 bark-volkolak-start = Чую плоть.
 bark-volkolak-kill = Сладко.
-bark-volkolak-hurt = Кусаешися? И аз тако.
+bark-volkolak-hurt = Кусаешися? И аз кусаю.
 bark-volkolak-down = Луна… гаснет…
 bark-volkolak-raise = Зверь не тако умирает.
 bark-volkolak-win = Паки. Хощу паки.

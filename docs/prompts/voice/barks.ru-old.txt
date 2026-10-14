@@ -24,7 +24,7 @@ bark-volhv-win = ТрИзну сотворИм пОсле.
 
 bark-volkolak-start = ЧУю плОть.
 bark-volkolak-kill = СлАдко.
-bark-volkolak-hurt = КусАешися? И Аз тАко.
+bark-volkolak-hurt = КусАешися? И Аз кусАю.
 bark-volkolak-down = ЛунА… гАснет…
 bark-volkolak-raise = ЗвЕрь не тАко умирАет.
 bark-volkolak-win = ПАки. ХощУ пАки.

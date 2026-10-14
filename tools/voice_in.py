@@ -123,7 +123,7 @@ def take(f, lang, key, text, reject_name):
         os.makedirs(out_dir, exist_ok=True)
         out = os.path.join(out_dir, f"{key}.wav")
         save_levelled(f, out)
-        print(f"ok  {lang} {key}: {seconds:.1f}s heard {s:.0%}")
+        print(f"ok  {lang} {key}: {seconds:.1f}s heard {s:.0%}    {heard}")
         os.makedirs(os.path.join(ROOT, "_inbox", "voice"), exist_ok=True)
         shutil.move(f, os.path.join(ROOT, "_inbox", "voice", f"{lang}_{key}_take.wav"))
     else:

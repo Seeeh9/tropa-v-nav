@@ -47,6 +47,20 @@ SOUNDS = {
 }
 
 
+# the book of the tale: assets/sfx/book_<name>-flow.wav, takes kept like the others
+BOOK = {
+    "book_flip": ("Single page of an old thick parchment book turned quickly, crisp paper flutter and soft landing, no music", 0.8),
+    "book_rustle": ("Old parchment page being bent and dragged slowly by a hand, soft crackling paper rustle, no music", 1.5),
+    "book_tear_small": ("Small piece of old thick paper torn off, short sharp rip, no music", 0.6),
+    "book_tear_big": ("A whole page ripped out of an old leather-bound book, long tearing rip with fibres snapping, no music", 1.2),
+    "book_peel": ("Two glued paper pages slowly peeled apart, sticky crackling separation, no music", 1.5),
+    "book_clasp": ("Brass clasp of an old leather book unlatched, small metallic click, no music", 0.5),
+    "book_open": ("Heavy old leather book cover opened, creaking spine and a soft thud on a wooden table, no music", 1.5),
+    "book_close": ("Heavy old leather book slammed shut, deep thud and a puff of dust, no music", 1.0),
+    "book_scrap": ("Small scrap of paper falling and settling onto a wooden table, very soft, no music", 0.6),
+}
+SOUNDS.update(BOOK)
+
 # battle ambience under the music, one seamless loop per act: assets/ambience/<name>-flow.wav
 AMBIENCE = {
     "act1": "Dark Slavic forest at night: wind in old pines, creaking branches, a distant owl, faint unseen rustling, eerie, no music",

@@ -24,7 +24,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, load)
         .add_systems(Update, cue_sounds.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, speak_lines.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
-        .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers))
+        .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers, fade_ambience))
         .init_resource::<BattleTrack>()
         .add_systems(Update, (ambient, fade_ambient))
         .add_systems(Update, koschei_movements.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
@@ -394,6 +394,27 @@ fn start_battle_music(mut commands: Commands, art: Res<Art>, assets: Res<AssetSe
     };
     spawn_layers(&mut commands, &art, &assets, &track);
     now.0 = track;
+    // the place itself under the music: wind in the forest, the swamp, the winter, the bone halls
+    if let Some(path) = art.find(&format!("ambience/act{}", act.clamp(1, 4)), "wav", "flow") {
+        commands.spawn((Ambience { level: 0.0 }, AudioPlayer::<AudioSource>::new(assets.load(path)), PlaybackSettings::LOOP.with_volume(Volume::Linear(0.0))));
+    }
+}
+
+/// The looping sound of the place a fight is in, quiet under the music.
+#[derive(Component)]
+struct Ambience {
+    level: f32,
+}
+
+/// How loud the ambience sits against the sound effects.
+const AMBIENCE_GAIN: f32 = 0.45;
+
+fn fade_ambience(time: Res<Time>, mixer: Res<Mixer>, mut beds: Query<(&mut Ambience, &mut AudioSink)>) {
+    for (mut bed, mut sink) in &mut beds {
+        // it rises slowly, as if the place were noticed
+        bed.level = (bed.level + time.delta_secs() / 3.0).min(1.0);
+        sink.set_volume(Volume::Linear(bed.level * mixer.sfx * AMBIENCE_GAIN * mixer.duck.max(0.6)));
+    }
 }
 
 /// Koschei's fight has three movements: on his throne, risen once the needle drops,
@@ -420,7 +441,7 @@ fn koschei_movements(mut commands: Commands, session: Res<Session>, art: Res<Art
     }
 }
 
-fn stop_music(mut commands: Commands, layers: Query<Entity, With<MusicLayer>>) {
+fn stop_music(mut commands: Commands, layers: Query<Entity, Or<(With<MusicLayer>, With<Ambience>)>>) {
     for e in &layers {
         commands.entity(e).despawn();
     }

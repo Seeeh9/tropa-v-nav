@@ -2,6 +2,7 @@
 
     python tools/sfx_api.py [name ...] [--takes 3]      # all of SOUNDS when no names are given
     python tools/sfx_api.py --pick <name> <take>        # put another take into the game
+    python tools/sfx_api.py --ambience [act1 ...]       # the looping battle ambience of each act
 
 The key is read from `.secrets/elevenlabs_key.txt` (gitignored). Each sound is generated `--takes`
 times; every take is cut to its sound (silence trimmed from both ends, with a short fade so the cut
@@ -46,13 +47,24 @@ SOUNDS = {
 }
 
 
+# battle ambience under the music, one seamless loop per act: assets/ambience/<name>-flow.wav
+AMBIENCE = {
+    "act1": "Dark Slavic forest at night: wind in old pines, creaking branches, a distant owl, faint unseen rustling, eerie, no music",
+    "act2": "Haunted swamp at dusk: bubbling mud, croaking frogs, buzzing insects, slow dripping water, eerie, no music",
+    "act3": "Frozen winter wasteland: howling icy wind, creaking ice, faint far-off wolf howl, desolate, no music",
+    "act4": "Underground hall of bones: low cavern drone, distant chains, dripping water, a faint cold breath, ominous, no music",
+}
+
+
 def ffmpeg():
     import imageio_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def generate(key, text, seconds):
+def generate(key, text, seconds, loop=False):
     body = {"text": text, "prompt_influence": 0.4}
+    if loop:
+        body["loop"] = True
     if seconds:
         body["duration_seconds"] = max(0.5, seconds)
     req = urllib.request.Request(
@@ -105,6 +117,18 @@ def main():
     if args[:1] == ["--pick"]:
         shutil.copy(os.path.join(INBOX, f"{args[1]}_{args[2]}.wav"), os.path.join(ROOT, "assets", "sfx", f"{args[1]}-flow.wav"))
         print("picked", args[1], args[2])
+        return
+    if args[:1] == ["--ambience"]:
+        key = open(KEY, encoding="utf-8").read().strip()
+        os.makedirs(os.path.join(ROOT, "assets", "ambience"), exist_ok=True)
+        os.makedirs(os.path.join(INBOX, "raw"), exist_ok=True)
+        for name in args[1:] or list(AMBIENCE):
+            src = os.path.join(INBOX, "raw", f"amb_{name}.mp3")
+            open(src, "wb").write(generate(key, AMBIENCE[name], 22.0, loop=True))
+            # a loop is kept whole: trimming would break the seam
+            a = to_samples(src)
+            save(os.path.join(ROOT, "assets", "ambience", f"{name}-flow.wav"), a)
+            print("ambience", name, f"{len(a) / 44100:.1f}s")
         return
     takes = 3
     if "--takes" in args:

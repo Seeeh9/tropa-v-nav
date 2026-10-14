@@ -25,7 +25,7 @@ from hear import hear, score  # noqa: E402
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
 # the old speech is Russian to Whisper, which then mishears its archaic endings: ask less of it
-ENOUGH = {"ru-old": 0.35}
+ENOUGH = {"ru-old": 0.35, "ru": 0.8, "en": 0.8}
 # characters a second the narrator cannot honestly exceed; a faster clip has lost its end
 FASTEST = {"ru-old": 10, "ru": 13, "en": 17}
 

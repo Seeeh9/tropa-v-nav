@@ -1,4 +1,4 @@
-//! Fluent-backed strings (ru/en) and card text generated from effect data,
+//! Fluent-backed strings (old Russian, ru, en) and card text generated from effect data,
 //! so the words on a card can never drift from what it does.
 
 use bevy::prelude::*;
@@ -9,21 +9,32 @@ use std::path::Path;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
+    /// Russian told the old way: the tale's own voice, and the default for Russian speakers.
+    /// Only what `i18n/ru-old` rewrites differs; every other string is the modern Russian one.
+    Old,
     Ru,
     En,
 }
 
 impl Lang {
+    /// Folder under `i18n/` and `voice/`.
     pub fn code(self) -> &'static str {
         match self {
+            Lang::Old => "ru-old",
             Lang::Ru => "ru",
             Lang::En => "en",
         }
     }
+    /// The language whose strings fill in whatever this one leaves unsaid.
+    fn base(self) -> Option<Lang> {
+        (self == Lang::Old).then_some(Lang::Ru)
+    }
+    /// The next language the menu button switches to.
     pub fn other(self) -> Lang {
         match self {
+            Lang::Old => Lang::Ru,
             Lang::Ru => Lang::En,
-            Lang::En => Lang::Ru,
+            Lang::En => Lang::Old,
         }
     }
 }
@@ -36,24 +47,30 @@ pub struct L10n {
 
 impl L10n {
     pub fn load(assets: &Path, lang: Lang) -> L10n {
-        let id: unic_langid::LanguageIdentifier = lang.code().parse().expect("valid language id");
+        // plural rules come from the base language: the old speech counts as Russian does
+        let id: unic_langid::LanguageIdentifier = lang.base().unwrap_or(lang).code().parse().expect("valid language id");
         let mut bundle = FluentBundle::new_concurrent(vec![id]);
         // no bidi isolation marks: they render as boxes in our fonts
         bundle.set_use_isolating(false);
-        let dir = assets.join("i18n").join(lang.code());
-        let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
-        files.sort();
-        for file in files {
-            let Ok(src) = std::fs::read_to_string(&file) else { continue };
-            let res = match FluentResource::try_new(src) {
-                Ok(r) => r,
-                Err((r, errs)) => {
-                    warn!("{}: {} fluent syntax errors", file.display(), errs.len());
-                    r
+        for (from, overriding) in [(lang.base(), false), (Some(lang), lang.base().is_some())] {
+            let Some(from) = from else { continue };
+            let dir = assets.join("i18n").join(from.code());
+            let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+            files.sort();
+            for file in files {
+                let Ok(src) = std::fs::read_to_string(&file) else { continue };
+                let res = match FluentResource::try_new(src) {
+                    Ok(r) => r,
+                    Err((r, errs)) => {
+                        warn!("{}: {} fluent syntax errors", file.display(), errs.len());
+                        r
+                    }
+                };
+                if overriding {
+                    bundle.add_resource_overriding(res);
+                } else if let Err(errs) = bundle.add_resource(res) {
+                    warn!("{}: {} duplicate keys", file.display(), errs.len());
                 }
-            };
-            if let Err(errs) = bundle.add_resource(res) {
-                warn!("{}: {} duplicate keys", file.display(), errs.len());
             }
         }
         L10n { lang, bundle }

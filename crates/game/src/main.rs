@@ -76,8 +76,9 @@ fn main() {
     let steam = steam::init(config.steam_app_id);
     let lang = match config.lang.as_deref() {
         Some("en") => Lang::En,
-        Some(_) => Lang::Ru,
-        None => steam.as_ref().ok().map(steam::ui_lang).unwrap_or(Lang::Ru),
+        Some("ru") => Lang::Ru,
+        Some(_) => Lang::Old,
+        None => steam.as_ref().ok().map(steam::ui_lang).unwrap_or(Lang::Old),
     };
     // offline dev builds share one local profile
     let account = steam.as_ref().ok().map(|c| c.user().steam_id().raw()).unwrap_or(0);

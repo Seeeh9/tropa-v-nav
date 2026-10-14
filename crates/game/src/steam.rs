@@ -16,7 +16,7 @@ pub fn init(app_id: u32) -> Result<Client, String> {
 
 pub fn ui_lang(client: &Client) -> Lang {
     match client.utils().ui_language().as_str() {
-        "russian" | "ukrainian" => Lang::Ru,
+        "russian" | "ukrainian" => Lang::Old,
         _ => Lang::En,
     }
 }

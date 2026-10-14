@@ -7,7 +7,7 @@ steam-required-quit = Quit
 
 menu-solo = Into the forest alone
 menu-coop = Gather a party
-menu-lang = Язык: русский
+menu-lang = Речь: старинная
 menu-quit = Quit
 
 battle-ready = Ready

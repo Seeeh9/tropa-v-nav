@@ -2,6 +2,7 @@
 
     python tools/flowart.py <card id> [...]            # 1000x750 -> assets/cards/<id>-gemini.png
     python tools/flowart.py --relic <relic id> [...]   # 256x256   -> assets/relics/<id>-gemini.png
+    python tools/flowart.py --story <page id> [...]    # 1920x1080 -> assets/story/<id>-gemini.png
     python tools/flowart.py --list                     # what is waiting, oldest first
     python tools/flowart.py --match [--relic] <id> [...] # pair waiting files with these ids by their titles
     python tools/flowart.py --packs                    # take in every tropa-pack-*.bin and tropa-<kind>-<id>.jpg
@@ -32,13 +33,20 @@ def waiting():
     return sorted(files, key=os.path.getmtime)
 
 
-def place(im, name, relic):
+def place(im, name, kind):
+    """Crops and scales a picture for `kind` ("card", "relic" or "story") and saves it."""
     w, h = im.size
-    if relic:
+    if kind == "relic":
         side = min(w, h)
         im = im.crop(((w - side) // 2, (h - side) // 2, (w - side) // 2 + side, (h - side) // 2 + side)).resize((256, 256), Image.LANCZOS)
-        os.makedirs(os.path.join(ROOT, "assets", "relics"), exist_ok=True)
-        out = os.path.join(ROOT, "assets", "relics", f"{name}-gemini.png")
+        folder = "relics"
+    elif kind == "story":
+        # a page of the tale is 16:9, and what matters sits in its upper two thirds: crop
+        # more from the foot than from the head
+        nh = min(w * 9 // 16, h)
+        top = (h - nh) // 3
+        im = im.crop((0, top, w, top + nh)).resize((1920, 1080), Image.LANCZOS)
+        folder = "story"
     else:
         if w * 3 > h * 4:
             nw = h * 4 // 3
@@ -47,9 +55,10 @@ def place(im, name, relic):
             nh = w * 3 // 4
             im = im.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
         im = im.resize((1000, 750), Image.LANCZOS)
-        out = os.path.join(ROOT, "assets", "cards", f"{name}-gemini.png")
-    im.save(out)
-    print("relic" if relic else "card", name, (w, h))
+        folder = "cards"
+    os.makedirs(os.path.join(ROOT, "assets", folder), exist_ok=True)
+    im.save(os.path.join(ROOT, "assets", folder, f"{name}-gemini.png"))
+    print(kind, name, (w, h))
 
 
 def packs():
@@ -68,11 +77,11 @@ def packs():
             raw = data[at:at + size]
             at += size
             open(os.path.join(inbox, f"{name}_f.jpg"), "wb").write(raw)
-            place(Image.open(io.BytesIO(raw)).convert("RGB"), name, kind == "relic")
+            place(Image.open(io.BytesIO(raw)).convert("RGB"), name, kind)
         os.remove(f)
     for f in sorted(glob.glob(os.path.join(DOWNLOADS, "tropa-card-*.jpg")) + glob.glob(os.path.join(DOWNLOADS, "tropa-relic-*.jpg"))):
         kind, name = os.path.basename(f)[len("tropa-"):-4].split("-", 1)
-        place(Image.open(f).convert("RGB"), name, kind == "relic")
+        place(Image.open(f).convert("RGB"), name, kind)
         shutil.move(f, os.path.join(inbox, f"{name}_f.jpg"))
 
 
@@ -115,7 +124,7 @@ def match(ids, relic):
     for f, i in pairs:
         if i is None:
             continue
-        place(Image.open(f).convert("RGB"), i, relic)
+        place(Image.open(f).convert("RGB"), i, "relic" if relic else "card")
         shutil.move(f, os.path.join(inbox, f"{'relic_' if relic else ''}{i}_f.jpg"))
 
 
@@ -133,38 +142,21 @@ def main():
         for f in files:
             print(os.path.basename(f))
         return
-    relic = args[:1] == ["--relic"]
-    names = args[1:] if relic else args
+    kind = {"--relic": "relic", "--story": "story"}.get(args[0] if args else "", "card")
+    names = args[1:] if kind != "card" else args
     if len(files) != len(names):
         raise SystemExit(f"{len(files)} downloads waiting but {len(names)} names given; nothing moved")
     inbox = os.path.join(ROOT, "_inbox")
     os.makedirs(inbox, exist_ok=True)
-    os.makedirs(os.path.join(ROOT, "assets", "relics"), exist_ok=True)
     for f, name in zip(files, names):
         if name == "-":
             os.remove(f)
             continue
-        im = Image.open(f).convert("RGB")
-        w, h = im.size
-        if relic:
-            side = min(w, h)
-            im = im.crop(((w - side) // 2, (h - side) // 2, (w - side) // 2 + side, (h - side) // 2 + side)).resize((256, 256), Image.LANCZOS)
-            out = os.path.join(ROOT, "assets", "relics", f"{name}-gemini.png")
-        else:
-            if w * 3 > h * 4:
-                nw = h * 4 // 3
-                im = im.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
-            else:
-                nh = w * 3 // 4
-                im = im.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
-            im = im.resize((1000, 750), Image.LANCZOS)
-            out = os.path.join(ROOT, "assets", "cards", f"{name}-gemini.png")
-        im.save(out)
+        place(Image.open(f).convert("RGB"), name, kind)
         k = 1
         while os.path.exists(os.path.join(inbox, f"{name}_f{k}.jpg")):
             k += 1
         shutil.move(f, os.path.join(inbox, f"{name}_f{k}.jpg"))
-        print("relic" if relic else "card", name, (w, h))
 
 
 if __name__ == "__main__":

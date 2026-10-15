@@ -31,9 +31,10 @@ const UNIT_W: f32 = 280.0;
 mod aim;
 mod impact;
 mod piles;
+mod status_row;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((aim::plugin, impact::plugin, piles::plugin));
+    app.add_plugins((aim::plugin, impact::plugin, piles::plugin, status_row::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -165,7 +166,6 @@ struct BlockBadge(UnitRef);
 enum Label {
     Hp(UnitRef),
     Block(UnitRef),
-    Status(UnitRef),
     Intent(u32),
     Team(u8),
     Energy,
@@ -728,13 +728,8 @@ fn sync_units(
                     Visibility::Hidden,
                 ));
                 u.spawn((theme::text(name, &fonts.body, 17.0, theme::BONE), Node { margin: UiRect::top(px(3)), ..default() }));
-                u.spawn((
-                    Label::Status(unit),
-                    theme::text("", &fonts.body, 16.0, theme::ROTLIGHT),
-                    TextLayout::justify(Justify::Center),
-                    Node { max_width: px(UNIT_W), ..default() },
-                    GlobalZIndex(20),
-                ));
+                // what lies on the unit, as pictures with numbers (see `status_row`)
+                u.spawn(status_row::status_row(unit));
             });
     }
 }
@@ -895,9 +890,6 @@ fn update_bars(
 
 // ---- text ----
 
-fn statuses_line(l10n: &L10n, map: &Statuses) -> String {
-    map.iter().map(|(k, v)| format!("{} {}", l10n.t(&format!("status-{k:?}")), v)).collect::<Vec<_>>().join(" · ")
-}
 
 /// Shows each enemy's intent as its picture (`assets/intents/<kind>`), hidden while it has none.
 /// Under the Sirin's song every intent is the unknown one.
@@ -943,55 +935,6 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
             Label::Hp(UnitRef::Enemy(i)) => shown.enemy(i).map(|e| format!("{}/{}", e.hp, e.max_hp)),
             Label::Block(UnitRef::Hero(i)) => shown.hero(i).map(|h| h.block.to_string()),
             Label::Block(UnitRef::Enemy(i)) => shown.enemy(i).map(|e| e.block.to_string()),
-            Label::Status(UnitRef::Hero(i)) => shown.hero(i).map(|h| {
-                if h.downed {
-                    l10n.t("battle-downed")
-                } else {
-                    // the hero's own resource first, then statuses
-                    let mut parts = Vec::new();
-                    let real = truth.hero(i).unwrap_or(h);
-                    if h.mechanic == Mechanic::Moon {
-                        parts.push(format!("{} · {} {}/5", l10n.t(&format!("form-{:?}", h.form)), l10n.t("res-moon"), real.moon));
-                    }
-                    if let Some(m) = h.mask {
-                        parts.push(format!("{} {}", l10n.t("res-mask"), l10n.t(&format!("mask-{m:?}"))));
-                    }
-                    if !h.runes.is_empty() {
-                        parts.push(format!("{}: {}", l10n.t("res-runes"), h.runes.iter().map(|r| l10n.t(&format!("rune-{r:?}"))).collect::<Vec<_>>().join(", ")));
-                    }
-                    if !real.cauldron.is_empty() {
-                        parts.push(format!("{}: {}", l10n.t("res-cauldron"), real.cauldron.iter().map(|x| l10n.t(&format!("herb-{x}"))).collect::<Vec<_>>().join(", ")));
-                    }
-                    for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter"] {
-                        if real.flags.contains_key(flag) {
-                            parts.push(l10n.t(&format!("trait-{flag}")));
-                        }
-                    }
-                    let st = statuses_line(&l10n, &h.statuses);
-                    if !st.is_empty() {
-                        parts.push(st);
-                    }
-                    parts.join("\n")
-                }
-            }),
-            Label::Status(UnitRef::Enemy(i)) => shown.enemy(i).map(|e| {
-                let mut s = statuses_line(&l10n, &e.statuses);
-                // the real state carries the traits and the countdown
-                if let Some(real) = truth.enemy(i) {
-                    let mut notes = Vec::new();
-                    if real.flags.contains_key("immortal") {
-                        notes.push(l10n.t("trait-immortal"));
-                    }
-                    if let Some(n) = real.flags.get("last_breath") {
-                        notes.push(l10n.n("trait-last-breath", *n));
-                    }
-                    if !notes.is_empty() {
-                        s = if s.is_empty() { notes.join(" · ") } else { format!("{}
-{s}", notes.join(" · ")) };
-                    }
-                }
-                s
-            }),
             Label::Intent(uid) => shown.enemy(uid).map(|e| {
                 let Some(intent) = &e.intent else { return String::new() };
                 // the Sirin's song: nobody can tell what is coming
@@ -1496,10 +1439,6 @@ fn update_tooltip(
         lines.push((l10n.t(&format!("relic-{}", chip.id)), l10n.t(&format!("relic-{}-desc", chip.id))));
         at = chip.at + Vec2::new(0.0, 50.0);
     } else if let Some((w, _)) = units.iter().find(|(_, hov)| hov.get()) {
-        let statuses = match w.unit {
-            UnitRef::Hero(i) => session.shown.hero(i).map(|x| &x.statuses),
-            UnitRef::Enemy(i) => session.shown.enemy(i).map(|x| &x.statuses),
-        };
         if let UnitRef::Enemy(uid) = w.unit {
             if let Some(e) = session.shown.enemy(uid) {
                 let sung = session.my_hero().flags.contains_key("no_intents");
@@ -1512,8 +1451,13 @@ fn update_tooltip(
                 }
             }
         }
-        for st in statuses.into_iter().flat_map(|m| m.keys()) {
-            lines.push((l10n.t(&format!("status-{st:?}")), l10n.t(&format!("status-{st:?}-help"))));
+        // everything the row under the unit shows, by name, with what it does
+        for c in status_row::chips(&l10n, &session, w.unit) {
+            let name = match c.n {
+                Some(n) => format!("{} {n}", c.name),
+                None => c.name,
+            };
+            lines.push((name, c.help));
         }
         at = Vec2::new((w.pos.x + UNIT_W + 6.0).min(STAGE_W - 350.0), w.pos.y + 80.0);
     }

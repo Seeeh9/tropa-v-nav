@@ -21,7 +21,7 @@ mod story;
 mod theme;
 
 use bevy::prelude::*;
-use bevy::window::WindowResolution;
+use bevy::window::{WindowPosition, WindowResolution};
 use l10n::{L10n, Lang};
 
 /// The whole UI is laid out on a fixed canvas and scaled to the window.
@@ -98,11 +98,11 @@ fn main() {
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
-                primary_window: Some(Window {
+                primary_window: Some(test_window(Window {
                     title: "Тропа в Навь".into(),
                     resolution: WindowResolution::new(1600, 900),
                     ..default()
-                }),
+                })),
                 ..default()
             })
             .set(AssetPlugin { file_path: assets.to_string_lossy().into_owned(), ..default() }),
@@ -177,4 +177,21 @@ pub fn stage_cursor(window: &Window, scale: f32) -> Option<Vec2> {
 pub fn stage_point(window: &Window, scale: f32, at: Vec2) -> Vec2 {
     let origin = Vec2::new(window.width() - STAGE_W * scale, window.height() - STAGE_H * scale) / 2.0;
     (at - origin) / scale
+}
+
+/// A dev screenshot run (`TROPA_SHOT`) opens its window out of the way: unfocused, beneath every
+/// other window and off the screen, so a game being played meanwhile is never covered or
+/// minimised. `TROPA_SHOW=1` shows it as usual.
+fn test_window(window: Window) -> Window {
+    let hidden = cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok() && std::env::var("TROPA_SHOW").is_err();
+    if !hidden {
+        return window;
+    }
+    Window {
+        focused: false,
+        window_level: bevy::window::WindowLevel::AlwaysOnBottom,
+        position: WindowPosition::At(IVec2::new(-6000, -6000)),
+        skip_taskbar: true,
+        ..window
+    }
 }

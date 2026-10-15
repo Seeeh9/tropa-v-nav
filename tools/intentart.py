@@ -2,6 +2,8 @@
 
     python tools/intentart.py <intent kind> [...]   # in the order the pictures arrived
     python tools/intentart.py --again <dir>         # redo from kept originals <dir>/<kind>_*.jpg
+    python tools/intentart.py --into status <name> [...]   # status icons, assets/status/
+
 
 Each picture is painted on flat black; the black is keyed out to transparency by brightness,
 so the emblem floats over any backdrop. The result is 128x128: assets/intents/<kind>-gemini.png.
@@ -33,6 +35,9 @@ def key_out(im):
     return Image.fromarray(out, "RGBA")
 
 
+FOLDER = "intents"
+
+
 def make(f, name):
     im = Image.open(f)
     w, h = im.size
@@ -43,12 +48,16 @@ def make(f, name):
     half = max(r - l, b - t) // 2 + side // 40
     cx, cy = (l + r) // 2, (t + b) // 2
     im = im.crop((cx - half, cy - half, cx + half, cy + half))
-    im.resize((128, 128), Image.LANCZOS).save(os.path.join(ROOT, "assets", "intents", f"{name}-gemini.png"))
-    print("intent", name, (w, h))
+    im.resize((128, 128), Image.LANCZOS).save(os.path.join(ROOT, "assets", FOLDER, f"{name}-gemini.png"))
+    print(FOLDER, name, (w, h))
 
 
 def main():
-    os.makedirs(os.path.join(ROOT, "assets", "intents"), exist_ok=True)
+    global FOLDER
+    if sys.argv[1:2] == ["--into"]:
+        FOLDER = sys.argv[2]
+        del sys.argv[1:3]
+    os.makedirs(os.path.join(ROOT, "assets", FOLDER), exist_ok=True)
     if sys.argv[1:2] == ["--again"]:
         import glob
         for f in sorted(glob.glob(os.path.join(sys.argv[2], "*_f*.jpg"))):
@@ -58,7 +67,7 @@ def main():
     files = waiting()
     if len(files) != len(names):
         raise SystemExit(f"{len(files)} pictures waiting but {len(names)} names given; nothing moved")
-    inbox = os.path.join(ROOT, "_inbox", "intents")
+    inbox = os.path.join(ROOT, "_inbox", FOLDER)
     os.makedirs(inbox, exist_ok=True)
     for f, name in zip(files, names):
         if name == "-":

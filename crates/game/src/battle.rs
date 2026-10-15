@@ -28,7 +28,11 @@ const HEAD_ROOM: f32 = 62.0;
 const INTENT_ICON: f32 = 60.0;
 const UNIT_W: f32 = 280.0;
 
+mod aim;
+mod impact;
+
 pub fn plugin(app: &mut App) {
+    app.add_plugins((aim::plugin, impact::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -47,7 +51,7 @@ pub fn plugin(app: &mut App) {
                 playback,
                 (sync_units, sync_hand, sync_potions, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_intent_icons, update_bars, update_tooltip),
-                (floaters, fly_ghosts, dying, style_buttons, shake_screen, turn_timer, send_pings, show_pings),
+                (floaters, fly_ghosts, dying, style_buttons, impact::shake_screen, turn_timer, send_pings, show_pings),
             )
                 .chain()
                 .run_if(in_state(AppState::Battle))
@@ -180,6 +184,8 @@ struct CardWidget {
     pos: Vec2,
     drag: Vec2,
     dragging: bool,
+    /// Lifted out of the hand and waiting above it for a target (see `aim`).
+    aiming: bool,
 }
 
 #[derive(Component)]
@@ -188,10 +194,10 @@ struct Floater {
     life: f32,
 }
 
-/// Screen shake in progress: strength in stage pixels, fading out.
+/// Screen shake: how shaken the view is, 0..1 (see `impact`), and the clock of its noise.
 #[derive(Resource, Default)]
 struct Shake {
-    strength: f32,
+    trauma: f32,
     t: f32,
 }
 
@@ -289,6 +295,7 @@ fn enter(
     l10n: Res<L10n>,
     art: Res<Art>,
     assets: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     // the session is built from the run's state before this screen opens
     let Some(session) = session else {
@@ -520,6 +527,8 @@ fn enter(
             ));
             p.spawn((HandLayer, layer(), Pickable::IGNORE));
             p.spawn((FloatLayer, layer(), Pickable::IGNORE, GlobalZIndex(50)));
+            // the aiming arrow, over everything
+            p.spawn((layer(), Pickable::IGNORE)).with_children(|a| aim::spawn_arrow(a, &mut images));
 
             p.spawn((
                 Label::Error,
@@ -589,6 +598,10 @@ fn sync_units(
         let Some((foot, size)) = unit_place(shown, unit) else { continue };
         let origin = widget_origin(foot, size);
         let is_hero = matches!(unit, UnitRef::Hero(_));
+        // elites and bosses are painted square and stand larger than their slot: the picture
+        // spills over the sides and the top, the layout box stays put
+        let wide = !is_hero && art.aspect(&stem).is_some_and(|a| a > 0.9);
+        let draw = if wide { Vec2::splat(size.y * 1.25) } else { size };
         commands
             .spawn((
                 UnitWidget { unit, pos: origin },
@@ -608,7 +621,9 @@ fn sync_units(
             ))
             .with_children(|u| {
                 u.spawn((
-                    Node { height: px(HEAD_ROOM), align_items: AlignItems::Center, ..default() },
+                    // over a picture that spills above its slot, the intent rises with it, so it
+                    // stays over the head and not on the face
+                    Node { height: px(HEAD_ROOM), align_items: AlignItems::Center, top: px(-(draw.y - size.y)), ..default() },
                     // text is never hidden by a sprite, this unit's or a neighbour's
                     GlobalZIndex(20),
                     Pickable::IGNORE,
@@ -656,11 +671,7 @@ fn sync_units(
                 let base = sprite.0.color;
                 u.spawn((
                     UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None },
-                    // elites and bosses are painted square and stand larger than their slot:
-                    // the picture spills over the sides and the top, the layout box stays put
                     {
-                        let wide = !is_hero && art.aspect(&stem).is_some_and(|a| a > 0.9);
-                        let draw = if wide { Vec2::splat(size.y * 1.25) } else { size };
                         Node {
                             width: px(draw.x),
                             height: px(draw.y),
@@ -716,6 +727,15 @@ fn sync_units(
                             children![(Label::Block(unit), theme::text("", &fonts.num, 20.0, theme::BONE))],
                         ),
                     ],
+                ));
+                // what the card or potion being aimed would do to this unit
+                u.spawn((
+                    aim::Forecast(unit),
+                    theme::text("", &fonts.num, 26.0, theme::BONE),
+                    TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK.with_alpha(0.9) },
+                    Node { position_type: PositionType::Absolute, top: px(HEAD_ROOM + size.y - 40.0), ..default() },
+                    GlobalZIndex(60),
+                    Visibility::Hidden,
                 ));
                 u.spawn((theme::text(name, &fonts.body, 17.0, theme::BONE), Node { margin: UiRect::top(px(3)), ..default() }));
                 u.spawn((
@@ -1112,10 +1132,13 @@ pub fn spawn_card<B: Bundle>(
                 return;
             }
             let name = l10n.card_name(&card.def, card.upgraded);
+            // long names shrink to stay on one line: the title face runs about 0.62 em a letter,
+            // and the strip leaves 170 px beside the cost
+            let size = (170.0 / (name.chars().count().max(1) as f32 * 0.62)).clamp(10.0, 19.0);
             c.spawn((
-                // long names shrink to stay on one line
-                theme::text(name.clone(), &fonts.title, if name.chars().count() > 13 { 14.5 } else { 19.0 }, if card.upgraded { theme::ROTLIGHT } else { theme::BONE }),
-                Node { height: px(28), ..default() },
+                theme::text(name.clone(), &fonts.title, size, if card.upgraded { theme::ROTLIGHT } else { theme::BONE }),
+                TextLayout::default().with_no_wrap(),
+                Node { height: px(28), align_items: AlignItems::Center, ..default() },
             ));
             c.spawn((
                 Node { width: px(196), height: px(147), border: UiRect::all(px(2)), ..default() },
@@ -1178,7 +1201,7 @@ fn sync_hand(
             // new cards slide in from the draw pile
             let from = Vec2::new(60.0, 900.0);
             let widget = (
-                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false },
+                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false, aiming: false },
                 // let the pointer through, so a dragged card can be dropped on the unit under it
                 Pickable { should_block_lower: false, is_hoverable: true },
             );
@@ -1226,12 +1249,15 @@ fn sync_potions(
         if !needs_target {
             e.observe(move |_: On<Activate>, mut outbox: ResMut<Outbox>| outbox.0.push(CombatAction::UsePotion { slot, target: None }));
         }
-        e.observe(|ev: On<PointerDrag>, scale: Res<UiScale>, mut q: Query<&mut UiTransform, With<PotionChip>>| {
-            if let Ok(mut tf) = q.get_mut(ev.event_target()) {
+        e.observe(move |ev: On<PointerDrag>, mut commands: Commands, scale: Res<UiScale>, mut q: Query<&mut UiTransform, With<PotionChip>>| {
+            // one that must be thrown at something is aimed with the arrow from its place
+            commands.entity(ev.event_target()).insert(aim::Thrown);
+            if let (false, Ok(mut tf)) = (needs_target, q.get_mut(ev.event_target())) {
                 tf.translation = Val2::px(ev.distance.x / scale.0, ev.distance.y / scale.0);
             }
         });
-        e.observe(|ev: On<PointerDragEnd>, mut q: Query<&mut UiTransform, With<PotionChip>>| {
+        e.observe(|ev: On<PointerDragEnd>, mut commands: Commands, mut q: Query<&mut UiTransform, With<PotionChip>>| {
+            commands.entity(ev.event_target()).remove::<aim::Thrown>();
             if let Ok(mut tf) = q.get_mut(ev.event_target()) {
                 tf.translation = Val2::ZERO;
             }
@@ -1320,13 +1346,16 @@ let rest = hand_slot(i, n);
         if let (Some(x), false) = (reach.0, lifted) {
             target.x += (centre - x).signum() * 46.0 * (pull * (1.0 - pull) * 4.0).min(1.0);
         }
-        w.pos = w.pos.lerp(target, k);
+        if w.aiming {
+            target = aim::AIM_SPOT;
+        }
+        w.pos = w.pos.lerp(if w.aiming { target - w.drag } else { target }, k);
         let p = w.pos + w.drag;
         node.left = px(p.x);
         node.top = px(p.y);
         // how far it has actually risen drives size and tilt, so they move with it
         let risen = ((rest.y - w.pos.y) / HAND_LIFT).clamp(0.0, 1.0);
-        let scale = if w.dragging { 0.86 } else { 1.0 + 0.10 * risen };
+        let scale = if w.aiming { 1.08 } else if w.dragging { 0.86 } else { 1.0 + 0.10 * risen };
         tf.scale = tf.scale.lerp(Vec2::splat(scale), k);
         let mid = (n as f32 - 1.0) / 2.0;
         tf.rotation = Rot2::radians((i as f32 - mid) * 0.035 * (1.0 - risen) * if w.dragging { 0.0 } else { 1.0 });
@@ -1374,8 +1403,9 @@ fn on_drag_end(
     mut outbox: ResMut<Outbox>,
 ) {
     let Ok(mut w) = cards.get_mut(ev.event_target()) else { return };
-    let lifted = ev.distance.y / scale.0 < -130.0;
+    let lifted = ev.distance.y / scale.0 < -aim::LIFT_TO_AIM;
     w.dragging = false;
+    w.aiming = false;
     // keep the card where it was dropped; the hand layout eases it home or it leaves the hand
     let dropped = w.drag;
     w.pos += dropped;
@@ -1505,7 +1535,7 @@ fn cue_effects(
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     mut sprites: Query<&mut UnitSprite>,
-    mut shake: ResMut<Shake>,
+    mut impacts: ResMut<impact::Impacts>,
     comfort: Res<Comfort>,
     db: Res<Db>,
 ) {
@@ -1560,13 +1590,17 @@ fn cue_effects(
                         play(*s, Anim::Lunge);
                     }
                 }
+                if *blocked > 0 {
+                    impacts.0.push(impact::Impact::Blocked { unit: *dst, blocked: *blocked, through: *lost });
+                }
                 if *lost > 0 {
-                    // the screen shakes with the size of the blow, 12 px at most
-                    let s = (*lost as f32 * 0.5).min(12.0);
-                    if s > shake.strength {
-                        shake.strength = s;
-                        shake.t = 0.0;
-                    }
+                    // the screen shakes with the weight of the blow (see `impact`)
+                    let max = match dst {
+                        UnitRef::Hero(i) => session.shown.hero(*i).map(|h| h.max_hp),
+                        UnitRef::Enemy(u) => session.shown.enemy(*u).map(|e| e.max_hp),
+                    };
+                    let share = max.map_or(0.0, |m| *lost as f32 / m.max(1) as f32);
+                    impacts.0.push(impact::Impact::Hurt { unit: *dst, lost: *lost, share });
                     play(*dst, Anim::Hit);
                     float(&mut commands, *dst, format!("-{lost}"), comfort.blood(), 46.0 + (*lost as f32).min(30.0), 0.0);
                 }
@@ -1644,8 +1678,7 @@ fn cue_effects(
             Event::Summoned { enemy, .. } => play(UnitRef::Enemy(*enemy), Anim::Buffed),
             Event::Phase2 { enemy } => {
                 play(UnitRef::Enemy(*enemy), Anim::Buffed);
-                shake.strength = 12.0;
-                shake.t = 0.0;
+                impacts.0.push(impact::Impact::Quake(0.6));
             }
             _ => {}
         }
@@ -1758,21 +1791,6 @@ fn show_pings(
             Node { position_type: PositionType::Absolute, left: px(foot.x - 90.0), top: px(foot.y - size.y - 30.0), ..default() },
             ChildOf(*layer),
         ));
-    }
-}
-
-fn shake_screen(time: Res<Time>, comfort: Res<Comfort>, mut shake: ResMut<Shake>, mut root: Single<&mut UiTransform, With<BattleRoot>>) {
-    if shake.strength <= 0.01 {
-        return;
-    }
-    shake.t += time.delta_secs();
-    // a quarter of a second, dying away
-    let left = (1.0 - shake.t / 0.25).max(0.0);
-    let amp = shake.strength * left * if comfort.less_shake { 0.25 } else { 1.0 };
-    root.translation = Val2::px((shake.t * 95.0).sin() * amp, (shake.t * 71.0).cos() * amp * 0.6);
-    if left <= 0.0 {
-        shake.strength = 0.0;
-        root.translation = Val2::ZERO;
     }
 }
 

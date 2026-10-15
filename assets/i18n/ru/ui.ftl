@@ -7,7 +7,7 @@ steam-required-quit = Выйти
 
 menu-solo = Один в лес
 menu-coop = Собрать отряд
-menu-lang = Language: English
+menu-lang = Язык: русский
 menu-quit = Выйти
 
 battle-ready = Готов
@@ -442,3 +442,4 @@ settings-voice-lang-0 = как текст
 settings-voice-lang-1 = старинная речь
 settings-voice-lang-2 = русский
 settings-voice-lang-3 = английский
+battle-blocked = Блок!

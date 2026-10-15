@@ -7,7 +7,7 @@ steam-required-quit = Quit
 
 menu-solo = Into the forest alone
 menu-coop = Gather a party
-menu-lang = Речь: старинная
+menu-lang = Language: English
 menu-quit = Quit
 
 battle-ready = Ready
@@ -442,3 +442,4 @@ settings-voice-lang-0 = as the text
 settings-voice-lang-1 = Old Russian
 settings-voice-lang-2 = Russian
 settings-voice-lang-3 = English
+battle-blocked = Blocked!

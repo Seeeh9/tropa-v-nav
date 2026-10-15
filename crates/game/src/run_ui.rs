@@ -288,8 +288,20 @@ fn draw_reward(
         commands.spawn((theme::text(l10n.n("reward-gold", r.gold), &fonts.body, 28.0, theme::BONE), ChildOf(column)));
     }
     if let Some(relic) = &r.relic {
-        let line = format!("{} — {}", l10n.t(&format!("relic-{relic}")), l10n.t(&format!("relic-{relic}-desc")));
-        commands.spawn((theme::text(l10n.tf("reward-relic", &[("relic", line.into())]), &fonts.body, 26.0, theme::ROTLIGHT), Node { max_width: px(1100), ..default() }, TextLayout::justify(Justify::Center), ChildOf(column)));
+        // the relic as itself: its picture, its name and what it does
+        commands
+            .spawn((
+                theme::panel(Node { padding: UiRect::all(px(14)), border: UiRect::all(px(2)), column_gap: px(18), align_items: AlignItems::Center, max_width: px(1000), ..default() }),
+                Pickable::IGNORE,
+                ChildOf(column),
+            ))
+            .with_children(|p| {
+                p.spawn((Node { width: px(112), height: px(112), flex_shrink: 0.0, ..default() }, art.node(&assets, &format!("relics/{relic}"), theme::PEAT), Pickable::IGNORE));
+                p.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(6), ..default() }, Pickable::IGNORE)).with_children(|t| {
+                    t.spawn(theme::text(l10n.t(&format!("relic-{relic}")), &fonts.title, 34.0, theme::CANDLE));
+                    t.spawn((theme::text(l10n.t(&format!("relic-{relic}-desc")), &fonts.body, 24.0, theme::BONE), Node { max_width: px(820), ..default() }));
+                });
+            });
     }
     if r.done {
         waiting_line(&mut commands, root, &fonts, &l10n);

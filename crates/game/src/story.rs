@@ -31,7 +31,7 @@ pub const ENDINGS: [&str; 8] = ["fall_forest", "fall_village", "fall_nav", "fall
 const THRONE_CURSES: usize = 3;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page, want_book, book_hands).chain());
+    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page, want_book, book_hands, read_secret).chain());
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
 }
@@ -394,6 +394,33 @@ fn book_hands(mut commands: Commands, tale: Res<Tale>, net: Option<ResMut<Net>>,
             Note::BookTear { page: p, edge, .. } if p == page => book.remote_tear(edge),
             Note::BookTurn { page: p, .. } if p == page => commands.trigger(Turn::TheirLeaf),
             _ => {}
+        }
+    }
+}
+
+/// A secret peeled open whole is read aloud, like any page of the tale: the storyteller's own
+/// voice, telling his own story. Whatever he was reading stops.
+#[allow(clippy::too_many_arguments)]
+fn read_secret(
+    mut commands: Commands,
+    mut found: MessageReader<crate::book::Found>,
+    speaking: Query<Entity, With<Narration>>,
+    l10n: Res<L10n>,
+    profile: Res<Profile>,
+    mixer: Res<Mixer>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+) {
+    for f in found.read() {
+        if !f.whole || mixer.narrator <= 0.0 {
+            continue;
+        }
+        let spoken = format!("voice/{}/story-secret-{}.wav", l10n.lang.voice(profile.settings.voice_lang).code(), f.act);
+        if art.root().join(&spoken).is_file() {
+            for e in &speaking {
+                commands.entity(e).despawn();
+            }
+            commands.spawn((Narration, AudioPlayer::new(assets.load::<AudioSource>(spoken)), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.narrator))));
         }
     }
 }

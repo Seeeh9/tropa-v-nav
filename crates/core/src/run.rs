@@ -155,6 +155,9 @@ pub struct Run {
     /// Acts whose secret in the tale's book has been found this run.
     #[serde(default)]
     pub secrets: Vec<u8>,
+    /// Omens already met this run; none comes twice while others are left.
+    #[serde(default)]
+    pub omens_seen: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -415,6 +418,7 @@ impl Run {
             elites_slain: 0,
             bosses_slain: 0,
             secrets: vec![],
+            omens_seen: vec![],
         })
     }
 
@@ -884,9 +888,15 @@ impl Run {
                 self.floors_cleared += 1;
                 let act = self.act;
                 let open = 20 + 15 * self.unlocks.omen_tier as usize;
-                let pool: Vec<&EventDef> = c.events.values().take(open).filter(|e| e.act == 0 || e.act == act).collect();
+                let fits: Vec<&EventDef> = c.events.values().take(open).filter(|e| e.act == 0 || e.act == act).collect();
+                let fresh: Vec<&EventDef> = fits.iter().copied().filter(|e| !self.omens_seen.contains(&e.id)).collect();
+                // a long road may run out of new omens; only then does an old one return
+                let pool = if fresh.is_empty() { fits } else { fresh };
                 match self.rng.pick(&pool) {
-                    Some(e) => self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] },
+                    Some(e) => {
+                        self.omens_seen.push(e.id.clone());
+                        self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] };
+                    }
                     // no omens written yet: the road is simply quiet
                     None => self.stage = Stage::Map { votes: vec![None; self.players.len()] },
                 }

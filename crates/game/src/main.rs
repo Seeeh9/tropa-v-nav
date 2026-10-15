@@ -6,6 +6,8 @@ mod battle;
 mod book;
 #[cfg(feature = "dev")]
 mod dev;
+#[cfg(feature = "dev")]
+mod lan;
 mod l10n;
 mod lobby;
 mod menu;
@@ -117,7 +119,7 @@ fn main() {
     .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin));
 
     #[cfg(feature = "dev")]
-    app.add_plugins(dev::plugin);
+    app.add_plugins((dev::plugin, lan::plugin));
 
     // Without Steam there is no game: only the "start Steam" screen. The `dev` build may run offline.
     let offline_ok = cfg!(feature = "dev");

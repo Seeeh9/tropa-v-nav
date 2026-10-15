@@ -15,7 +15,7 @@ use crate::battle::Btn;
 use crate::net::{Net, NetStatus};
 use crate::profile::Profile;
 use crate::theme::{self, Fonts};
-use crate::{Stage as Canvas, STAGE_H, STAGE_W};
+use crate::{AppState, Stage as Canvas, STAGE_H, STAGE_W};
 use bevy::audio::Volume;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
@@ -165,7 +165,17 @@ fn silent(net: &Net) -> bool {
     net.bot_me || (cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok() && std::env::var("TROPA_STORY").is_err())
 }
 
-fn watch_run(net: Option<Res<Net>>, db: Res<crate::session::Db>, mut tale: ResMut<Tale>, mut profile: ResMut<Profile>, mut told: Local<Told>) {
+#[allow(clippy::too_many_arguments)]
+fn watch_run(
+    net: Option<Res<Net>>,
+    db: Res<crate::session::Db>,
+    state: Res<State<AppState>>,
+    time: Res<Time>,
+    mut tale: ResMut<Tale>,
+    mut profile: ResMut<Profile>,
+    mut told: Local<Told>,
+    mut settled: Local<f32>,
+) {
     let Some(net) = net else {
         *told = Told::default();
         return;
@@ -201,6 +211,15 @@ fn watch_run(net: Option<Res<Net>>, db: Res<crate::session::Db>, mut tale: ResMu
         }
     }
     if matches!(run.stage, Stage::Victory | Stage::Defeat) && !told.ended {
+        // the last fight plays out and the end of the road is seen before the book opens on it
+        if *state.get() != AppState::RunEnd {
+            *settled = 0.0;
+            return;
+        }
+        *settled += time.delta_secs();
+        if *settled < 1.5 {
+            return;
+        }
         told.ended = true;
         let Some(me) = net.node.my_slot() else { return };
         let id = ending(run, me as usize, &db.0);

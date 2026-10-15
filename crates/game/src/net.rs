@@ -37,7 +37,7 @@ pub struct Net {
     pub code: String,
     /// Extra clients living in this process (dev build), played by the autopilot.
     pub locals: Vec<Node>,
-    timer: f32,
+    pub(crate) timer: f32,
     /// Dev: the local seat is played by the autopilot too.
     pub bot_me: bool,
     /// The finished run has been written to the profile.
@@ -369,7 +369,7 @@ fn receive(steam: Res<Steam>, db: Res<Db>, mut net: Option<ResMut<Net>>) {
     }
 }
 
-fn send(steam: Option<Res<Steam>>, db: Res<Db>, mut net: ResMut<Net>) {
+pub(crate) fn send(steam: Option<Res<Steam>>, db: Res<Db>, mut net: ResMut<Net>) {
     let net = &mut *net;
     let Some(lobby) = net.lobby else {
         route(&db.0, &mut net.node, &mut net.locals);
@@ -545,9 +545,10 @@ fn follow_stage(net: Res<Net>, session: Option<Res<Session>>, state: Res<State<A
         if session.as_ref().is_some_and(|s| !s.idle()) {
             return;
         }
-        // let the killing blow land before the screen changes
+        // let the killing blow land before the screen changes; a death is given time to be seen
         *linger += time.delta_secs();
-        if *linger < 0.9 {
+        let hold = if matches!(run.stage, Stage::Defeat) { 2.8 } else { 0.9 };
+        if *linger < hold {
             return;
         }
     }

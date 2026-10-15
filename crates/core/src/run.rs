@@ -493,18 +493,14 @@ impl Run {
                 ev.push(RunEvent::Voted { player, choice: *choice });
                 if votes.iter().all(|v| v.is_some()) {
                     let cast: Vec<u8> = votes.iter().flatten().copied().collect();
-                    let mut counts = vec![0u32; options];
-                    for v in &cast {
-                        counts[*v as usize] += 1;
-                    }
-                    let best = counts.iter().copied().max().unwrap_or(0);
-                    let tied: Vec<u8> = (0..options as u8).filter(|i| counts[*i as usize] == best).collect();
-                    // a tie goes to the lot, never to the host
-                    let winner = if tied.len() == 1 {
-                        tied[0]
+                    // a party that disagrees draws lots, each vote one ticket: two against one
+                    // goes two thirds of the time to the two, one against one is an even toss.
+                    // The host's vote weighs no more than anyone's
+                    let winner = if cast.iter().all(|v| *v == cast[0]) {
+                        cast[0]
                     } else {
-                        let chosen = *self.rng.pick(&tied).unwrap_or(&tied[0]);
-                        ev.push(RunEvent::Lot { tied: tied.clone(), chosen });
+                        let chosen = *self.rng.pick(&cast).unwrap_or(&cast[0]);
+                        ev.push(RunEvent::Lot { tied: cast.clone(), chosen });
                         chosen
                     };
                     self.travel(c, winner, &mut ev);

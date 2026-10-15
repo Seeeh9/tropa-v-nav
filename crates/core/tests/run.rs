@@ -118,7 +118,7 @@ impl Origin for Run {
 }
 
 #[test]
-fn the_party_waits_for_every_vote_and_majority_wins() {
+fn the_party_waits_for_every_vote_and_one_mind_needs_no_lot() {
     let c = content();
     // a seed whose first floor offers at least two ways
     let mut run = (0..50).map(|s| party(&c, 3, s, 0)).find(|r| r.choices().len() >= 2).unwrap();
@@ -129,9 +129,30 @@ fn the_party_waits_for_every_vote_and_majority_wins() {
     // a player may move their token before the last vote lands
     run.apply(&c, 1, &RunAction::Vote(1)).unwrap();
     let want = run.choices()[1].0;
-    let ev = run.apply(&c, 2, &RunAction::Vote(0)).unwrap();
+    let ev = run.apply(&c, 2, &RunAction::Vote(1)).unwrap();
     assert_eq!(run.at, Some((0, want)));
     assert!(!ev.iter().any(|e| matches!(e, RunEvent::Lot { .. })));
+}
+
+#[test]
+fn a_split_vote_draws_lots_weighted_by_votes() {
+    let c = content();
+    let (mut two, mut tries) = (0, 0);
+    for seed in 0..300 {
+        let mut run = party(&c, 3, seed, 0);
+        if run.choices().len() < 2 {
+            continue;
+        }
+        run.apply(&c, 0, &RunAction::Vote(0)).unwrap();
+        run.apply(&c, 1, &RunAction::Vote(0)).unwrap();
+        let ev = run.apply(&c, 2, &RunAction::Vote(1)).unwrap();
+        let (tickets, chosen) = ev.iter().find_map(|e| if let RunEvent::Lot { tied, chosen } = e { Some((tied.clone(), *chosen)) } else { None }).expect("two against one draws lots");
+        assert_eq!(tickets, vec![0, 0, 1], "one ticket per vote");
+        tries += 1;
+        two += (chosen == 0) as u32;
+    }
+    let share = two as f32 / tries as f32;
+    assert!((0.55..0.78).contains(&share), "two votes against one won {share:.2} of {tries} lots, not about two thirds");
 }
 
 #[test]

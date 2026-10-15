@@ -70,6 +70,11 @@ pub struct NetStatus {
     pub book: Vec<Note>,
     /// What happened to this player's deck, not yet shown (see `deck_fx`).
     pub deck: Vec<RunEvent>,
+    /// Votes and lots on the path map, not yet shown (see `run_ui::map_party`).
+    pub map: Vec<RunEvent>,
+    /// The other players' cursors over the map and their nudges, as last heard.
+    pub pointers: Vec<(u8, [f32; 2])>,
+    pub nudges: Vec<(u8, u8)>,
 }
 
 enum SteamEv {
@@ -489,6 +494,7 @@ fn notes(
             Note::Applied { events, .. } => {
                 status.run_dirty = true;
                 let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { continue };
+                status.map.extend(events.iter().filter(|e| matches!(e, RunEvent::Voted { .. } | RunEvent::Lot { .. })).cloned());
                 status.deck.extend(events.iter().filter(|e| match e {
                     RunEvent::CardGained { player, .. } | RunEvent::Upgraded { player, .. } | RunEvent::CardRemoved { player, .. } => *player == me,
                     RunEvent::CardTaken { player, card } => *player == me && card.is_some(),
@@ -526,13 +532,24 @@ fn notes(
             Note::Ping { from, kind, at } => status.pings.push((from, kind, at)),
             Note::StoryVote { from, page, skip } => status.story_votes.push((from, page, skip)),
             note @ (Note::BookHand { .. } | Note::BookTear { .. } | Note::BookTurn { .. }) => status.book.push(note),
+            Note::MapPointer { from, at } => status.pointers.push((from, at)),
+            Note::Nudge { from, node } => status.nudges.push((from, node)),
         }
     }
 }
 
 /// Opens the screen that matches where the run is. A fight is left only
 /// once its last blow has been shown.
-fn follow_stage(net: Res<Net>, session: Option<Res<Session>>, state: Res<State<AppState>>, mut next: ResMut<NextState<AppState>>, time: Res<Time>, mut linger: Local<f32>) {
+fn follow_stage(
+    net: Res<Net>,
+    session: Option<Res<Session>>,
+    state: Res<State<AppState>>,
+    mut next: ResMut<NextState<AppState>>,
+    time: Res<Time>,
+    lot: Option<Res<crate::map_party::MapLot>>,
+    status: Res<NetStatus>,
+    mut linger: Local<f32>,
+) {
     let Some(run) = net.node.state.as_ref() else { return };
     let want = match run.stage {
         Stage::Map { .. } => AppState::Map,
@@ -546,6 +563,12 @@ fn follow_stage(net: Res<Net>, session: Option<Res<Session>>, state: Res<State<A
     let now = *state.get();
     if now == want || !matches!(now, AppState::Lobby | AppState::Map | AppState::Battle | AppState::Reward | AppState::Rest | AppState::Shop | AppState::Omen | AppState::RunEnd | AppState::Menu) {
         *linger = 0.0;
+        return;
+    }
+    // a lot drawn on the map is watched to its end before the party sets off
+    // (or about to be: the map screen has not yet taken up the lot heard of this frame)
+    let drawn = status.map.iter().any(|e| matches!(e, RunEvent::Lot { tied, .. } if !tied.is_empty()));
+    if now == AppState::Map && (lot.is_some() || drawn) {
         return;
     }
     if now == AppState::Battle {

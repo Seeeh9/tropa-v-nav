@@ -97,6 +97,10 @@ pub enum Msg {
     BookTear { page: String, edge: u16 },
     /// Everyone: I have turned the leaf of `page` over; read on.
     BookTurn { page: String },
+    /// Everyone: where my cursor is over the path map, in stage pixels.
+    MapPointer { at: [f32; 2] },
+    /// Everyone: hurry up, I have long since chosen this node of the map.
+    Nudge { node: u8 },
 }
 
 impl Msg {
@@ -132,6 +136,9 @@ pub enum Note {
     BookHand { from: u8, page: String, at: [f32; 3], hold: Option<u16> },
     BookTear { from: u8, page: String, edge: u16 },
     BookTurn { from: u8, page: String },
+    /// Another player's cursor over the map, and their nudge at the node they chose.
+    MapPointer { from: u8, at: [f32; 2] },
+    Nudge { from: u8, node: u8 },
     HostChanged,
 }
 
@@ -396,6 +403,16 @@ impl Node {
         self.out.push((To::All, Msg::BookTurn { page: page.into() }));
     }
 
+    /// Shows the others where my cursor is over the map.
+    pub fn map_pointer(&mut self, at: [f32; 2]) {
+        self.out.push((To::All, Msg::MapPointer { at }));
+    }
+
+    /// Hurries the others along, from the map node I chose.
+    pub fn nudge(&mut self, node: u8) {
+        self.out.push((To::All, Msg::Nudge { node }));
+    }
+
     // ---- membership ----
 
     /// The transport saw this peer leave the lobby.
@@ -498,6 +515,16 @@ impl Node {
             Msg::BookTurn { page } => {
                 if let Some(slot) = self.lobby.slot_of(from) {
                     self.notes.push(Note::BookTurn { from: slot, page });
+                }
+            }
+            Msg::MapPointer { at } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::MapPointer { from: slot, at });
+                }
+            }
+            Msg::Nudge { node } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::Nudge { from: slot, node });
                 }
             }
 

@@ -173,6 +173,7 @@ fn draw_map(
     canvas: Single<Entity, With<Canvas>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    mut spots: ResMut<crate::map_party::MapSpots>,
 ) {
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
@@ -227,6 +228,12 @@ fn draw_map(
     let choices = run.choices();
     let here = run.at;
     let next_floor = here.map(|(f, _)| f as usize + 1).unwrap_or(0);
+    // where each choice sits, for the party's rings and the lot (see `map_party`)
+    spots.0 = match run.map.floors.get(next_floor) {
+        Some(floor) => choices.iter().map(|(n, _)| floor.get(*n as usize).map(|node| map_pos(next_floor, node.col)).unwrap_or(BOSS_POS)).collect(),
+        None => vec![BOSS_POS],
+    };
+    let party = run.players.len() > 1;
     // paths first, so the nodes sit on top of them
     for (f, floor) in run.map.floors.iter().enumerate() {
         for (i, node) in floor.iter().enumerate() {
@@ -266,7 +273,18 @@ fn draw_map(
         if let Some(c) = choice {
             // only the nodes the party can step to are buttons
             e.insert((Button, Hovered::default(), Btn(base)));
-            e.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Vote(c)));
+            // clicked again once chosen, the node hurries the others along
+            let mine = party && votes[me as usize] == Some(c);
+            e.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>, net: Option<ResMut<Net>>, mut status: ResMut<NetStatus>| {
+                if mine {
+                    if let Some(mut net) = net {
+                        net.node.nudge(c);
+                    }
+                    status.nudges.push((me, c));
+                } else {
+                    out.0.push(RunAction::Vote(c));
+                }
+            });
             // each player's token, in their hero's colour
             let tokens: Vec<Color> = votes.iter().enumerate().filter(|(_, v)| **v == Some(c)).map(|(p, _)| theme::hero_color(&run.players[p].hero)).collect();
             e.with_children(|t| {
@@ -393,6 +411,8 @@ fn draw_rest(
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     pick: Res<UpgradePick>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
 ) {
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
@@ -441,27 +461,22 @@ fn draw_rest(
     }
     commands.spawn((theme::text(l10n.t("rest-upgrade-hint"), &fonts.body, 24.0, theme::DIM), ChildOf(column)));
     let grid = commands
-        .spawn((Node { width: px(1500), flex_wrap: FlexWrap::Wrap, justify_content: JustifyContent::Center, column_gap: px(10), row_gap: px(10), ..default() }, Pickable::IGNORE, ChildOf(column)))
+        .spawn((Node { width: px(1700), flex_wrap: FlexWrap::Wrap, justify_content: JustifyContent::Center, column_gap: px(12), row_gap: px(12), ..default() }, Pickable::IGNORE, ChildOf(column)))
         .id();
-    for (i, (id, upgraded)) in pl.deck.iter().enumerate() {
+    let open: Vec<(usize, &String)> = pl.deck.iter().enumerate().filter(|(_, (id, up))| !*up && db.0.cards.get(id).is_some_and(|d| d.up.is_some())).map(|(i, (id, _))| (i, id)).collect();
+    // each card as it will be once upgraded, as small as it takes for all to fit
+    let k = if open.len() <= 14 { 0.7 } else if open.len() <= 24 { 0.56 } else { 0.46 };
+    for (i, id) in open {
         let Some(def) = db.0.cards.get(id) else { continue };
-        if *upgraded || def.up.is_none() {
-            continue;
+        let slot = commands.spawn((Node { width: px(crate::battle::CARD_W * k), height: px(crate::battle::CARD_H * k), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
+        let card = Card { uid: i as u32, def: id.clone(), upgraded: true, free: false };
+        let at = Vec2::new(-crate::battle::CARD_W * (1.0 - k) / 2.0, -crate::battle::CARD_H * (1.0 - k) / 2.0);
+        let hints = l10n.card_glossary(&def.view(true, Form::Human));
+        let frame = crate::battle::card_frame(def);
+        if let Some(e) = spawn_card(&mut commands, slot, &card, Form::Human, Some(at), false, (Button, Btn(frame), CardHints::new(hints)), &db.0, &l10n, &fonts, &art, &assets) {
+            commands.entity(e).insert(UiTransform { scale: Vec2::splat(k), ..default() });
+            commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Upgrade(i as u16)));
         }
-        // what the card becomes, in words
-        let after = l10n.card_text(id, def, &def.view(true, Form::Human));
-        let label = format!("{}+  ·  {}", l10n.card_name(id, false), after);
-        commands.spawn((
-            Button,
-            Hovered::default(),
-            Btn(theme::PEAT),
-            Node { width: px(480), padding: UiRect::axes(px(12), px(8)), border: UiRect::all(px(2)), ..default() },
-            BackgroundColor(theme::PEAT),
-            BorderColor::all(if def.hero.is_empty() { theme::DIM } else { theme::hero_color(&def.hero) }),
-            children![theme::text(label, &fonts.body, 18.0, theme::BONE)],
-            observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Upgrade(i as u16))),
-            ChildOf(grid),
-        ));
     }
     commands.spawn((
         menu_button(l10n.t("coop-back"), &fonts),

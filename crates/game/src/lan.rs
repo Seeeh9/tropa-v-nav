@@ -5,6 +5,7 @@
 //!
 //!   TROPA_LAN=host:<port>          host a party on that port
 //!   TROPA_LAN=join:<addr>:<port>   join it
+//!   TROPA_SEED=<n>                 (host) a fixed seed for the run
 //!   TROPA_LAN_HERO=<id>            take this hero and get ready at once; the host starts the run
 //!                                  as soon as everyone is
 //!
@@ -209,7 +210,7 @@ fn auto_lobby(net: Option<ResMut<Net>>, db: Res<Db>, profile: Res<crate::profile
         return;
     }
     if net.node.lobby.players.len() > 1 && net.node.lobby.can_start() && !net.node.lobby.started {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1);
+        let seed = std::env::var("TROPA_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1));
         net.node.secrets = profile.secret_relics();
         net.node.start(&db.0, seed, profile.village());
     }

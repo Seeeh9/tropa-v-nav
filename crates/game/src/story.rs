@@ -219,11 +219,13 @@ enum Turn {
     Skip,
 }
 
-fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res<Tale>) {
+fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res<Tale>, mut turned: MessageReader<crate::book::Turned>) {
     if !tale.open() {
+        turned.clear();
         return;
     }
-    if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
+    // the reader turned the leaf by hand
+    if turned.read().count() > 0 || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
         commands.trigger(Turn::Skip);
@@ -351,13 +353,17 @@ fn show_page(
             ChildOf(*canvas),
         ))
         .id();
-    // the book on the table, rendered in 3D; the page's painting and text are printed in it
-    book.spread = crate::book::Spread {
+    // the book on the table, rendered in 3D; the page's painting and text are printed in it, and
+    // the next page waits under the leaf for the reader to turn it (by hand only when reading alone)
+    let spread = |page: &Page, at: usize| crate::book::Spread {
         picture: page.picture.clone(),
         title: page.title.as_ref().map(|t| l10n.t(t)),
         text: l10n.t(&page.text),
         numbers: (at as u32 * 2, at as u32 * 2 + 1),
     };
+    book.spread = spread(page, at);
+    book.next = tale.pages.get(1).map(|p| spread(p, at + 1));
+    book.drag_ok = !together;
     commands.spawn((
         Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
         ImageNode::new(book.view.clone()),

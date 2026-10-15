@@ -167,7 +167,11 @@ fn fit_stage(window: Single<&Window>, mut scale: ResMut<UiScale>) {
 
 /// Cursor position in stage coordinates.
 pub fn stage_cursor(window: &Window, scale: f32) -> Option<Vec2> {
-    let c = window.cursor_position()?;
+    Some(stage_point(window, scale, window.cursor_position()?))
+}
+
+/// A point in the window (logical pixels) in stage coordinates.
+pub fn stage_point(window: &Window, scale: f32, at: Vec2) -> Vec2 {
     let origin = Vec2::new(window.width() - STAGE_W * scale, window.height() - STAGE_H * scale) / 2.0;
-    Some((c - origin) / scale)
+    (at - origin) / scale
 }

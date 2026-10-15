@@ -613,8 +613,6 @@ dependencies = [
 [[package]]
 name = "bevy_audio"
 version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd16f2ac779d6ce5fdcc951c314141d37deff54cef213197872054259fc3a031"
 dependencies = [
  "bevy_app",
  "bevy_asset",
@@ -5460,6 +5458,7 @@ name = "tropa"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "cpal",
  "fluent-bundle",
  "nav_core",
  "nav_net",

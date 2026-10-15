@@ -44,6 +44,12 @@ SOUNDS = {
     "rune": ("Rune of thunder igniting: crackling electric spark and a low rumble, short, no music", 1.5),
     "status": ("Curse taking hold: eerie hissing whisper with a dark shimmer, short, no music", 1.5),
     "victory": ("Victory sting: bright folk horn fanfare with frame drums, triumphant, 3 seconds", 3.0),
+    # the path map, voted on together
+    "map_vote": ("Small carved bone token set down firmly on an old parchment map on a wooden table, single dry tap, no music", 0.6),
+    "map_nudge": ("Impatient double knock of knuckles on an old wooden table, short, dry, no music", 0.6),
+    "lot_tick": ("Single dry wooden click of a spinning fortune wheel peg, very short, no music", 0.3),
+    "lot_land": ("Fortune wheel stops with a heavy wooden thunk and a low ominous bell toll, no music", 2.0),
+    "card_gain": ("Parchment card swooping through the air and sliding into a deck, quick whoosh then a soft paper slap, no music", 0.8),
 }
 
 

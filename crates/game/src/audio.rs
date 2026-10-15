@@ -13,15 +13,15 @@ use std::collections::HashMap;
 
 const SFX: &[&str] = &[
     "card_play", "card_draw", "hit", "hit_heavy", "block", "heal", "status", "death", "downed", "raised", "click", "ready", "round", "rune", "potion", "gold", "victory",
-    "defeat",
+    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain",
 ];
 
 pub fn plugin(app: &mut App) {
     // unattended screenshot runs (dev) stay silent
     let quiet = cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok();
     app.insert_resource(if quiet { Mixer { music: 0.0, sfx: 0.0, narrator: 0.0, voices: 0.0, duck: 1.0 } } else { Mixer { music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, duck: 1.0 } })
-        .add_systems(Update, duck_music)
-        .add_systems(Startup, load)
+        .add_systems(Update, (duck_music, follow_default_output))
+        .add_systems(Startup, (load, watch_default_output))
         .add_systems(Update, cue_sounds.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, speak_lines.after(crate::session::playback).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>))
         .add_systems(Update, (battle_layers.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>), fade_layers, fade_ambience))
@@ -31,6 +31,53 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::Battle), start_battle_music)
         .add_systems(OnExit(AppState::Battle), stop_music)
         .add_observer(|_: On<Activate>, mut commands: Commands, sfx: Res<Sfx>, mixer: Res<Mixer>| sfx.play(&mut commands, "click", &mixer, 1.0));
+}
+
+/// The system's default output device, as last seen by a watcher thread: a device unplugged or a
+/// new one chosen in Windows changes it, and the game's sound must move there with it.
+#[derive(Resource, Clone)]
+struct DefaultOutput(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+
+fn watch_default_output(mut commands: Commands) {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let seen = DefaultOutput(Default::default());
+    let shared = seen.0.clone();
+    // asking the system takes a moment now and then: never on a frame
+    let _ = std::thread::Builder::new().name("audio-device-watch".into()).spawn(move || loop {
+        let id = cpal::default_host().default_output_device().and_then(|d| d.id().ok()).map(|id| id.to_string());
+        if let Ok(mut s) = shared.lock() {
+            *s = id;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    });
+    commands.insert_resource(seen);
+}
+
+/// When the default output changes, the sound is reopened there: whatever loops (music,
+/// ambience) starts again on the new device, one-off sounds that were playing are let go.
+fn follow_default_output(
+    mut commands: Commands,
+    seen: Option<Res<DefaultOutput>>,
+    mut last: Local<Option<Option<String>>>,
+    output: Option<ResMut<bevy::audio::AudioOutput>>,
+    playing: Query<(Entity, &PlaybackSettings), With<AudioSink>>,
+) {
+    let (Some(seen), Some(mut output)) = (seen, output) else { return };
+    let Ok(now) = seen.0.lock().map(|s| s.clone()) else { return };
+    let Some(before) = last.replace(now.clone()) else { return };
+    if before == now {
+        return;
+    }
+    info!("audio output changed to {now:?}: reopening");
+    output.reopen();
+    for (e, settings) in &playing {
+        if matches!(settings.mode, bevy::audio::PlaybackMode::Loop) {
+            // without a sink, bevy plays it again from the start
+            commands.entity(e).remove::<AudioSink>();
+        } else {
+            commands.entity(e).despawn();
+        }
+    }
 }
 
 /// Player volume settings, 0..1.

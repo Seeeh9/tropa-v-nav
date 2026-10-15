@@ -1,105 +1,342 @@
-//! One leaf of paper as a grid of particles: a Verlet cloth held at the spine.
+//! One leaf of paper as a cloth of particles held at the spine, which can be torn.
 //!
-//! Points lie in columns `i` running from the spine (0) to the free edge and rows `j` running from
-//! the head of the page (0, far from the reader) to its foot. Stretch links keep the paper from
-//! growing, shear links keep its corners square, and links that skip a point give it the stiffness
-//! of paper against bending. The column at the spine is glued.
+//! The leaf is a grid of cells. Grid points have a home `(i, j)`: columns `i` run from the spine
+//! (0) to the free edge, rows `j` from the head of the page (0, far from the reader) to its foot.
+//! At first neighbouring cells share their corner particles. Links between particles keep the
+//! paper from stretching (the cells' edges), from shearing (their diagonals) and from bending
+//! (links that reach across two and three cells). The column at the spine is glued.
+//!
+//! Paper tears where it is stretched past what its fibres bear. A torn edge no longer joins the
+//! two cells beside it, and every point along the tear is split into one particle per side, so
+//! the cut opens cleanly, and a piece cut loose from the spine falls where it will.
 
 use bevy::math::Vec3;
 
 pub const NX: usize = 16;
 pub const NZ: usize = 22;
+const CX: usize = NX - 1;
+const CZ: usize = NZ - 1;
 
 /// Pull of the earth on the leaf, in scene units per second squared (a page is one unit wide).
 const GRAVITY: f32 = 5.5;
 /// Share of its speed a point keeps from one step to the next: air on a sheet of paper.
 const KEEP: f32 = 0.985;
 const ITERATIONS: usize = 20;
-/// How strongly the skip-one links resist bending, 0..1: paper holds its shape but does give.
+/// How strongly the links across two cells resist bending, 0..1: paper holds its shape but gives.
 const BEND: f32 = 0.6;
+/// Stretch, as a share of its length, at which an edge of paper gives way: twice what the
+/// briskest calm turn asks of it (about 0.09), so only a pull or a jerk tears.
+const TEAR: f32 = 0.18;
+/// Edges that may give way in one step: a tear runs, it does not burst.
+const TEARS_PER_STEP: usize = 1;
+
+/// Where a leaf lies: the book's two pages, and the table round it.
+#[derive(Clone, Copy)]
+pub struct Floor {
+    /// Height of the right-hand page and of the left-hand one.
+    pub right: f32,
+    pub left: f32,
+    /// Half the size of the book on the table: beyond it lies the table, at height 0.
+    pub half: (f32, f32),
+}
+
+impl Floor {
+    fn at(&self, x: f32, z: f32) -> f32 {
+        if x.abs() > self.half.0 || z.abs() > self.half.1 {
+            0.002
+        } else if x >= 0.0 {
+            self.right
+        } else {
+            self.left
+        }
+    }
+}
 
 struct Link {
     a: usize,
     b: usize,
     rest: f32,
     stiffness: f32,
+    /// The cell edge this link is, if it is one (`edge` index), and so may tear.
+    edge: Option<usize>,
 }
 
 pub struct Leaf {
     pub points: Vec<Vec3>,
     prev: Vec<Vec3>,
+    /// The grid point each particle stands for.
+    home: Vec<(usize, usize)>,
+    /// Each cell's corner particles: head-spine, head-edge, foot-spine, foot-edge.
+    cells: Vec<[usize; 4]>,
+    /// Torn edges, by `edge` index.
+    cut: Vec<bool>,
     links: Vec<Link>,
     /// The point a hand holds, and where the hand is.
     pub grab: Option<(usize, Vec3)>,
+    gap: f32,
     width: f32,
     height: f32,
-    /// Height of the paper the leaf lies on, right of the spine and left of it.
-    floor: (f32, f32),
+    floor: Floor,
 }
 
+/// The particle first standing for grid point `(i, j)`.
 pub fn at(i: usize, j: usize) -> usize {
     j * NX + i
 }
 
+fn cell(ci: usize, cj: usize) -> usize {
+    cj * CX + ci
+}
+
+/// Edges of the grid: the ones along rows (`i`..`i+1` on row `j`) come first, then the ones
+/// down columns (`j`..`j+1` on column `i`).
+fn row_edge(i: usize, j: usize) -> usize {
+    j * CX + i
+}
+
+fn col_edge(i: usize, j: usize) -> usize {
+    CX * NZ + i * CZ + j
+}
+
+const EDGES: usize = CX * NZ + NX * CZ;
+
 impl Leaf {
-    /// A flat leaf over the right-hand page: `gap` from the spine, `width` by `height`, at `floor.0`.
-    pub fn new(gap: f32, width: f32, height: f32, floor: (f32, f32)) -> Self {
-        let mut points = Vec::with_capacity(NX * NZ);
-        for j in 0..NZ {
-            for i in 0..NX {
-                let x = gap + width * i as f32 / (NX - 1) as f32;
-                let z = height * (j as f32 / (NZ - 1) as f32 - 0.5);
-                points.push(Vec3::new(x, floor.0, z));
-            }
-        }
-        let mut links = Vec::new();
-        let mut link = |a: usize, b: usize, stiffness: f32, points: &[Vec3]| {
-            links.push(Link { a, b, rest: points[a].distance(points[b]), stiffness });
+    /// A flat leaf over the right-hand page: `gap` from the spine, `width` by `height`.
+    pub fn new(gap: f32, width: f32, height: f32, floor: Floor) -> Self {
+        let mut leaf = Leaf {
+            points: Vec::new(),
+            prev: Vec::new(),
+            home: Vec::new(),
+            cells: Vec::with_capacity(CX * CZ),
+            cut: vec![false; EDGES],
+            links: Vec::new(),
+            grab: None,
+            gap,
+            width,
+            height,
+            floor,
         };
         for j in 0..NZ {
             for i in 0..NX {
-                let p = at(i, j);
-                if i + 1 < NX {
-                    link(p, at(i + 1, j), 1.0, &points);
-                }
-                if j + 1 < NZ {
-                    link(p, at(i, j + 1), 1.0, &points);
-                }
-                if i + 1 < NX && j + 1 < NZ {
-                    link(p, at(i + 1, j + 1), 0.8, &points);
-                    link(at(i + 1, j), at(i, j + 1), 0.8, &points);
-                }
-                // stiffness against bending, over a short and a longer reach: the short one
-                // smooths a curl, the long one keeps a crease from settling in
-                for (reach, stiffness) in [(2, BEND), (4, BEND * 0.5)] {
-                    if i + reach < NX {
-                        link(p, at(i + reach, j), stiffness, &points);
-                    }
-                    if j + reach < NZ {
-                        link(p, at(i, j + reach), stiffness, &points);
-                    }
-                    if i + reach < NX && j + reach < NZ {
-                        link(p, at(i + reach, j + reach), stiffness * 0.5, &points);
-                        link(at(i + reach, j), at(i, j + reach), stiffness * 0.5, &points);
-                    }
-                }
+                leaf.points.push(leaf.rest(i, j) + Vec3::Y * floor.right);
+                leaf.home.push((i, j));
             }
         }
-        Leaf { prev: points.clone(), points, links, grab: None, width, height, floor }
+        leaf.prev = leaf.points.clone();
+        for cj in 0..CZ {
+            for ci in 0..CX {
+                leaf.cells.push([at(ci, cj), at(ci + 1, cj), at(ci, cj + 1), at(ci + 1, cj + 1)]);
+            }
+        }
+        leaf.relink();
+        leaf
+    }
+
+    /// Where grid point `(i, j)` lies on the flat leaf, at height 0.
+    fn rest(&self, i: usize, j: usize) -> Vec3 {
+        Vec3::new(self.gap + self.width * i as f32 / CX as f32, 0.0, self.height * (j as f32 / CZ as f32 - 0.5))
     }
 
     pub fn height(&self) -> f32 {
         self.height
     }
 
-    fn pinned(p: usize) -> bool {
-        p % NX == 0
+    pub fn home(&self, p: usize) -> (usize, usize) {
+        self.home[p]
+    }
+
+    /// The cells' corners, for drawing: head-spine, head-edge, foot-spine, foot-edge.
+    pub fn cells(&self) -> &[[usize; 4]] {
+        &self.cells
+    }
+
+    fn pinned(&self, p: usize) -> bool {
+        self.home[p].0 == 0
+    }
+
+    /// Rebuilds the links from the cells and the edges still whole.
+    fn relink(&mut self) {
+        let mut links = Vec::new();
+        fn link(links: &mut Vec<Link>, leaf: &Leaf, a: usize, b: usize, stiffness: f32, edge: Option<usize>) {
+            let (ha, hb) = (leaf.home[a], leaf.home[b]);
+            let rest = leaf.rest(ha.0, ha.1).distance(leaf.rest(hb.0, hb.1));
+            links.push(Link { a, b, rest, stiffness, edge });
+        }
+        let link = |links: &mut Vec<Link>, a: usize, b: usize, stiffness: f32, edge: Option<usize>| link(links, self, a, b, stiffness, edge);
+        for cj in 0..CZ {
+            for ci in 0..CX {
+                let [hs, he, fs, fe] = self.cells[cell(ci, cj)];
+                // the cell's diagonals hold it square
+                link(&mut links, hs, fe, 0.8, None);
+                link(&mut links, he, fs, 0.8, None);
+                // its head and spine-side edges; the foot and far edges belong to the cells
+                // beyond, or to this one at the border of the leaf
+                link(&mut links, hs, he, 1.0, Some(row_edge(ci, cj)));
+                link(&mut links, hs, fs, 1.0, Some(col_edge(ci, cj)));
+                if cj + 1 == CZ {
+                    link(&mut links, fs, fe, 1.0, Some(row_edge(ci, cj + 1)));
+                }
+                if ci + 1 == CX {
+                    link(&mut links, he, fe, 1.0, Some(col_edge(ci + 1, cj)));
+                }
+            }
+        }
+        // a torn edge is not drawn together by its cells' head and spine links either
+        links.retain(|l| l.edge.is_none_or(|e| !self.cut[e]));
+        // stiffness against bending, across neighbouring cells that are still joined: the short
+        // reach smooths a curl, the long one keeps a crease from settling in
+        for cj in 0..CZ {
+            for ci in 0..CX {
+                let here = self.cells[cell(ci, cj)];
+                for reach in [1, 2] {
+                    let across = (1..=reach).all(|k| ci + k < CX && !self.cut[col_edge(ci + k, cj)]);
+                    if across {
+                        let there = self.cells[cell(ci + reach, cj)];
+                        let s = if reach == 1 { BEND } else { BEND * 0.5 };
+                        link(&mut links, here[0], there[1], s, None);
+                        link(&mut links, here[2], there[3], s, None);
+                    }
+                    let down = (1..=reach).all(|k| cj + k < CZ && !self.cut[row_edge(ci, cj + k)]);
+                    if down {
+                        let there = self.cells[cell(ci, cj + reach)];
+                        let s = if reach == 1 { BEND } else { BEND * 0.5 };
+                        link(&mut links, here[0], there[2], s, None);
+                        link(&mut links, here[1], there[3], s, None);
+                    }
+                }
+            }
+        }
+        self.links = links;
+    }
+
+    /// The grid points at the ends of an edge.
+    fn ends(e: usize) -> [(usize, usize); 2] {
+        if e < CX * NZ {
+            let (i, j) = (e % CX, e / CX);
+            [(i, j), (i + 1, j)]
+        } else {
+            let k = e - CX * NZ;
+            let (i, j) = (k / CZ, k % CZ);
+            [(i, j), (i, j + 1)]
+        }
+    }
+
+    /// The edges that cross an edge's line at either of its ends.
+    fn crossing(e: usize) -> [Option<usize>; 4] {
+        if e < CX * NZ {
+            let (i, j) = (e % CX, e / CX);
+            [(j > 0).then(|| col_edge(i, j - 1)), (j < CZ).then(|| col_edge(i, j)), (j > 0).then(|| col_edge(i + 1, j - 1)), (j < CZ).then(|| col_edge(i + 1, j))]
+        } else {
+            let k = e - CX * NZ;
+            let (i, j) = (k / CZ, k % CZ);
+            [(i > 0).then(|| row_edge(i - 1, j)), (i < CX).then(|| row_edge(i, j)), (i > 0).then(|| row_edge(i - 1, j + 1)), (i < CX).then(|| row_edge(i, j + 1))]
+        }
+    }
+
+    /// Does this edge touch a torn one, at the tip of a running tear?
+    fn at_tip(&self, e: usize) -> bool {
+        Self::ends(e).into_iter().any(|p| self.touches_cut(p, e))
+    }
+
+    fn touches_cut(&self, (i, j): (usize, usize), not: usize) -> bool {
+        [
+            (i < CX).then(|| row_edge(i, j)),
+            (i > 0).then(|| row_edge(i - 1, j)),
+            (j < CZ).then(|| col_edge(i, j)),
+            (j > 0).then(|| col_edge(i, j - 1)),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|n| n != not && self.cut[n])
+    }
+
+    /// Can a tear reach this edge: does it touch the border of the sheet, or a torn edge? An edge
+    /// along the border itself parts nothing and never tears.
+    fn at_front(&self, e: usize) -> bool {
+        let rim = if e < CX * NZ {
+            let j = e / CX;
+            j == 0 || j == CZ
+        } else {
+            let i = (e - CX * NZ) / CZ;
+            i == 0 || i == CX
+        };
+        !rim && Self::ends(e).into_iter().any(|(i, j)| i == 0 || i == CX || j == 0 || j == CZ || self.touches_cut((i, j), e))
+    }
+
+    /// Tears an edge and splits the points at its ends where the paper round them has parted.
+    fn tear(&mut self, e: usize) {
+        self.cut[e] = true;
+        for (i, j) in Self::ends(e) {
+            self.split(i, j);
+        }
+        self.relink();
+    }
+
+    /// Gives each fan of cells still joined round grid point `(i, j)` its own particle.
+    fn split(&mut self, i: usize, j: usize) {
+        // the up to four cells round the point, with the corner of each that the point is,
+        // in order round it: head-spine, head-edge, foot-edge, foot-spine
+        let around: [(Option<usize>, usize); 4] = [
+            ((i > 0 && j > 0).then(|| cell(i - 1, j - 1)), 3),
+            ((i < CX && j > 0).then(|| cell(i, j - 1)), 2),
+            ((i < CX && j < CZ).then(|| cell(i, j)), 0),
+            ((i > 0 && j < CZ).then(|| cell(i - 1, j)), 1),
+        ];
+        // the edges between consecutive cells of that ring
+        let between = [
+            (j > 0).then(|| col_edge(i, j - 1)),
+            (i < CX).then(|| row_edge(i, j)),
+            (j < CZ).then(|| col_edge(i, j)),
+            (i > 0).then(|| row_edge(i - 1, j)),
+        ];
+        // walk the ring: a whole edge keeps two neighbours in the same fan
+        let mut fan = [usize::MAX; 4];
+        let mut fans = 0;
+        for start in 0..4 {
+            if around[start].0.is_none() || fan[start] != usize::MAX {
+                continue;
+            }
+            fan[start] = fans;
+            for dir in [1usize, 3] {
+                let mut k = start;
+                loop {
+                    let next = (k + dir) % 4;
+                    let edge = if dir == 1 { between[k] } else { between[next] };
+                    if around[next].0.is_none() || fan[next] != usize::MAX || edge.is_none_or(|e| self.cut[e]) {
+                        break;
+                    }
+                    fan[next] = fans;
+                    k = next;
+                }
+            }
+            fans += 1;
+        }
+        // the first fan keeps the particle it has, every other fan gets one of its own
+        let mut given: Vec<Option<usize>> = vec![None; fans];
+        let mut used = Vec::new();
+        for k in 0..4 {
+            let (Some(c), corner) = around[k] else { continue };
+            let f = fan[k];
+            let p = self.cells[c][corner];
+            let q = *given[f].get_or_insert_with(|| {
+                if used.contains(&p) {
+                    self.points.push(self.points[p]);
+                    self.prev.push(self.prev[p]);
+                    self.home.push(self.home[p]);
+                    self.points.len() - 1
+                } else {
+                    p
+                }
+            });
+            used.push(q);
+            self.cells[c][corner] = q;
+        }
     }
 
     pub fn step(&mut self, dt: f32) {
         let dt = dt.min(1.0 / 30.0);
         for p in 0..self.points.len() {
-            if Self::pinned(p) {
+            if self.pinned(p) {
                 continue;
             }
             let now = self.points[p];
@@ -119,7 +356,7 @@ impl Leaf {
                     continue;
                 }
                 let fix = d * ((len - l.rest) / len) * l.stiffness;
-                match (Self::pinned(l.a), Self::pinned(l.b)) {
+                match (self.home[l.a].0 == 0, self.home[l.b].0 == 0) {
                     (true, true) => {}
                     (true, false) => self.points[l.b] -= fix,
                     (false, true) => self.points[l.a] += fix,
@@ -129,32 +366,107 @@ impl Leaf {
                     }
                 }
             }
-            // the leaf lies on paper: it cannot sink into the block on either side of the spine
+            // the leaf lies on paper or on the table: it cannot sink into either
             let floor = self.floor;
             for q in &mut self.points {
-                q.y = q.y.max(if q.x >= 0.0 { floor.0 } else { floor.1 });
+                q.y = q.y.max(floor.at(q.x, q.z));
             }
         }
         // paper on paper: a little friction, so a landed leaf does not slide about, but not so
         // much that a bulge cannot spread flat
         for p in 0..self.points.len() {
             let q = self.points[p];
-            if q.y <= self.floor_at(q.x) + 1e-4 {
+            if q.y <= self.floor.at(q.x, q.z) + 1e-4 {
                 let prev = &mut self.prev[p];
                 prev.x = q.x + (prev.x - q.x) * 0.9;
                 prev.z = q.z + (prev.z - q.z) * 0.9;
             }
         }
+        // what the solver could not take up, the paper's fibres must: of the edges stretched past
+        // bearing, the worst gives way. Paper tears from an edge of the sheet or from the tip of
+        // a tear already started, where the pull gathers, so only such edges may give
+        // A crack runs across the pull, so a link stretched too far parts the paper along an edge
+        // that crosses it at one of its ends
+        let mut strained: Vec<(f32, usize)> = self
+            .links
+            .iter()
+            .filter_map(|l| {
+                let e = l.edge?;
+                let s = self.points[l.a].distance(self.points[l.b]) / l.rest - 1.0;
+                if s <= TEAR {
+                    return None;
+                }
+                let crossing = Self::crossing(e).into_iter().flatten().filter(|c| !self.cut[*c] && self.at_front(*c));
+                // the tip of a tear already running goes first, then the border of the sheet
+                let best = crossing.max_by_key(|c| self.at_tip(*c))?;
+                Some((s, best))
+            })
+            .collect();
+        if !strained.is_empty() {
+            strained.sort_by(|a, b| b.0.total_cmp(&a.0));
+            for (_, e) in strained.into_iter().take(TEARS_PER_STEP) {
+                if !self.cut[e] {
+                    self.tear(e);
+                }
+            }
+            // a hand that held a point now torn off still holds that point
+        }
     }
 
-    fn floor_at(&self, x: f32) -> f32 {
-        if x >= 0.0 { self.floor.0 } else { self.floor.1 }
+    /// Share of the leaf's cells that are no longer joined to the spine.
+    pub fn lost(&self) -> f32 {
+        let held = self.held();
+        1.0 - held.iter().filter(|h| **h).count() as f32 / held.len() as f32
     }
 
-    /// How far over the leaf has gone: 1 lying on the right, -1 lying on the left.
+    /// Has any of the leaf been torn?
+    pub fn torn(&self) -> bool {
+        self.cut.iter().any(|c| *c)
+    }
+
+    /// How many edges of paper have torn.
+    pub fn cuts(&self) -> usize {
+        self.cut.iter().filter(|c| **c).count()
+    }
+
+    /// For each cell, is it still joined to the spine through whole edges?
+    pub fn held(&self) -> Vec<bool> {
+        let mut held = vec![false; self.cells.len()];
+        let mut todo: Vec<usize> = (0..CZ).map(|cj| cell(0, cj)).collect();
+        for &c in &todo {
+            held[c] = true;
+        }
+        while let Some(c) = todo.pop() {
+            let (ci, cj) = (c % CX, c / CX);
+            let near = [
+                (ci + 1 < CX).then(|| (cell(ci + 1, cj), col_edge(ci + 1, cj))),
+                (ci > 0).then(|| (cell(ci - 1, cj), col_edge(ci, cj))),
+                (cj + 1 < CZ).then(|| (cell(ci, cj + 1), row_edge(ci, cj + 1))),
+                (cj > 0).then(|| (cell(ci, cj - 1), row_edge(ci, cj))),
+            ];
+            for (n, e) in near.into_iter().flatten() {
+                if !held[n] && !self.cut[e] {
+                    held[n] = true;
+                    todo.push(n);
+                }
+            }
+        }
+        held
+    }
+
+    /// How far over the leaf has gone: 1 lying on the right, -1 lying on the left. Only the part
+    /// still held at the spine counts.
     pub fn side(&self) -> f32 {
-        let edge: f32 = (0..NZ).map(|j| self.points[at(NX - 1, j)].x).sum::<f32>() / NZ as f32;
-        (edge / self.width).clamp(-1.0, 1.0)
+        let held = self.held();
+        let edge: Vec<f32> = (0..CZ).filter(|cj| held[cell(CX - 1, *cj)]).map(|cj| self.points[self.cells[cell(CX - 1, cj)][1]].x).collect();
+        let x = if edge.is_empty() {
+            // torn off at the spine: what is left is a stub, it lies wherever the stub lies
+            let stub: Vec<f32> = (0..self.cells.len()).filter(|c| held[*c]).map(|c| self.points[self.cells[c][1]].x).collect();
+            stub.iter().sum::<f32>() / stub.len().max(1) as f32
+        } else {
+            edge.iter().sum::<f32>() / edge.len() as f32
+        };
+        (x / self.width).clamp(-1.0, 1.0)
     }
 
     /// Has the leaf come to rest?
@@ -162,23 +474,22 @@ impl Leaf {
         self.grab.is_none() && self.points.iter().zip(&self.prev).all(|(p, q)| p.distance_squared(*q) < 1e-8)
     }
 
-    /// The point nearest to `to`, for a hand to take hold of.
+    /// The particle nearest to `to`, for a hand to take hold of.
     pub fn nearest(&self, to: Vec3) -> usize {
-        (0..self.points.len()).filter(|p| !Self::pinned(*p)).min_by(|a, b| self.points[*a].distance_squared(to).total_cmp(&self.points[*b].distance_squared(to))).unwrap_or(NX - 1)
+        (0..self.points.len()).filter(|p| !self.pinned(*p)).min_by(|a, b| self.points[*a].distance_squared(to).total_cmp(&self.points[*b].distance_squared(to))).unwrap_or(NX - 1)
     }
 
-    /// The surface normal at every point, facing up while the leaf lies on the right.
+    /// The surface normal at every particle, facing up while the leaf lies on the right.
     pub fn normals(&self) -> Vec<Vec3> {
         let mut out = vec![Vec3::ZERO; self.points.len()];
-        for j in 0..NZ {
-            for i in 0..NX {
-                let p = |i: usize, j: usize| self.points[at(i, j)];
-                let dx = p((i + 1).min(NX - 1), j) - p(i.saturating_sub(1), j);
-                let dz = p(i, (j + 1).min(NZ - 1)) - p(i, j.saturating_sub(1));
-                out[at(i, j)] = dz.cross(dx).normalize_or(Vec3::Y);
+        for c in &self.cells {
+            let [hs, he, fs, fe] = c.map(|p| self.points[p]);
+            let n = (fs - hs).cross(he - hs) + (fe - he).cross(fs - he);
+            for p in c {
+                out[*p] += n;
             }
         }
-        out
+        out.into_iter().map(|n| n.normalize_or(Vec3::Y)).collect()
     }
 }
 
@@ -186,8 +497,20 @@ impl Leaf {
 mod tests {
     use super::*;
 
+    const FLOOR: Floor = Floor { right: 0.094, left: 0.099, half: (1.06, 0.725) };
+
     fn leaf() -> Leaf {
-        Leaf::new(0.005, 1.0, 1.37, (0.09, 0.095))
+        Leaf::new(0.005, 1.0, 1.37, FLOOR)
+    }
+
+    fn carry(l: &mut Leaf, point: usize, upto: f32, steps: usize) {
+        let z = l.points[point].z;
+        for k in 0..=steps {
+            let a = std::f32::consts::PI * upto * k as f32 / steps as f32;
+            l.grab = Some((point, Vec3::new(a.cos() * 0.95, 0.1 + a.sin() * 0.5, z)));
+            l.step(1.0 / 60.0);
+        }
+        l.grab = None;
     }
 
     #[test]
@@ -203,22 +526,14 @@ mod tests {
     }
 
     #[test]
-    fn carried_over_the_spine_it_falls_to_the_left() {
+    fn carried_over_the_spine_it_falls_to_the_left_whole() {
         let mut l = leaf();
-        let corner = at(NX - 1, NZ - 1);
-        let z = l.points[corner].z;
-        // a hand lifts the corner up and over in an arc, then lets go
-        for k in 0..=60 {
-            let a = std::f32::consts::PI * k as f32 / 60.0;
-            l.grab = Some((corner, Vec3::new(a.cos() * 0.95, 0.1 + a.sin() * 0.5, z)));
-            l.step(1.0 / 60.0);
-        }
-        l.grab = None;
+        carry(&mut l, at(NX - 1, NZ - 1), 1.0, 60);
         for _ in 0..240 {
             l.step(1.0 / 60.0);
         }
         assert!(l.side() < -0.85, "side {}", l.side());
-        // and paper does not stretch on the way
+        assert!(!l.torn(), "a calm turn tore the page");
         let w = l.points[at(0, NZ / 2)].distance(l.points[at(NX - 1, NZ / 2)]);
         assert!(w < 1.02, "width {w}");
     }
@@ -226,17 +541,48 @@ mod tests {
     #[test]
     fn let_go_early_it_falls_back() {
         let mut l = leaf();
-        let corner = at(NX - 1, NZ - 1);
-        let z = l.points[corner].z;
-        for k in 0..=20 {
-            let a = std::f32::consts::PI * 0.3 * k as f32 / 20.0;
-            l.grab = Some((corner, Vec3::new(a.cos() * 0.95, 0.1 + a.sin() * 0.5, z)));
-            l.step(1.0 / 60.0);
-        }
-        l.grab = None;
+        carry(&mut l, at(NX - 1, NZ - 1), 0.3, 20);
         for _ in 0..300 {
             l.step(1.0 / 60.0);
         }
         assert!(l.side() > 0.85, "side {}", l.side());
+    }
+
+    #[test]
+    fn yanked_away_from_the_spine_the_corner_tears_off() {
+        let mut l = leaf();
+        let corner = at(NX - 1, NZ - 1);
+        let from = l.points[corner];
+        // a jerk: the hand flies off the page in a few frames, and holds on out there
+        for k in 1..=40 {
+            l.grab = Some((corner, from + Vec3::new(0.12, 0.05, 0.12) * k.min(8) as f32));
+            l.step(1.0 / 60.0);
+        }
+        l.grab = None;
+        for _ in 0..240 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(l.torn(), "nothing tore");
+        let lost = l.lost();
+        assert!(lost > 0.0 && lost < 0.6, "lost {lost}");
+        // the torn piece is loose: some of the paper now lies on the table
+        assert!(l.points.iter().any(|p| p.y < 0.01), "nothing fell to the table");
+    }
+
+    #[test]
+    fn a_tear_splits_the_points_along_it() {
+        let mut l = leaf();
+        let before = l.points.len();
+        // cut a line down the middle of the page, head to foot
+        for j in 0..CZ {
+            l.cut[col_edge(NX / 2, j)] = true;
+        }
+        for j in 0..NZ {
+            l.split(NX / 2, j);
+        }
+        l.relink();
+        assert_eq!(l.points.len(), before + NZ, "every point on the cut was split");
+        let lost = l.lost();
+        assert!((lost - (CX - NX / 2) as f32 / CX as f32).abs() < 1e-4, "lost {lost}");
     }
 }

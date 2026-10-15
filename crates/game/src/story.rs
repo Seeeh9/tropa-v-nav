@@ -219,7 +219,11 @@ enum Turn {
     Skip,
 }
 
-fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res<Tale>, mut turned: MessageReader<crate::book::Turned>) {
+fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res<Tale>, mut turned: MessageReader<crate::book::Turned>, mut torn: MessageReader<crate::book::Torn>) {
+    // what a torn page costs (the curse «Порча книги») waits on its design; for now it is noted
+    for t in torn.read() {
+        info!("a page of the tale was torn: {:.0}% of the leaf lost", t.lost * 100.0);
+    }
     if !tale.open() {
         turned.clear();
         return;

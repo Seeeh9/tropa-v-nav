@@ -24,7 +24,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::sprite::{BorderRect, SliceScaleMode, TextureSlicer};
 use bevy::ui::widget::NodeImageMode;
 use bevy::ui::UiTargetCamera;
-use leaf::{Leaf, NX, NZ};
+use leaf::{Floor, Leaf, NX, NZ};
 use std::f32::consts::PI;
 
 mod leaf;
@@ -39,8 +39,8 @@ const PAGE_H: f32 = 1.37;
 const GUTTER: f32 = 0.005;
 /// Height of the top of the page block above the table.
 const TOP: f32 = 0.09;
-/// Where a leaf lies: on the right-hand page, and on the left-hand one.
-const LEAF_FLOOR: (f32, f32) = (TOP + 0.004, TOP + 0.009);
+/// Where a leaf lies: on the right-hand page, on the left-hand one, and on the table round the book.
+const LEAF_FLOOR: Floor = Floor { right: TOP + 0.004, left: TOP + 0.009, half: (PAGE_W + 0.06, PAGE_H / 2.0 + 0.04) };
 /// Distance from the edge of the frame texture to its inner window, in texture pixels.
 const FRAME_SLICE: f32 = 380.0;
 /// Where the reader's eye rests, and the point of the spread it looks at.
@@ -48,11 +48,14 @@ const EYE: Vec3 = Vec3::new(0.0, 1.66, 1.02);
 const LOOK: Vec3 = Vec3::new(0.0, 0.0, 0.16);
 /// How long the unseen hand takes to carry a leaf over, in seconds.
 const AUTO_TURN: f32 = 0.9;
+/// How much more a pull past the paper's reach counts than the mouse moved.
+const PULL: f32 = 2.5;
 /// Stage pixels at the foot of the screen that belong to the story's buttons, not the book.
 const BUTTON_BAND: f32 = 130.0;
 
 pub fn plugin(app: &mut App) {
     app.add_message::<Turned>()
+        .add_message::<Torn>()
         .add_systems(Startup, setup)
         .add_systems(Update, ((open_cover, follow_story, hold_leaf, move_leaf, redraw_pages).chain(), flicker, sway_camera, fit_pages));
 }
@@ -60,6 +63,13 @@ pub fn plugin(app: &mut App) {
 /// Sent when the reader has turned the page by hand: the story reads on.
 #[derive(Message)]
 pub struct Turned;
+
+/// Sent when a torn leaf has come to rest: `lost` is the share of it no longer held at the spine.
+/// What a torn page costs the reader is the run's business.
+#[derive(Message)]
+pub struct Torn {
+    pub lost: f32,
+}
 
 /// What the open spread shows.
 #[derive(Clone, PartialEq, Default)]
@@ -134,6 +144,8 @@ pub struct Book {
     drawn: [Option<(Spread, Half)>; 4],
     turn: Option<Turning>,
     leaf: Leaf,
+    /// A torn leaf lies where it came to rest, in place of a whole page.
+    kept: bool,
     leaf_meshes: (Handle<Mesh>, Handle<Mesh>),
     /// 0 closed .. 1 open.
     open: f32,
@@ -194,37 +206,35 @@ fn tiled(assets: &AssetServer, art: &Art, stem: &str) -> Option<Handle<Image>> {
 /// The leaf as a mesh: its front faces up while it lies on the right, its back once on the left.
 /// The back's pictures run the other way across, so the spine stays at the spine.
 fn leaf_mesh(leaf: &Leaf, back: bool) -> Mesh {
-    let mut uvs = Vec::with_capacity(NX * NZ);
-    for j in 0..NZ {
-        for i in 0..NX {
-            let u = i as f32 / (NX - 1) as f32;
-            uvs.push([if back { 1.0 - u } else { u }, j as f32 / (NZ - 1) as f32]);
-        }
-    }
-    let mut indices = Vec::with_capacity((NX - 1) * (NZ - 1) * 6);
-    for j in 0..NZ - 1 {
-        for i in 0..NX - 1 {
-            let (a, b, c, d) = (leaf::at(i, j), leaf::at(i, j + 1), leaf::at(i + 1, j), leaf::at(i + 1, j + 1));
-            let quad = [a, b, c, c, b, d].map(|p| p as u32);
-            if back {
-                indices.extend(quad.iter().rev());
-            } else {
-                indices.extend(quad);
-            }
-        }
-    }
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_indices(Indices::U32(indices));
     shape_leaf(&mut mesh, leaf, back);
     mesh
 }
 
+/// Lays the leaf's particles into its mesh. A tear adds particles, so everything is rebuilt.
 fn shape_leaf(mesh: &mut Mesh, leaf: &Leaf, back: bool) {
     let positions: Vec<[f32; 3]> = leaf.points.iter().map(|p| p.to_array()).collect();
     let normals: Vec<[f32; 3]> = leaf.normals().iter().map(|n| if back { (-*n).to_array() } else { n.to_array() }).collect();
+    let uvs: Vec<[f32; 2]> = (0..leaf.points.len())
+        .map(|p| {
+            let (i, j) = leaf.home(p);
+            let u = i as f32 / (NX - 1) as f32;
+            [if back { 1.0 - u } else { u }, j as f32 / (NZ - 1) as f32]
+        })
+        .collect();
+    let mut indices = Vec::with_capacity(leaf.cells().len() * 6);
+    for &[hs, he, fs, fe] in leaf.cells() {
+        let quad = [hs, fs, he, he, fs, fe].map(|p| p as u32);
+        if back {
+            indices.extend(quad.iter().rev());
+        } else {
+            indices.extend(quad);
+        }
+    }
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
 }
 
 fn setup(
@@ -294,7 +304,13 @@ fn setup(
     let front = meshes.add(leaf_mesh(&leaf, false));
     let back = meshes.add(leaf_mesh(&leaf, true));
     for (mesh, face) in [(front.clone(), Face::LeafFront), (back.clone(), Face::LeafBack)] {
-        commands.spawn((LeafMesh, Mesh3d(mesh), MeshMaterial3d(page_mat(&mut materials, &textures[face as usize])), Transform::default(), Visibility::Hidden));
+        let mut leaf = commands.spawn((LeafMesh, Mesh3d(mesh), MeshMaterial3d(page_mat(&mut materials, &textures[face as usize])), Transform::default(), Visibility::Hidden));
+        // the two sides lie in one place: one shadow is enough, two would darken each other; and
+        // a crumpled leaf lying a hair over the page would speckle itself with its own shadow
+        leaf.insert(bevy::light::NotShadowReceiver);
+        if face == Face::LeafBack {
+            leaf.insert(bevy::light::NotShadowCaster);
+        }
     }
 
     // the front cover hinges on the spine; closed it lies over the right page
@@ -370,6 +386,7 @@ fn setup(
         drawn: Default::default(),
         turn: None,
         leaf,
+        kept: false,
         leaf_meshes: (front, back),
         open: 0.0,
         heard: false,
@@ -422,6 +439,7 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
     if !book.wanted {
         book.shown = None;
         book.turn = None;
+        book.kept = false;
         return;
     }
     let spread = book.spread.clone();
@@ -437,8 +455,13 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
     match book.shown.take() {
         // the book has only just opened, or a turn is under way: no time for the leaf, the pages change
         Some(from) if book.open >= 1.0 && book.turn.is_none() => {
-            book.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
-            let point = leaf::at(NX - 1, NZ - 3);
+            // a torn leaf left lying on the page is turned as it is, torn
+            let reuse = book.kept && book.leaf.side() > 0.5;
+            book.kept = false;
+            if !reuse {
+                book.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
+            }
+            let point = book.leaf.nearest(Vec3::new(GUTTER + PAGE_W, LEAF_FLOOR.right, PAGE_H * 0.4));
             let z = book.leaf.points[point].z;
             book.wear(Face::LeafFront, &from, Half::Right);
             book.wear(Face::LeafBack, &spread, Half::Left);
@@ -448,6 +471,7 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
         }
         _ => {
             book.turn = None;
+            book.kept = false;
             book.wear(Face::Left, &spread, Half::Left);
             book.wear(Face::Right, &spread, Half::Right);
         }
@@ -490,11 +514,15 @@ fn hold_leaf(
         if c.y > crate::STAGE_H - BUTTON_BAND {
             return;
         }
-        let Some(hit) = cursor_on(camera, at, c, LEAF_FLOOR.0) else { return };
+        let Some(hit) = cursor_on(camera, at, c, LEAF_FLOOR.right) else { return };
         if !(GUTTER..GUTTER + PAGE_W).contains(&hit.x) || hit.z.abs() > PAGE_H / 2.0 {
             return;
         }
-        book.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
+        // a torn leaf left lying on the page is taken up as it is, torn
+        if !(book.kept && book.leaf.side() > 0.5) {
+            book.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
+        }
+        book.kept = false;
         let point = book.leaf.nearest(hit);
         book.leaf.grab = Some((point, book.leaf.points[point]));
         book.wear(Face::LeafFront, &shown, Half::Right);
@@ -519,28 +547,43 @@ fn hold_leaf(
         }
         return;
     }
-    // carry: the point held keeps its distance from the spine, so it rides a dome over the book
-    let (Some(c), Some((point, _))) = (cursor, book.leaf.grab) else { return };
-    let Some(hit) = cursor_on(camera, at, c, LEAF_FLOOR.0) else { return };
-    let reach = GUTTER + PAGE_W * (point % NX) as f32 / (NX - 1) as f32;
+    // carry: the point held keeps its distance from the spine, so it rides a dome over the book;
+    // a hand that pulls past the dome pulls the paper with it, and paper pulled too far tears
+    let (Some(c), Some((point, hand))) = (cursor, book.leaf.grab) else { return };
+    // the cursor read at the height the hand holds the paper, so a raised page does not slip
+    // away from it in perspective
+    let Some(hit) = cursor_on(camera, at, c, hand.y) else { return };
+    let (i, j) = book.leaf.home(point);
+    let reach = GUTTER + PAGE_W * i as f32 / (NX - 1) as f32;
     let x = hit.x.clamp(-reach, reach);
-    let rest_z = book.leaf.height() * ((point / NX) as f32 / (NZ - 1) as f32 - 0.5);
-    let y = LEAF_FLOOR.0 + (reach * reach - x * x).max(0.0).sqrt() * 0.75;
+    let rest_z = book.leaf.height() * (j as f32 / (NZ - 1) as f32 - 0.5);
+    let y = LEAF_FLOOR.right + (reach * reach - x * x).max(0.0).sqrt() * 0.75;
     let z = rest_z + (hit.z - rest_z) * 0.35;
-    book.leaf.grab = Some((point, Vec3::new(x, y, z)));
+    // only a pull out past where the paper reaches from the spine strains it; within that the
+    // hand just leads the leaf about. A mouse has little room, so a pull counts for more
+    let out = Vec2::new(hit.x, hit.z - rest_z);
+    let beyond = (out.length() - reach).max(0.0);
+    let pull = out.normalize_or_zero() * beyond * PULL;
+    book.leaf.grab = Some((point, Vec3::new(x + pull.x, y, z + pull.y)));
 }
 
 /// Runs the leaf's paper, moves the unseen hand, and lays the leaf down when it comes to rest.
 fn move_leaf(
+    mut commands: Commands,
     time: Res<Time>,
     mut book: ResMut<Book>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut shown: Query<&mut Visibility, With<LeafMesh>>,
+    mut torn: MessageWriter<Torn>,
+    mut heard_tear: Local<f32>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    mixer: Res<Mixer>,
 ) {
     let book = &mut *book;
-    let turning = book.turn.is_some();
+    let seen = book.turn.is_some() || book.kept;
     for mut v in &mut shown {
-        let want = if turning { Visibility::Inherited } else { Visibility::Hidden };
+        let want = if seen { Visibility::Inherited } else { Visibility::Hidden };
         if *v != want {
             *v = want;
         }
@@ -551,14 +594,22 @@ fn move_leaf(
         *t = (*t + dt / AUTO_TURN).min(1.0);
         // lifted at the corner, carried over in an arc, a little ahead of the paper
         let a = PI * (*t * *t * (3.0 - 2.0 * *t));
-        let reach = GUTTER + PAGE_W * (*point % NX) as f32 / (NX - 1) as f32;
-        book.leaf.grab = Some((*point, Vec3::new(reach * a.cos(), LEAF_FLOOR.0 + reach * a.sin() * 0.6, *z)));
+        let reach = GUTTER + PAGE_W * book.leaf.home(*point).0 as f32 / (NX - 1) as f32;
+        book.leaf.grab = Some((*point, Vec3::new(reach * a.cos(), LEAF_FLOOR.right + reach * a.sin() * 0.6, *z)));
         if *t >= 1.0 {
             turn.hand = Hand::Gone;
             book.leaf.grab = None;
         }
     }
+    let (cuts, lost) = (book.leaf.cuts(), book.leaf.lost());
     book.leaf.step(dt);
+    // the sound of a tear: a rip as it runs, a long one when a great piece comes away
+    *heard_tear -= dt;
+    if book.leaf.cuts() > cuts && *heard_tear <= 0.0 {
+        let big = book.leaf.lost() - lost > 0.2;
+        play(&mut commands, &art, &assets, &mixer, if big { "book_tear_big" } else { "book_tear_small" });
+        *heard_tear = if big { 1.2 } else { 0.35 };
+    }
     for (handle, back) in [(&book.leaf_meshes.0, false), (&book.leaf_meshes.1, true)] {
         if let Some(mut mesh) = meshes.get_mut(handle) {
             shape_leaf(&mut mesh, &book.leaf, back);
@@ -567,10 +618,14 @@ fn move_leaf(
     if !matches!(turn.hand, Hand::Gone) || !book.leaf.still() {
         return;
     }
-    // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned
+    // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned;
+    // a torn leaf stays as it lies, holes and loose pieces and all, over the page beneath
     let (from, to, committed) = (turn.from.clone(), turn.to.clone(), turn.committed);
     book.turn = None;
-    if committed && book.leaf.side() < 0.0 {
+    if book.leaf.torn() {
+        book.kept = true;
+        torn.write(Torn { lost: book.leaf.lost() });
+    } else if committed && book.leaf.side() < 0.0 {
         book.wear(Face::Left, &to, Half::Left);
     } else {
         book.wear(Face::Right, &from, Half::Right);

@@ -48,16 +48,22 @@ const EYE: Vec3 = Vec3::new(0.0, 1.66, 1.02);
 const LOOK: Vec3 = Vec3::new(0.0, 0.0, 0.16);
 /// How long the unseen hand takes to carry a leaf over, in seconds.
 const AUTO_TURN: f32 = 0.9;
+/// How often a reader's hand is told to the others, per second.
+const HAND_RATE: f32 = 20.0;
+/// How long another reader's hand stays in sight after their machine last told of it, seconds.
+const GHOST_LINGER: f32 = 1.5;
 /// How much more a pull past the paper's reach counts than the mouse moved.
 const PULL: f32 = 2.5;
 /// Stage pixels at the foot of the screen that belong to the story's buttons, not the book.
 const BUTTON_BAND: f32 = 130.0;
 
 pub fn plugin(app: &mut App) {
+    #[cfg(feature = "dev")]
+    app.add_systems(Update, dev_ghost.before(follow_ghosts));
     app.add_message::<Turned>()
         .add_message::<Torn>()
         .add_systems(Startup, setup)
-        .add_systems(Update, ((open_cover, follow_story, hold_leaf, move_leaf, redraw_pages).chain(), flicker, sway_camera, fit_pages));
+        .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, move_leaf, redraw_pages).chain(), flicker, sway_camera, fit_pages));
 }
 
 /// Sent when the reader has turned the page by hand: the story reads on.
@@ -106,10 +112,33 @@ enum Face {
 
 const FACES: [Face; 4] = [Face::Left, Face::Right, Face::LeafFront, Face::LeafBack];
 
+/// What the reader's hand did over a page read together, for the story to tell the others.
+pub enum HandNews {
+    /// Where the hand is in the scene, and the point of the leaf it holds, if any.
+    Hand { at: [f32; 3], hold: Option<u16> },
+    /// The leaf the reader holds tore along this edge.
+    Tear(u16),
+}
+
+/// Another reader's hand over the book, as their machine last told it.
+struct Ghost {
+    at: Vec3,
+    /// How fast it was moving between the last two tellings: between tellings it is carried on
+    /// at that speed, so the paper it holds is drawn along smoothly and not jerked.
+    speed: Vec3,
+    /// The point of the leaf it holds.
+    hold: Option<usize>,
+    color: Color,
+    /// Seconds since it was last heard of.
+    quiet: f32,
+}
+
 /// Who is turning the leaf.
 enum Hand {
     /// The reader, with the mouse.
     Reader,
+    /// Another reader, whose machine sends where their hand is (their seat).
+    Remote(u8),
     /// The story, by its button: carried over in an arc, `t` from 0 to 1.
     Unseen { t: f32, point: usize, z: f32 },
     /// Nobody: the leaf falls where it will.
@@ -135,8 +164,14 @@ pub struct Book {
     pub spread: Spread,
     /// The spread after this one, when there is one: what turning the leaf uncovers.
     pub next: Option<Spread>,
-    /// May the reader turn the leaf by hand (not while a party reads a page together).
+    /// May the reader turn the leaf by hand.
     pub drag_ok: bool,
+    /// Is the page read together: the reader's hand is shown to the others through `news`.
+    pub shared: bool,
+    /// What the story is to send the others, oldest first.
+    pub news: Vec<HandNews>,
+    /// The other readers' hands, by seat.
+    ghosts: [Option<Ghost>; 4],
     /// The spread the pages beneath show.
     shown: Option<Spread>,
     /// What each face is to wear, and what it wears now (indexed like `FACES`).
@@ -157,6 +192,43 @@ impl Book {
     fn wear(&mut self, face: Face, spread: &Spread, half: Half) {
         self.faces[face as usize] = Some((spread.clone(), half));
     }
+
+    /// Another reader's hand, as their machine tells it: `color` is their hero's.
+    pub fn remote_hand(&mut self, seat: u8, color: Color, at: [f32; 3], hold: Option<u16>) {
+        if let Some(slot) = self.ghosts.get_mut(seat as usize) {
+            let at = Vec3::from_array(at);
+            let speed = match slot {
+                Some(g) if g.quiet > 1e-3 && g.quiet < 0.5 => (at - g.at) / g.quiet,
+                _ => Vec3::ZERO,
+            };
+            *slot = Some(Ghost { at, speed, hold: hold.map(usize::from), color, quiet: 0.0 });
+        }
+    }
+
+    /// The leaf another reader holds tore there.
+    pub fn remote_tear(&mut self, edge: u16) {
+        if matches!(self.turn.as_ref().map(|t| &t.hand), Some(Hand::Remote(_)) | Some(Hand::Gone)) {
+            self.leaf.tear_edge(edge as usize);
+        }
+    }
+
+    /// Starts turning the leaf over to the next spread: the right-hand page shows that spread at
+    /// once, and the leaf wears this one's right side and the next one's left.
+    fn take_up(&mut self, hand: Hand) -> bool {
+        let (Some(next), Some(shown)) = (self.next.clone(), self.shown.clone()) else { return false };
+        // a torn leaf left lying on the page is taken up as it is, torn
+        if !(self.kept && self.leaf.side() > 0.5) {
+            self.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
+        }
+        self.kept = false;
+        // a leaf held on another machine tears there; here it only follows
+        self.leaf.tearing = !matches!(hand, Hand::Remote(_));
+        self.wear(Face::LeafFront, &shown, Half::Right);
+        self.wear(Face::LeafBack, &next, Half::Left);
+        self.wear(Face::Right, &next, Half::Right);
+        self.turn = Some(Turning { from: shown, to: next, committed: false, hand });
+        true
+    }
 }
 
 #[derive(Component)]
@@ -167,6 +239,9 @@ struct PageCamera;
 struct Cover;
 #[derive(Component)]
 struct LeafMesh;
+/// The wisp showing another reader's hand, by their seat.
+#[derive(Component)]
+struct GhostHand(u8);
 #[derive(Component)]
 struct Candle {
     base: f32,
@@ -367,6 +442,20 @@ fn setup(
         Transform::from_translation(candle_at + Vec3::Y * 0.66),
     ));
 
+    // the other readers' hands: a pale wisp each, in their hero's colour, hidden till heard of
+    let wisp = meshes.add(Rectangle::new(0.14, 0.14));
+    for seat in 0..4 {
+        let glow = materials.add(StandardMaterial {
+            base_color_texture: art.image(&assets, "book/flame"),
+            unlit: true,
+            alpha_mode: AlphaMode::Add,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        });
+        commands.spawn((GhostHand(seat), Mesh3d(wisp.clone()), MeshMaterial3d(glow), Transform::default(), Visibility::Hidden, bevy::light::NotShadowCaster));
+    }
+
     // the painters: one camera and one UI tree per face of paper
     for (face, tex) in FACES.into_iter().zip(textures) {
         let cam = commands
@@ -381,6 +470,9 @@ fn setup(
         spread: Spread::default(),
         next: None,
         drag_ok: false,
+        shared: false,
+        news: Vec::new(),
+        ghosts: Default::default(),
         shown: None,
         faces: Default::default(),
         drawn: Default::default(),
@@ -493,6 +585,8 @@ fn hold_leaf(
     mut book: ResMut<Book>,
     pointers: Query<(&PointerId, &PointerLocation, &PointerPressState)>,
     mut was_down: Local<bool>,
+    mut since_told: Local<f32>,
+    time: Res<Time>,
     window: Single<&Window>,
     scale: Res<UiScale>,
     camera: Query<(&Camera, &GlobalTransform), With<BookCamera>>,
@@ -508,39 +602,47 @@ fn hold_leaf(
     let pressed = down && !*was_down;
     *was_down = down;
     let book = &mut *book;
+    // over a page read together the others see where the hand is, a few times a second
+    *since_told += time.delta_secs();
+    let mut tell = |book: &mut Book, at: Vec3, hold: Option<usize>, now: bool| {
+        if book.shared && (now || *since_told >= 1.0 / HAND_RATE) {
+            *since_told = 0.0;
+            book.news.push(HandNews::Hand { at: at.to_array(), hold: hold.map(|p| p as u16) });
+        }
+    };
     // take hold: only of a page lying still, with a page after it to uncover
     if pressed && book.turn.is_none() && book.drag_ok && book.open >= 1.0 {
-        let (Some(c), Some(next), Some(shown)) = (cursor, book.next.clone(), book.shown.clone()) else { return };
+        let Some(c) = cursor else { return };
         if c.y > crate::STAGE_H - BUTTON_BAND {
             return;
         }
         let Some(hit) = cursor_on(camera, at, c, LEAF_FLOOR.right) else { return };
-        if !(GUTTER..GUTTER + PAGE_W).contains(&hit.x) || hit.z.abs() > PAGE_H / 2.0 {
+        if !(GUTTER..GUTTER + PAGE_W).contains(&hit.x) || hit.z.abs() > PAGE_H / 2.0 || !book.take_up(Hand::Reader) {
             return;
         }
-        // a torn leaf left lying on the page is taken up as it is, torn
-        if !(book.kept && book.leaf.side() > 0.5) {
-            book.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
-        }
-        book.kept = false;
         let point = book.leaf.nearest(hit);
         book.leaf.grab = Some((point, book.leaf.points[point]));
-        book.wear(Face::LeafFront, &shown, Half::Right);
-        book.wear(Face::LeafBack, &next, Half::Left);
-        book.wear(Face::Right, &next, Half::Right);
-        book.turn = Some(Turning { from: shown, to: next, committed: false, hand: Hand::Reader });
+        tell(book, hit, Some(point), true);
         play(&mut commands, &art, &assets, &mixer, "book_rustle");
         return;
     }
-    let Some(turn) = book.turn.as_mut() else { return };
-    if !matches!(turn.hand, Hand::Reader) {
+    let holding = matches!(book.turn.as_ref().map(|t| &t.hand), Some(Hand::Reader));
+    if !holding {
+        // an empty hand hovering over the book
+        if let Some(hit) = cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right)) {
+            tell(book, hit, None, false);
+        }
         return;
     }
     if !down {
         // let go: past the spine the leaf is turned, and the story reads on
-        turn.hand = Hand::Gone;
+        let hand = book.leaf.grab.map(|(_, h)| h).unwrap_or_default();
+        tell(book, hand, None, true);
         book.leaf.grab = None;
-        if book.leaf.side() < 0.15 {
+        let over = book.leaf.side() < 0.15;
+        let Some(turn) = book.turn.as_mut() else { return };
+        turn.hand = Hand::Gone;
+        if over {
             turn.committed = true;
             turned.write(Turned);
             play(&mut commands, &art, &assets, &mixer, "book_flip");
@@ -564,7 +666,104 @@ fn hold_leaf(
     let out = Vec2::new(hit.x, hit.z - rest_z);
     let beyond = (out.length() - reach).max(0.0);
     let pull = out.normalize_or_zero() * beyond * PULL;
-    book.leaf.grab = Some((point, Vec3::new(x + pull.x, y, z + pull.y)));
+    let hand = Vec3::new(x + pull.x, y, z + pull.y);
+    book.leaf.grab = Some((point, hand));
+    tell(book, hand, Some(point), false);
+}
+
+/// Dev: `TROPA_GHOST=1` plays a second reader, as their machine would tell of them: a hand that
+/// hovers over the book, takes hold of the page's corner and carries it over, then lets go.
+#[cfg(feature = "dev")]
+fn dev_ghost(time: Res<Time>, mut book: ResMut<Book>, mut since: Local<f32>, mut told: Local<f32>) {
+    if std::env::var("TROPA_GHOST").is_err() || !book.wanted {
+        return;
+    }
+    *since += time.delta_secs();
+    *told += time.delta_secs();
+    // their machine speaks a few times a second, not every frame
+    if *told < 1.0 / HAND_RATE {
+        return;
+    }
+    *told = 0.0;
+    let t = *since - 2.0;
+    let corner = leaf::at(NX - 1, NZ - 4) as u16;
+    let z = PAGE_H * ((NZ - 4) as f32 / (NZ - 1) as f32 - 0.5);
+    let color = Color::srgb(0.35, 0.6, 0.95);
+    if t < 0.0 {
+        book.remote_hand(1, color, [1.2 + t * 0.2, LEAF_FLOOR.right, z + 0.2], None);
+    } else if t < 1.4 {
+        let a = PI * (t / 1.4).min(1.0);
+        book.remote_hand(1, color, [a.cos(), LEAF_FLOOR.right + a.sin() * 0.6, z], Some(corner));
+    } else if t < 3.0 {
+        book.remote_hand(1, color, [-0.9, LEAF_FLOOR.left + 0.15, z], None);
+    }
+}
+
+/// The other readers' hands: one that takes hold of the page turns the leaf here as there, and
+/// each is shown as a wisp in its hero's colour where it hovers.
+fn follow_ghosts(
+    time: Res<Time>,
+    mut book: ResMut<Book>,
+    mut wisps: Query<(&GhostHand, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    camera: Query<&Transform, (With<BookCamera>, Without<GhostHand>)>,
+) {
+    let book = &mut *book;
+    let dt = time.delta_secs();
+    for ghost in book.ghosts.iter_mut() {
+        if let Some(g) = ghost {
+            g.quiet += dt;
+            if g.quiet > GHOST_LINGER || !book.wanted {
+                *ghost = None;
+            }
+        }
+    }
+    // another reader takes hold of the page lying still
+    if book.turn.is_none() && book.open >= 1.0 {
+        let holder = book.ghosts.iter().enumerate().find_map(|(seat, g)| g.as_ref().and_then(|g| g.hold.map(|p| (seat as u8, p, g.at))));
+        if let Some((seat, point, at)) = holder {
+            if book.take_up(Hand::Remote(seat)) && point < book.leaf.points.len() {
+                book.leaf.grab = Some((point, at));
+            }
+        }
+    }
+    // and carries it, smoothly between the few times a second their machine tells of it
+    if let Some(Turning { hand: Hand::Remote(seat), .. }) = book.turn.as_ref() {
+        let seat = *seat as usize;
+        match book.ghosts[seat].as_ref().and_then(|g| g.hold.map(|p| (p, g.at + g.speed * g.quiet.min(2.0 / HAND_RATE)))) {
+            Some((point, at)) if point < book.leaf.points.len() => {
+                let from = book.leaf.grab.map(|(_, h)| h).unwrap_or(at);
+                book.leaf.grab = Some((point, from.lerp(at, (dt * 20.0).min(1.0))));
+            }
+            _ => {
+                book.leaf.grab = None;
+                if let Some(turn) = book.turn.as_mut() {
+                    turn.hand = Hand::Gone;
+                }
+            }
+        }
+    }
+    let Ok(cam) = camera.single() else { return };
+    for (wisp, mut tf, mut vis, material) in &mut wisps {
+        let ghost = book.ghosts[wisp.0 as usize].as_ref();
+        let want = if ghost.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
+        let Some(g) = ghost else { continue };
+        let to = cam.translation - g.at;
+        tf.translation = tf.translation.lerp(g.at + Vec3::Y * 0.03, (dt * 12.0).min(1.0));
+        tf.rotation = Quat::from_rotation_y(to.x.atan2(to.z)) * Quat::from_rotation_x(-0.5);
+        // a hand that holds the paper burns brighter, and fades as it falls quiet
+        let strength = if g.hold.is_some() { 1.6 } else { 1.0 } * (1.0 - g.quiet / GHOST_LINGER).max(0.0);
+        tf.scale = Vec3::splat(if g.hold.is_some() { 1.3 } else { 1.0 });
+        if let Some(mut m) = materials.get_mut(&material.0) {
+            let tint = (g.color.to_linear() * strength).with_alpha(1.0);
+            if m.base_color != Color::from(tint) {
+                m.base_color = tint.into();
+            }
+        }
+    }
 }
 
 /// Runs the leaf's paper, moves the unseen hand, and lays the leaf down when it comes to rest.
@@ -603,6 +802,11 @@ fn move_leaf(
     }
     let (cuts, lost) = (book.leaf.cuts(), book.leaf.lost());
     book.leaf.step(dt);
+    // a leaf torn here is torn the same way on the others' machines
+    let fresh = book.leaf.take_fresh();
+    if book.shared && book.leaf.tearing {
+        book.news.extend(fresh.into_iter().map(|e| HandNews::Tear(e as u16)));
+    }
     // the sound of a tear: a rip as it runs, a long one when a great piece comes away
     *heard_tear -= dt;
     if book.leaf.cuts() > cuts && *heard_tear <= 0.0 {

@@ -73,6 +73,11 @@ pub struct Leaf {
     links: Vec<Link>,
     /// The point a hand holds, and where the hand is.
     pub grab: Option<(usize, Vec3)>,
+    /// Does the paper tear of itself when pulled too far? Not when another reader's machine
+    /// holds the leaf: then its tears come from there, edge by edge, in their order.
+    pub tearing: bool,
+    /// Edges torn since last asked, in order.
+    fresh: Vec<usize>,
     gap: f32,
     width: f32,
     height: f32,
@@ -111,6 +116,8 @@ impl Leaf {
             cut: vec![false; EDGES],
             links: Vec::new(),
             grab: None,
+            tearing: true,
+            fresh: Vec::new(),
             gap,
             width,
             height,
@@ -266,6 +273,7 @@ impl Leaf {
     /// Tears an edge and splits the points at its ends where the paper round them has parted.
     fn tear(&mut self, e: usize) {
         self.cut[e] = true;
+        self.fresh.push(e);
         for (i, j) in Self::ends(e) {
             self.split(i, j);
         }
@@ -402,7 +410,7 @@ impl Leaf {
                 Some((s, best))
             })
             .collect();
-        if !strained.is_empty() {
+        if self.tearing && !strained.is_empty() {
             strained.sort_by(|a, b| b.0.total_cmp(&a.0));
             for (_, e) in strained.into_iter().take(TEARS_PER_STEP) {
                 if !self.cut[e] {
@@ -417,6 +425,19 @@ impl Leaf {
     pub fn lost(&self) -> f32 {
         let held = self.held();
         1.0 - held.iter().filter(|h| **h).count() as f32 / held.len() as f32
+    }
+
+    /// Tears an edge torn on another machine. The same edges torn in the same order give the
+    /// same particles, so a hand there and here holds the same point.
+    pub fn tear_edge(&mut self, e: usize) {
+        if e < EDGES && !self.cut[e] {
+            self.tear(e);
+        }
+    }
+
+    /// The edges torn since the last call, in the order they tore.
+    pub fn take_fresh(&mut self) -> Vec<usize> {
+        std::mem::take(&mut self.fresh)
     }
 
     /// Has any of the leaf been torn?
@@ -484,7 +505,8 @@ impl Leaf {
         let mut out = vec![Vec3::ZERO; self.points.len()];
         for c in &self.cells {
             let [hs, he, fs, fe] = c.map(|p| self.points[p]);
-            let n = (fs - hs).cross(he - hs) + (fe - he).cross(fs - he);
+            // across the cell's diagonals: up while the leaf lies flat on the right
+            let n = (fe - hs).cross(he - fs);
             for p in c {
                 out[*p] += n;
             }
@@ -567,6 +589,32 @@ mod tests {
         assert!(lost > 0.0 && lost < 0.6, "lost {lost}");
         // the torn piece is loose: some of the paper now lies on the table
         assert!(l.points.iter().any(|p| p.y < 0.01), "nothing fell to the table");
+    }
+
+    #[test]
+    fn tears_replayed_elsewhere_give_the_same_paper() {
+        let mut here = leaf();
+        let corner = at(NX - 1, NZ - 1);
+        let from = here.points[corner];
+        for k in 1..=40 {
+            here.grab = Some((corner, from + Vec3::new(0.12, 0.05, 0.12) * k.min(8) as f32));
+            here.step(1.0 / 60.0);
+        }
+        let torn = here.take_fresh();
+        assert!(!torn.is_empty());
+        let mut there = leaf();
+        there.tearing = false;
+        for e in &torn {
+            there.tear_edge(*e);
+        }
+        assert_eq!(here.points.len(), there.points.len());
+        assert_eq!(here.cells, there.cells);
+    }
+
+    #[test]
+    fn a_flat_leaf_faces_up() {
+        let l = leaf();
+        assert!(l.normals().iter().all(|n| n.distance(Vec3::Y) < 1e-4));
     }
 
     #[test]

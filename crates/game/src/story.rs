@@ -21,6 +21,7 @@ use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
 use nav_core::{CardType, Run, Stage};
+use nav_net::Note;
 use std::collections::{HashMap, VecDeque};
 
 /// Every ending there is, in the order the chronicle lists them.
@@ -30,7 +31,7 @@ pub const ENDINGS: [&str; 8] = ["fall_forest", "fall_village", "fall_nav", "fall
 const THRONE_CURSES: usize = 3;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page, want_book).chain());
+    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page, want_book, book_hands).chain());
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
 }
@@ -217,6 +218,11 @@ fn page_button(label: String, fonts: &Fonts) -> impl Bundle {
 enum Turn {
     Next,
     Skip,
+    /// The reader turned the leaf by hand. A page read together turns for everyone at once,
+    /// with no vote: whoever turns the leaf turns it for all.
+    Leaf,
+    /// Another reader turned the leaf by hand.
+    TheirLeaf,
 }
 
 fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res<Tale>, mut turned: MessageReader<crate::book::Turned>, mut torn: MessageReader<crate::book::Torn>) {
@@ -229,7 +235,9 @@ fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res
         return;
     }
     // the reader turned the leaf by hand
-    if turned.read().count() > 0 || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
+    if turned.read().count() > 0 {
+        commands.trigger(Turn::Leaf);
+    } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
         commands.trigger(Turn::Skip);
@@ -238,10 +246,18 @@ fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res
 
 fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, net: Option<ResMut<Net>>, speaking: Query<Entity, With<Narration>>) {
     let skip = matches!(*turn, Turn::Skip);
-    // in a party the button is a vote; the page turns once everyone has voted
+    let by_hand = matches!(*turn, Turn::Leaf | Turn::TheirLeaf);
     if let (Some(mut net), Some(page)) = (net, tale.pages.front()) {
-        if shared(&net, page) {
-            let key = page.text.clone();
+        let together = shared(&net, page);
+        let key = page.text.clone();
+        // a leaf turned by hand turns for all, with no vote; the others are told
+        if by_hand {
+            if together && matches!(*turn, Turn::Leaf) {
+                net.node.book_turn(&key);
+            }
+            tale.votes.remove(&key);
+        } else if together {
+            // in a party the button is a vote; the page turns once everyone has voted
             net.node.story_vote(&key, skip);
             return;
         }
@@ -301,6 +317,36 @@ fn tally_votes(
     let key = page.text.clone();
     tale.votes.remove(&key);
     advance(&mut commands, &mut tale, &speaking, skip);
+}
+
+/// Carries the hands over a page read together: this reader's out to the others, theirs into
+/// the book, and a leaf they turned by hand turns the page here.
+fn book_hands(mut commands: Commands, tale: Res<Tale>, net: Option<ResMut<Net>>, status: Option<ResMut<NetStatus>>, mut book: ResMut<crate::book::Book>) {
+    use crate::book::HandNews;
+    let news = std::mem::take(&mut book.news);
+    let (Some(mut net), Some(mut status)) = (net, status) else { return };
+    let notes = std::mem::take(&mut status.book);
+    let Some(page) = tale.pages.front().map(|p| p.text.clone()) else { return };
+    for n in news {
+        match n {
+            HandNews::Hand { at, hold } => net.node.book_hand(&page, at, hold),
+            HandNews::Tear(edge) => net.node.book_tear(&page, edge),
+        }
+    }
+    let colour = |seat: u8| {
+        net.node.state.as_ref().and_then(|run| run.players.get(seat as usize)).map(|p| theme::hero_color(&p.hero)).unwrap_or(theme::BONE)
+    };
+    for n in notes {
+        match n {
+            Note::BookHand { from, page: p, at, hold } if p == page => {
+                let c = colour(from);
+                book.remote_hand(from, c, at, hold);
+            }
+            Note::BookTear { page: p, edge, .. } if p == page => book.remote_tear(edge),
+            Note::BookTurn { page: p, .. } if p == page => commands.trigger(Turn::TheirLeaf),
+            _ => {}
+        }
+    }
 }
 
 /// The book lies on the table while there is a tale to read.
@@ -367,7 +413,8 @@ fn show_page(
     };
     book.spread = spread(page, at);
     book.next = tale.pages.get(1).map(|p| spread(p, at + 1));
-    book.drag_ok = !together;
+    book.drag_ok = true;
+    book.shared = together;
     commands.spawn((
         Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
         ImageNode::new(book.view.clone()),

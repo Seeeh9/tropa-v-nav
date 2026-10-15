@@ -90,6 +90,13 @@ pub enum Msg {
     Ping { kind: u8, at: UnitRef },
     /// Everyone: my vote on the story page `page` (its text key): read on, or skip the scene.
     StoryVote { page: String, skip: bool },
+    /// Everyone: my hand over the book while `page` is read together: where it is in the scene,
+    /// and which point of the leaf it holds, if it holds the leaf.
+    BookHand { page: String, at: [f32; 3], hold: Option<u16> },
+    /// Everyone: the leaf I hold on `page` tore along this edge of its grid.
+    BookTear { page: String, edge: u16 },
+    /// Everyone: I have turned the leaf of `page` over; read on.
+    BookTurn { page: String },
 }
 
 impl Msg {
@@ -121,6 +128,10 @@ pub enum Note {
     Ping { from: u8, kind: u8, at: UnitRef },
     /// A player voted on a story page, this player included.
     StoryVote { from: u8, page: String, skip: bool },
+    /// Another player's hand over the book, the leaf they tore, the leaf they turned.
+    BookHand { from: u8, page: String, at: [f32; 3], hold: Option<u16> },
+    BookTear { from: u8, page: String, edge: u16 },
+    BookTurn { from: u8, page: String },
     HostChanged,
 }
 
@@ -366,6 +377,21 @@ impl Node {
         }
     }
 
+    /// Shows the others my hand over the book of the page read together.
+    pub fn book_hand(&mut self, page: &str, at: [f32; 3], hold: Option<u16>) {
+        self.out.push((To::All, Msg::BookHand { page: page.into(), at, hold }));
+    }
+
+    /// Tells the others the leaf I hold tore along `edge`.
+    pub fn book_tear(&mut self, page: &str, edge: u16) {
+        self.out.push((To::All, Msg::BookTear { page: page.into(), edge }));
+    }
+
+    /// Tells the others I turned the leaf of `page`: everyone reads on.
+    pub fn book_turn(&mut self, page: &str) {
+        self.out.push((To::All, Msg::BookTurn { page: page.into() }));
+    }
+
     // ---- membership ----
 
     /// The transport saw this peer leave the lobby.
@@ -453,6 +479,21 @@ impl Node {
             Msg::StoryVote { page, skip } => {
                 if let Some(slot) = self.lobby.slot_of(from) {
                     self.notes.push(Note::StoryVote { from: slot, page, skip });
+                }
+            }
+            Msg::BookHand { page, at, hold } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::BookHand { from: slot, page, at, hold });
+                }
+            }
+            Msg::BookTear { page, edge } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::BookTear { from: slot, page, edge });
+                }
+            }
+            Msg::BookTurn { page } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::BookTurn { from: slot, page });
                 }
             }
 

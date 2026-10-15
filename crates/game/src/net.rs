@@ -66,6 +66,8 @@ pub struct NetStatus {
     pub pings: Vec<(u8, u8, nav_core::UnitRef)>,
     /// Story votes not yet counted: `(player slot, page text key, skip)`.
     pub story_votes: Vec<(u8, String, bool)>,
+    /// Other players' hands on the book, tears and turns, not yet shown (`Note::Book*`).
+    pub book: Vec<Note>,
 }
 
 enum SteamEv {
@@ -516,6 +518,7 @@ fn notes(
             }
             Note::Ping { from, kind, at } => status.pings.push((from, kind, at)),
             Note::StoryVote { from, page, skip } => status.story_votes.push((from, page, skip)),
+            note @ (Note::BookHand { .. } | Note::BookTear { .. } | Note::BookTurn { .. }) => status.book.push(note),
         }
     }
 }

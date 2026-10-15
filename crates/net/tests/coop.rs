@@ -162,6 +162,27 @@ fn illegal_action_is_refused_and_changes_nothing() {
 }
 
 #[test]
+fn a_hand_on_the_book_reaches_the_others() {
+    let c = content();
+    let mut hub = party(&c, 3, 4);
+    for n in 1..=3 {
+        hub.node(n).take_notes();
+    }
+    hub.node(2).book_hand("story-pro_1", [0.5, 0.3, 0.1], Some(31));
+    hub.node(2).book_tear("story-pro_1", 77);
+    hub.node(2).book_turn("story-pro_1");
+    hub.pump(&c);
+    for n in [1, 3] {
+        let notes = hub.node(n).take_notes();
+        assert!(notes.contains(&Note::BookHand { from: 1, page: "story-pro_1".into(), at: [0.5, 0.3, 0.1], hold: Some(31) }), "{notes:?}");
+        assert!(notes.contains(&Note::BookTear { from: 1, page: "story-pro_1".into(), edge: 77 }));
+        assert!(notes.contains(&Note::BookTurn { from: 1, page: "story-pro_1".into() }));
+    }
+    // the reader's own hand is not shown back to them
+    assert!(!hub.node(2).take_notes().iter().any(|n| matches!(n, Note::BookHand { .. })));
+}
+
+#[test]
 fn a_cheating_client_cannot_act_for_someone_else() {
     let c = content();
     let mut hub = party(&c, 2, 9);

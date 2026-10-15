@@ -7,6 +7,8 @@ use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use nav_core::*;
 use std::path::Path;
 
+mod old_spelling;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Lang {
     /// Russian told the old way: the tale's own voice, and the default for Russian speakers.
@@ -103,7 +105,13 @@ impl L10n {
             fa.set(*k, v.clone());
         }
         let mut errs = vec![];
-        self.bundle.format_pattern(pattern, Some(&fa), &mut errs).into_owned()
+        let text = self.bundle.format_pattern(pattern, Some(&fa), &mut errs);
+        // the old speech is printed as the old books printed it, whatever its source wrote
+        if self.lang == Lang::Old {
+            old_spelling::convert(&text)
+        } else {
+            text.into_owned()
+        }
     }
 
     pub fn n(&self, key: &str, n: i32) -> String {

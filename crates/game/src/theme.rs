@@ -36,7 +36,7 @@ pub struct Fonts {
 
 pub fn load_fonts(mut commands: Commands, assets: Res<AssetServer>) {
     commands.insert_resource(Fonts {
-        title: assets.load("fonts/RuslanDisplay-Regular.ttf"),
+        title: assets.load("fonts/NavDisplay-Regular.ttf"),
         body: assets.load("fonts/PT_Serif-Web-Regular.ttf"),
         num: assets.load("fonts/AlegreyaSC-Bold.ttf"),
     });

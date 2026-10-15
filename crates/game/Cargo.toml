@@ -10,7 +10,7 @@ dev = []
 [dependencies]
 nav_core = { path = "../core" }
 nav_net = { path = "../net" }
-bevy = { version = "0.20", default-features = false, features = ["2d", "ui", "audio", "wav", "vorbis", "png"] }
+bevy = { version = "0.20", default-features = false, features = ["2d", "3d", "ui", "audio", "wav", "vorbis", "png"] }
 steamworks = "0.13"
 serde.workspace = true
 ron.workspace = true

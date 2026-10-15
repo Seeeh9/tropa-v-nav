@@ -3,6 +3,7 @@
 mod art;
 mod audio;
 mod battle;
+mod book;
 #[cfg(feature = "dev")]
 mod dev;
 mod l10n;
@@ -113,7 +114,7 @@ fn main() {
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(PostStartup, menu::apply_settings)
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);

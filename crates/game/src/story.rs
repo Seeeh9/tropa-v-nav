@@ -30,7 +30,7 @@ pub const ENDINGS: [&str; 8] = ["fall_forest", "fall_village", "fall_nav", "fall
 const THRONE_CURSES: usize = 3;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page).chain());
+    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page, want_book).chain());
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
 }
@@ -297,6 +297,13 @@ fn tally_votes(
     advance(&mut commands, &mut tale, &speaking, skip);
 }
 
+/// The book lies on the table while there is a tale to read.
+fn want_book(tale: Res<Tale>, mut book: ResMut<crate::book::Book>) {
+    if book.wanted != tale.open() {
+        book.wanted = tale.open();
+    }
+}
+
 fn show_page(
     mut commands: Commands,
     mut tale: ResMut<Tale>,
@@ -309,6 +316,7 @@ fn show_page(
     mixer: Res<Mixer>,
     profile: Res<Profile>,
     net: Option<Res<Net>>,
+    mut book: ResMut<crate::book::Book>,
 ) {
     if !*hooked {
         *hooked = true;
@@ -343,24 +351,19 @@ fn show_page(
             ChildOf(*canvas),
         ))
         .id();
+    // the book on the table, rendered in 3D; the page's painting and text are printed in it
+    book.spread = crate::book::Spread {
+        picture: page.picture.clone(),
+        title: page.title.as_ref().map(|t| l10n.t(t)),
+        text: l10n.t(&page.text),
+        numbers: (at as u32 * 2, at as u32 * 2 + 1),
+    };
     commands.spawn((
         Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
-        art.node(&assets, &page.picture, theme::SOOT),
+        ImageNode::new(book.view.clone()),
         Pickable::IGNORE,
         ChildOf(root),
     ));
-    if let Some(title) = &page.title {
-        commands.spawn((
-            Node { position_type: PositionType::Absolute, left: px(0), top: px(48), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
-            Pickable::IGNORE,
-            ChildOf(root),
-            children![(
-                Node { padding: UiRect::axes(px(40), px(10)), ..default() },
-                BackgroundColor(theme::SOOT.with_alpha(0.78)),
-                children![theme::text(l10n.t(title), &fonts.title, 60.0, theme::CANDLE)],
-            )],
-        ));
-    }
     // the text sits on a dark band along the bottom, like a caption under a painting
     commands.spawn((
         Node {
@@ -368,18 +371,14 @@ fn show_page(
             left: px(0),
             bottom: px(0),
             width: px(STAGE_W),
-            padding: UiRect::new(px(150), px(150), px(34), px(30)),
+            padding: UiRect::new(px(150), px(150), px(18), px(22)),
             flex_direction: FlexDirection::Column,
-            row_gap: px(22),
-            border: UiRect::top(px(3)),
             ..default()
         },
-        BackgroundColor(theme::SOOT.with_alpha(0.88)),
-        BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+        BackgroundColor(theme::SOOT.with_alpha(0.55)),
         Pickable::IGNORE,
         ChildOf(root),
         children![
-            (theme::text(l10n.t(&page.text), &fonts.body, 34.0, theme::BONE), Node { width: px(STAGE_W - 300.0), ..default() }),
             (
                 Node { width: px(STAGE_W - 300.0), justify_content: JustifyContent::SpaceBetween, align_items: AlignItems::Center, ..default() },
                 Pickable::IGNORE,

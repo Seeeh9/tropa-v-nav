@@ -70,11 +70,13 @@ pub fn plugin(app: &mut App) {
 #[derive(Message)]
 pub struct Turned;
 
-/// Sent when a torn leaf has come to rest: `lost` is the share of it no longer held at the spine.
-/// What a torn page costs the reader is the run's business.
+/// Sent when a torn leaf has come to rest having lost more paper: `lost` is the share of the
+/// leaf newly cut loose from the spine, and `mine` says this reader's hand held it, so the cost
+/// is theirs. A leaf torn in another reader's hands tears here too, but costs them, not us.
 #[derive(Message)]
 pub struct Torn {
     pub lost: f32,
+    pub mine: bool,
 }
 
 /// What the open spread shows.
@@ -155,6 +157,8 @@ struct Turning {
     /// Seconds since the leaf was let go: paper caught on the edge of the book may never quite
     /// come to rest, so after a while it is taken as lying where it lies.
     loose: f32,
+    /// This reader's hand held the leaf on this turn.
+    mine: bool,
 }
 
 /// How long a let-go leaf may keep stirring before it is taken as come to rest, in seconds.
@@ -187,6 +191,8 @@ pub struct Book {
     leaf: Leaf,
     /// A torn leaf lies where it came to rest, in place of a whole page.
     kept: bool,
+    /// Share of the leaf whose loss has been paid for.
+    charged: f32,
     /// Torn leaves set aside for a fresh one, with what their two faces wear: they stay in the
     /// scene as scraps (`keep_scraps`).
     scraps_out: Vec<(Leaf, (Spread, Half), (Spread, Half))>,
@@ -211,6 +217,7 @@ impl Book {
         let reuse = self.kept && self.leaf.side() > 0.5;
         if !reuse {
             let old = std::mem::replace(&mut self.leaf, Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR));
+            self.charged = 0.0;
             // torn paper, at rest or still falling, is never just gone
             if old.torn() {
                 let faces = (self.faces[Face::LeafFront as usize].clone(), self.faces[Face::LeafBack as usize].clone());
@@ -251,7 +258,8 @@ impl Book {
         self.wear(Face::LeafFront, &shown, Half::Right);
         self.wear(Face::LeafBack, &next, Half::Left);
         self.wear(Face::Right, &next, Half::Right);
-        self.turn = Some(Turning { from: shown, to: next, committed: false, hand, loose: 0.0 });
+        let mine = matches!(hand, Hand::Reader);
+        self.turn = Some(Turning { from: shown, to: next, committed: false, hand, loose: 0.0, mine });
         true
     }
 }
@@ -609,6 +617,7 @@ fn setup(
         turn: None,
         leaf,
         kept: false,
+        charged: 0.0,
         scraps_out: Vec::new(),
         leaf_meshes: (front, back),
         fringe,
@@ -685,7 +694,7 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
             book.wear(Face::LeafFront, &from, Half::Right);
             book.wear(Face::LeafBack, &spread, Half::Left);
             book.wear(Face::Right, &spread, Half::Right);
-            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0 });
+            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false });
             play(&mut commands, &art, &assets, &mixer, "book_flip");
         }
         _ => {
@@ -958,11 +967,16 @@ fn move_leaf(
     }
     // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned;
     // a torn leaf stays as it lies, holes and loose pieces and all, over the page beneath
-    let (from, to, committed) = (turn.from.clone(), turn.to.clone(), turn.committed);
+    let (from, to, committed, turn_mine) = (turn.from.clone(), turn.to.clone(), turn.committed, turn.mine);
     book.turn = None;
     if book.leaf.torn() {
         book.kept = true;
-        torn.write(Torn { lost: book.leaf.lost() });
+        // only paper newly cut loose costs: a leaf taken up torn again has paid for its old holes
+        let lost = book.leaf.lost();
+        if lost - book.charged > 0.005 {
+            torn.write(Torn { lost: lost - book.charged, mine: turn_mine });
+            book.charged = lost;
+        }
     } else if committed && book.leaf.side() < 0.0 {
         book.wear(Face::Left, &to, Half::Left);
     } else {

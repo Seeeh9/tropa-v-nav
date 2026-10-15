@@ -36,6 +36,9 @@
         in_hand_end: [Apply(Strength, N(1), AllFoes)]),
     (id: "orphanhood", kind: Curse, rarity: Special, keywords: [Unplayable],
         in_hand_end: [Flag("draw_less", 1)]),
+    // Порча книги: кто вырвал кусок сказки, у того вырвано из себя
+    (id: "book_spoil", kind: Curse, rarity: Special, keywords: [Unplayable],
+        in_hand_end: [LoseHp(N(2), Me)]),
 
     // ---- ещё шесть статус-карт: их подбрасывают враги ----
     (id: "burn", kind: Status, rarity: Special, keywords: [Unplayable],

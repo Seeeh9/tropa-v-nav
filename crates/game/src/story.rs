@@ -20,7 +20,7 @@ use bevy::audio::Volume;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
-use nav_core::{CardType, Run, Stage};
+use nav_core::{CardType, Run, RunAction, Stage};
 use nav_net::Note;
 use std::collections::{HashMap, VecDeque};
 
@@ -225,10 +225,21 @@ enum Turn {
     TheirLeaf,
 }
 
-fn turn_pages(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, tale: Res<Tale>, mut turned: MessageReader<crate::book::Turned>, mut torn: MessageReader<crate::book::Torn>) {
-    // what a torn page costs (the curse «Порча книги») waits on its design; for now it is noted
+fn turn_pages(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    tale: Res<Tale>,
+    mut turned: MessageReader<crate::book::Turned>,
+    mut torn: MessageReader<crate::book::Torn>,
+    mut run_outbox: ResMut<crate::session::RunOutbox>,
+) {
+    // what is torn from the tale is torn from the one who held it: the curse «Порча книги»,
+    // and max HP for a great piece (the run decides, see `RunAction::TearPage`)
     for t in torn.read() {
-        info!("a page of the tale was torn: {:.0}% of the leaf lost", t.lost * 100.0);
+        if t.mine {
+            let lost = (t.lost * 100.0).ceil().clamp(1.0, 100.0) as u8;
+            run_outbox.0.push(RunAction::TearPage { lost });
+        }
     }
     if !tale.open() {
         turned.clear();

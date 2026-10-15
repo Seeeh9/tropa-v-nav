@@ -173,7 +173,17 @@ pub enum RunAction {
     Choose(u8),
     /// Throw away a potion to free the slot.
     DropPotion(u8),
+    /// The player tore a page of the tale's book, losing this share of the leaf (percent).
+    /// Whatever is torn from the tale is torn from the one who held it.
+    TearPage { lost: u8 },
 }
+
+/// The curse a torn page of the tale lays on whoever tore it.
+pub const BOOK_SPOIL: &str = "book_spoil";
+/// A tear that takes more than this share of the leaf (percent) also costs max HP...
+pub const BIG_TEAR: u8 = 25;
+/// ...this much of it, for the rest of the run.
+pub const BIG_TEAR_HP: i32 = 5;
 
 /// At a schism the party must part: when every other player has gone the same way,
 /// that way is closed to the last one. `None` alone, or while the others differ or still think.
@@ -721,6 +731,26 @@ impl Run {
                     return Err(RunError::BadChoice);
                 }
                 pl.potions.remove(*i as usize);
+            }
+            (RunAction::TearPage { lost }, _) => {
+                // the book is read between fights, never in one; a nick that frees no paper costs nothing
+                if self.stage == Stage::Combat {
+                    return Err(RunError::WrongStage);
+                }
+                if *lost == 0 || *lost > 100 {
+                    return Err(RunError::BadChoice);
+                }
+                let pl = &mut self.players[p];
+                pl.deck.push((BOOK_SPOIL.into(), false));
+                ev.push(RunEvent::CardGained { player, card: BOOK_SPOIL.into() });
+                if *lost > BIG_TEAR {
+                    pl.max_hp = (pl.max_hp - BIG_TEAR_HP).max(1);
+                    let delta = pl.hp.min(pl.max_hp) - pl.hp;
+                    pl.hp += delta;
+                    if delta != 0 {
+                        ev.push(RunEvent::Hp { player, delta });
+                    }
+                }
             }
             _ => return Err(RunError::WrongStage),
         }

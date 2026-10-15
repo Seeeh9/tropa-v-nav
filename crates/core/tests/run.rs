@@ -658,7 +658,7 @@ fn the_card_pool_matches_the_design_document() {
     let real: Vec<&CardDef> = c.cards.values().filter(|d| !d.id.starts_with("t_")).collect();
     let count = |f: &dyn Fn(&CardDef) -> bool| real.iter().filter(|d| f(d)).count();
     assert_eq!(count(&|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special), 30, "neutral");
-    assert_eq!(count(&|d| d.kind == CardType::Curse), 12, "curses");
+    assert_eq!(count(&|d| d.kind == CardType::Curse), 13, "curses");
     assert_eq!(count(&|d| d.kind == CardType::Status), 8, "statuses");
     assert_eq!(count(&|d| !d.hero.is_empty()), 480, "hero cards");
 }
@@ -777,4 +777,25 @@ fn report_first_boss() {
             left / lost
         );
     }
+}
+
+#[test]
+fn a_torn_page_curses_whoever_tore_it() {
+    let c = content();
+    let mut run = party(&c, 2, 7, 0);
+    let (hp, max) = (run.players[1].hp, run.players[1].max_hp);
+    // a small piece: the curse only
+    run.apply(&c, 1, &RunAction::TearPage { lost: 10 }).unwrap();
+    assert_eq!(run.players[1].deck.iter().filter(|(id, _)| id == BOOK_SPOIL).count(), 1);
+    assert_eq!(run.players[1].max_hp, max);
+    // a great piece: the curse and max HP for the rest of the run
+    run.apply(&c, 1, &RunAction::TearPage { lost: 60 }).unwrap();
+    assert_eq!(run.players[1].deck.iter().filter(|(id, _)| id == BOOK_SPOIL).count(), 2);
+    assert_eq!(run.players[1].max_hp, max - BIG_TEAR_HP);
+    assert!(run.players[1].hp <= run.players[1].max_hp && run.players[1].hp >= hp.min(max - BIG_TEAR_HP));
+    // the other reader is untouched, and a nick that frees nothing is no tear
+    assert!(!run.players[0].deck.iter().any(|(id, _)| id == BOOK_SPOIL));
+    assert_eq!(run.apply(&c, 0, &RunAction::TearPage { lost: 0 }), Err(RunError::BadChoice));
+    // and the curse is a real card of the game
+    assert!(c.cards.contains_key(BOOK_SPOIL));
 }

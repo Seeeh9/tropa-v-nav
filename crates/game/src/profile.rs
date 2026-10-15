@@ -69,6 +69,8 @@ pub struct Profile {
     pub last_ending: Option<String>,
     /// Endings reached, by id, and how many times.
     pub endings: BTreeMap<String, u32>,
+    /// Acts whose secret in the tale's book this player has ever peeled open (1..=4).
+    pub secrets: Vec<u8>,
     pub settings: Settings,
     #[serde(skip)]
     path: Option<PathBuf>,
@@ -109,6 +111,20 @@ impl Profile {
     /// Smithy, herbalist's hut and tavern levels: the pools a run hosted by this player draws on.
     pub fn village(&self) -> (u8, u8, u8) {
         (self.building("smithy").min(2), self.building("hut").min(2), self.building("tavern").min(2))
+    }
+
+    /// Relics of the tale's book whose secrets this player has found: in a run they host, they
+    /// turn up like any other relic.
+    pub fn secret_relics(&self) -> Vec<String> {
+        self.secrets.iter().filter_map(|a| nav_core::SECRET_RELICS.get(*a as usize - 1)).map(|r| r.to_string()).collect()
+    }
+
+    /// Notes a secret found; the chronicle counts them.
+    pub fn note_secret(&mut self, act: u8) {
+        if (1..=4).contains(&act) && !self.secrets.contains(&act) {
+            self.secrets.push(act);
+            self.secrets.sort();
+        }
     }
 
     /// Price of the next level of a building, or `None` when it is finished.

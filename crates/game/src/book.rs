@@ -48,6 +48,8 @@ const EYE: Vec3 = Vec3::new(0.0, 1.66, 1.02);
 const LOOK: Vec3 = Vec3::new(0.0, 0.0, 0.16);
 /// How long the unseen hand takes to carry a leaf over, in seconds.
 const AUTO_TURN: f32 = 0.9;
+/// Steps a second the leaf's paper is run at.
+const LEAF_RATE: f32 = 60.0;
 /// How often a reader's hand is told to the others, per second.
 const HAND_RATE: f32 = 20.0;
 /// How long another reader's hand stays in sight after their machine last told of it, seconds.
@@ -62,6 +64,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, dev_ghost.before(follow_ghosts));
     app.add_message::<Turned>()
         .add_message::<Torn>()
+        .add_message::<Found>()
         .add_systems(Startup, setup)
         .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, move_leaf, redraw_pages, keep_scraps).chain(), flicker, sway_camera, fit_pages));
 }
@@ -90,6 +93,22 @@ pub struct Spread {
     pub text: String,
     /// Page numbers printed at the foot of the two pages.
     pub numbers: (u32, u32),
+    /// The right-hand page is two leaves glued together, and between them lies this act's
+    /// secret spread: peeled apart slowly by hand it opens; turned by the story's button, the
+    /// glued pair turns over as one and the secret is never seen.
+    pub secret: Option<(u8, Box<Spread>)>,
+    /// This spread was glued shut: each page bears, mirrored and faint, ink torn from the other.
+    pub peeled: bool,
+}
+
+/// Sent when a reader has peeled a glued leaf apart and its secret spread lies open. `whole`
+/// says the leaf came away untorn (a torn one loses its secret); `mine`, that this reader's
+/// hand held it.
+#[derive(Message)]
+pub struct Found {
+    pub act: u8,
+    pub whole: bool,
+    pub mine: bool,
 }
 
 /// One side of a spread.
@@ -159,6 +178,8 @@ struct Turning {
     loose: f32,
     /// This reader's hand held the leaf on this turn.
     mine: bool,
+    /// The leaf is the top of a glued pair being peeled off its secret (that act's).
+    peel: Option<u8>,
 }
 
 /// How long a let-go leaf may keep stirring before it is taken as come to rest, in seconds.
@@ -184,6 +205,10 @@ pub struct Book {
     ghosts: [Option<Ghost>; 4],
     /// The spread the pages beneath show.
     shown: Option<Spread>,
+    /// The story's spread the book has last followed.
+    followed: Option<Spread>,
+    /// Acts whose glued secret has been peeled open while this book lies open.
+    opened: Vec<u8>,
     /// What each face is to wear, and what it wears now (indexed like `FACES`).
     faces: [Option<(Spread, Half)>; 4],
     drawn: [Option<(Spread, Half)>; 4],
@@ -193,6 +218,8 @@ pub struct Book {
     kept: bool,
     /// Share of the leaf whose loss has been paid for.
     charged: f32,
+    /// Time not yet run by the leaf's paper (see `LEAF_RATE`).
+    leaf_clock: f32,
     /// Torn leaves set aside for a fresh one, with what their two faces wear: they stay in the
     /// scene as scraps (`keep_scraps`).
     scraps_out: Vec<(Leaf, (Spread, Half), (Spread, Half))>,
@@ -251,15 +278,27 @@ impl Book {
     /// Starts turning the leaf over to the next spread: the right-hand page shows that spread at
     /// once, and the leaf wears this one's right side and the next one's left.
     fn take_up(&mut self, hand: Hand) -> bool {
-        let (Some(next), Some(shown)) = (self.next.clone(), self.shown.clone()) else { return false };
+        let Some(shown) = self.shown.clone() else { return false };
+        // a hand on a glued right-hand page lifts the top leaf off the secret beneath it
+        let peel = shown.secret.clone().filter(|(act, _)| !self.opened.contains(act));
+        let (to, peel) = match peel {
+            Some((act, secret)) => (*secret, Some(act)),
+            None => match self.next.clone() {
+                Some(next) => (next, None),
+                None => return false,
+            },
+        };
         self.fresh_leaf();
+        if peel.is_some() {
+            self.leaf.glue_down();
+        }
         // a leaf held on another machine tears there; here it only follows
         self.leaf.tearing = !matches!(hand, Hand::Remote(_));
         self.wear(Face::LeafFront, &shown, Half::Right);
-        self.wear(Face::LeafBack, &next, Half::Left);
-        self.wear(Face::Right, &next, Half::Right);
+        self.wear(Face::LeafBack, &to, Half::Left);
+        self.wear(Face::Right, &to, Half::Right);
         let mine = matches!(hand, Hand::Reader);
-        self.turn = Some(Turning { from: shown, to: next, committed: false, hand, loose: 0.0, mine });
+        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel });
         true
     }
 }
@@ -612,12 +651,15 @@ fn setup(
         news: Vec::new(),
         ghosts: Default::default(),
         shown: None,
+        followed: None,
+        opened: Vec::new(),
         faces: Default::default(),
         drawn: Default::default(),
         turn: None,
         leaf,
         kept: false,
         charged: 0.0,
+        leaf_clock: 0.0,
         scraps_out: Vec::new(),
         leaf_meshes: (front, back),
         fringe,
@@ -671,14 +713,19 @@ fn open_cover(
 fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, assets: Res<AssetServer>, mixer: Res<Mixer>) {
     if !book.wanted {
         book.shown = None;
+        book.followed = None;
         book.turn = None;
         book.kept = false;
+        book.opened.clear();
         return;
     }
+    // the story's page, not what lies open: a secret peeled open is the book's own, and the
+    // story knows nothing of it
     let spread = book.spread.clone();
-    if book.shown.as_ref() == Some(&spread) {
+    if book.followed.as_ref() == Some(&spread) {
         return;
     }
+    book.followed = Some(spread.clone());
     // the reader has carried the leaf over, and the story has read on to what it uncovered
     if let Some(turn) = book.turn.as_mut().filter(|t| t.to == spread) {
         turn.committed = true;
@@ -694,7 +741,7 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
             book.wear(Face::LeafFront, &from, Half::Right);
             book.wear(Face::LeafBack, &spread, Half::Left);
             book.wear(Face::Right, &spread, Half::Right);
-            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false });
+            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false, peel: None });
             play(&mut commands, &art, &assets, &mixer, "book_flip");
         }
         _ => {
@@ -756,7 +803,9 @@ fn hold_leaf(
         if !(GUTTER..GUTTER + PAGE_W).contains(&hit.x) || hit.z.abs() > PAGE_H / 2.0 || !book.take_up(Hand::Reader) {
             return;
         }
-        let point = book.leaf.nearest(hit);
+        // a glued leaf is taken by its border, to be peeled
+        let peeling = book.turn.as_ref().is_some_and(|t| t.peel.is_some());
+        let point = if peeling { book.leaf.nearest_border(hit) } else { book.leaf.nearest(hit) };
         book.leaf.grab = Some((point, book.leaf.points[point]));
         tell(book, hit, Some(point), true);
         play(&mut commands, &art, &assets, &mixer, "book_rustle");
@@ -778,7 +827,8 @@ fn hold_leaf(
         let over = book.leaf.side() < 0.15;
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
-        if over {
+        // a leaf peeled off a secret opens the book's own spread: the story does not read on
+        if over && turn.peel.is_none() {
             turn.committed = true;
             turned.write(Turned);
             play(&mut commands, &art, &assets, &mixer, "book_flip");
@@ -910,6 +960,7 @@ fn move_leaf(
     mut meshes: ResMut<Assets<Mesh>>,
     mut shown: Query<&mut Visibility, With<LeafMesh>>,
     mut torn: MessageWriter<Torn>,
+    mut found: MessageWriter<Found>,
     mut heard_tear: Local<f32>,
     art: Res<Art>,
     assets: Res<AssetServer>,
@@ -937,7 +988,13 @@ fn move_leaf(
         }
     }
     let (cuts, lost) = (book.leaf.cuts(), book.leaf.lost());
-    book.leaf.step(dt);
+    // paper runs at a steady sixty steps a second, whatever the frame rate: how fast glue gives
+    // and a tear runs are counted in steps
+    book.leaf_clock = (book.leaf_clock + dt).min(4.0 / LEAF_RATE);
+    while book.leaf_clock >= 1.0 / LEAF_RATE {
+        book.leaf_clock -= 1.0 / LEAF_RATE;
+        book.leaf.step(1.0 / LEAF_RATE);
+    }
     // a leaf torn here is torn the same way on the others' machines
     let fresh = book.leaf.take_fresh();
     if book.shared && book.leaf.tearing {
@@ -967,8 +1024,15 @@ fn move_leaf(
     }
     // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned;
     // a torn leaf stays as it lies, holes and loose pieces and all, over the page beneath
-    let (from, to, committed, turn_mine) = (turn.from.clone(), turn.to.clone(), turn.committed, turn.mine);
+    let (from, to, committed, turn_mine, peel) = (turn.from.clone(), turn.to.clone(), turn.committed, turn.mine, turn.peel);
     book.turn = None;
+    // a leaf peeled over onto the left has opened its secret, whoever's hand it was in
+    if let Some(act) = peel.filter(|_| book.leaf.side() < 0.0) {
+        book.opened.push(act);
+        book.shown = Some(to.clone());
+        found.write(Found { act, whole: !book.leaf.torn(), mine: turn_mine });
+    }
+    let committed = committed || (peel.is_some() && book.leaf.side() < 0.0);
     if book.leaf.torn() {
         book.kept = true;
         // only paper newly cut loose costs: a leaf taken up torn again has paid for its old holes
@@ -1072,10 +1136,6 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
 
 fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer) {
     let parchment = art.image(assets, "book/parchment");
-    // ornaments with the paper cut out from under them (tools/inkcut.py), printed onto the page
-    let cut = |stem: &str| art.find(stem, "png", "cut").map(|p| assets.load::<Image>(p));
-    let ink = Color::srgb(0.17, 0.11, 0.07);
-    let cinnabar = Color::srgb(0.62, 0.13, 0.08);
     commands.entity(entity).despawn_children();
     let mut page = commands.entity(entity);
     if let Some(p) = &parchment {
@@ -1085,81 +1145,133 @@ fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Ha
         Half::Left => spread.numbers.0,
         Half::Right => spread.numbers.1,
     };
+    let ink = Color::srgb(0.17, 0.11, 0.07);
+    page.with_children(|p| {
+        print_content(p, spread, half, fonts, art, assets, 1.0);
+        if spread.peeled {
+            print_peeled(p, spread, half, fonts, art, assets);
+        }
+        if number > 0 {
+            p.spawn((
+                Node { position_type: PositionType::Absolute, left: px(0), bottom: px(56), width: px(PAGE_PX.x as f32), justify_content: JustifyContent::Center, ..default() },
+                children![crate::theme::text(number.to_string(), &fonts.num, 40.0, ink.with_alpha(0.8))],
+            ));
+        }
+    });
+}
+
+/// A page that was glued face to face with its neighbour and torn apart: in patches its own ink
+/// went with the other page and bare fibrous paper shows, and in other patches the other page's
+/// ink came with it, mirrored, as it lay against it.
+fn print_peeled(p: &mut ChildSpawnerCommands, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer) {
+    let other = match half {
+        Half::Left => Half::Right,
+        Half::Right => Half::Left,
+    };
+    let (w, h) = (PAGE_PX.x as f32, PAGE_PX.y as f32);
+    // where the glue held hardest, decided by the page itself so both machines agree
+    let seed = spread.numbers.0 * 31 + if matches!(half, Half::Left) { 0 } else { 7 };
+    let patch = |k: u32| {
+        let r = |n: u32| hash(seed * 1000 + k * 17 + n);
+        let size = Vec2::new(120.0 + r(1) * 260.0, 80.0 + r(2) * 200.0);
+        (Vec2::new(r(3) * (w - size.x), 120.0 + r(4) * (h - 300.0 - size.y)), size)
+    };
+    // the bared paper, where this page's own ink left with the other
+    let fibres = art.image(assets, "book/fibres");
+    for k in 0..5 {
+        let (at, size) = patch(k);
+        let mut bare = p.spawn((
+            Node { position_type: PositionType::Absolute, left: px(at.x), top: px(at.y), width: px(size.x), height: px(size.y), border_radius: BorderRadius::all(px(size.min_element() * 0.45)), ..default() },
+        ));
+        match &fibres {
+            Some(f) => bare.insert(ImageNode::new(f.clone()).with_mode(NodeImageMode::Stretch).with_color(Color::WHITE.with_alpha(0.55))),
+            None => bare.insert(BackgroundColor(Color::srgba(0.95, 0.92, 0.85, 0.55))),
+        };
+    }
+    // and the other page's ink, mirrored, where it came away onto this one
+    for k in 5..11 {
+        let (at, size) = patch(k);
+        p.spawn(Node { position_type: PositionType::Absolute, left: px(at.x), top: px(at.y), width: px(size.x), height: px(size.y), overflow: Overflow::clip(), ..default() }).with_children(|clip| {
+            clip.spawn((
+                Node { position_type: PositionType::Absolute, left: px(-at.x), top: px(-at.y), width: px(w), height: px(h), ..default() },
+                UiTransform { scale: Vec2::new(-1.0, 1.0), ..default() },
+            ))
+            .with_children(|m| print_content(m, spread, other, fonts, art, assets, 0.3));
+        });
+    }
+}
+
+/// The printed matter of one side of a spread: on the left the painting in its frame and the
+/// chapter's name, on the right the headpiece, a red initial and the text. `alpha` fades it all.
+fn print_content(p: &mut ChildSpawnerCommands, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer, alpha: f32) {
+    // ornaments with the paper cut out from under them (tools/inkcut.py), printed onto the page
+    let cut = |stem: &str| art.find(stem, "png", "cut").map(|p| assets.load::<Image>(p));
+    let ink = Color::srgb(0.17, 0.11, 0.07).with_alpha(alpha);
+    let cinnabar = Color::srgb(0.62, 0.13, 0.08).with_alpha(alpha);
+    let faded = Color::WHITE.with_alpha(alpha);
     match half {
         Half::Left => {
-            // the painting in its knotwork frame, the chapter's name beneath; the frame is sliced
-            // so its corners keep their knots and its sides repeat along a picture of any shape
+            // the frame is sliced so its corners keep their knots and its sides repeat along a
+            // picture of any shape
             const FRAME_W: f32 = 900.0;
             const BAND: f32 = 84.0;
             let inner_w = FRAME_W - 2.0 * BAND;
             let frame_h = inner_w / art.aspect(&spread.picture).unwrap_or(16.0 / 9.0) + 2.0 * BAND;
             let frame = cut("book/frame").map(|h| {
-                ImageNode::new(h).with_mode(NodeImageMode::Sliced(TextureSlicer {
-                    border: BorderRect::all(FRAME_SLICE),
-                    center_scale_mode: SliceScaleMode::Stretch,
-                    sides_scale_mode: SliceScaleMode::Tile { stretch_value: BAND / FRAME_SLICE },
-                    max_corner_scale: BAND / FRAME_SLICE,
-                }))
+                ImageNode::new(h)
+                    .with_mode(NodeImageMode::Sliced(TextureSlicer {
+                        border: BorderRect::all(FRAME_SLICE),
+                        center_scale_mode: SliceScaleMode::Stretch,
+                        sides_scale_mode: SliceScaleMode::Tile { stretch_value: BAND / FRAME_SLICE },
+                        max_corner_scale: BAND / FRAME_SLICE,
+                    }))
+                    .with_color(faded)
             });
             let picture = match art.image(assets, &spread.picture) {
-                Some(h) => ImageNode::new(h).with_mode(NodeImageMode::Stretch),
-                None => ImageNode::solid_color(Color::BLACK),
+                Some(h) => ImageNode::new(h).with_mode(NodeImageMode::Stretch).with_color(faded),
+                None => ImageNode::solid_color(Color::BLACK.with_alpha(alpha)),
             };
             let left = (PAGE_PX.x as f32 - FRAME_W) / 2.0;
-            page.with_children(|p| {
-                // the picture runs a little under the frame's inner line, so no paper shows
-                // between them; the frame is printed after it, on top
-                let tuck = BAND - 6.0;
+            // the picture runs a little under the frame's inner line, so no paper shows between
+            // them; the frame is printed after it, on top
+            let tuck = BAND - 6.0;
+            p.spawn((
+                Node { position_type: PositionType::Absolute, left: px(left + tuck), top: px(150.0 + tuck), width: px(FRAME_W - 2.0 * tuck), height: px(frame_h - 2.0 * tuck), ..default() },
+                picture,
+            ));
+            if let Some(frame) = frame {
+                p.spawn((Node { position_type: PositionType::Absolute, left: px(left), top: px(150), width: px(FRAME_W), height: px(frame_h), ..default() }, frame));
+            }
+            if let Some(title) = &spread.title {
                 p.spawn((
-                    Node { position_type: PositionType::Absolute, left: px(left + tuck), top: px(150.0 + tuck), width: px(FRAME_W - 2.0 * tuck), height: px(frame_h - 2.0 * tuck), ..default() },
-                    picture,
+                    Node { position_type: PositionType::Absolute, left: px(0), top: px(150.0 + frame_h + 48.0), width: px(PAGE_PX.x as f32), justify_content: JustifyContent::Center, ..default() },
+                    children![crate::theme::text(title.clone(), &fonts.title, 64.0, cinnabar)],
                 ));
-                if let Some(frame) = frame {
-                    p.spawn((Node { position_type: PositionType::Absolute, left: px(left), top: px(150), width: px(FRAME_W), height: px(frame_h), ..default() }, frame));
-                }
-                if let Some(title) = &spread.title {
-                    p.spawn((
-                        Node { position_type: PositionType::Absolute, left: px(0), top: px(150.0 + frame_h + 48.0), width: px(PAGE_PX.x as f32), justify_content: JustifyContent::Center, ..default() },
-                        children![crate::theme::text(title.clone(), &fonts.title, 64.0, cinnabar)],
-                    ));
-                }
-            });
+            }
         }
         Half::Right => {
-            // the headpiece, a red initial, and the text in ink
             let mut chars = spread.text.chars();
             let initial: String = chars.next().map(|c| c.to_string()).unwrap_or_default();
             let rest: String = chars.collect();
-            page.with_children(|p| {
-                if let Some(h) = cut("book/headpiece") {
-                    // only the band of the square sheet the ornament is painted on
-                    let band = Rect::new(0.0, 184.0, 1024.0, 758.0);
-                    let w = 680.0;
-                    p.spawn((
-                        Node { position_type: PositionType::Absolute, left: px((PAGE_PX.x as f32 - w) / 2.0), top: px(70), width: px(w), height: px(w * band.height() / band.width()), ..default() },
-                        ImageNode { rect: Some(band), ..ImageNode::new(h).with_mode(NodeImageMode::Stretch) },
-                    ));
-                }
+            if let Some(h) = cut("book/headpiece") {
+                // only the band of the square sheet the ornament is painted on
+                let band = Rect::new(0.0, 184.0, 1024.0, 758.0);
+                let w = 680.0;
                 p.spawn((
-                    Node { position_type: PositionType::Absolute, left: px(110), top: px(470), width: px(804), column_gap: px(14), ..default() },
-                    children![
-                        crate::theme::text(initial, &fonts.title, 150.0, cinnabar),
-                        (Node { flex_grow: 1.0, padding: UiRect::top(px(10)), ..default() }, children![crate::theme::text(rest, &fonts.body, 44.0, ink)]),
-                    ],
+                    Node { position_type: PositionType::Absolute, left: px((PAGE_PX.x as f32 - w) / 2.0), top: px(70), width: px(w), height: px(w * band.height() / band.width()), ..default() },
+                    ImageNode { rect: Some(band), ..ImageNode::new(h).with_mode(NodeImageMode::Stretch).with_color(faded) },
                 ));
-            });
+            }
+            p.spawn((
+                Node { position_type: PositionType::Absolute, left: px(110), top: px(470), width: px(804), column_gap: px(14), ..default() },
+                children![
+                    crate::theme::text(initial, &fonts.title, 150.0, cinnabar),
+                    (Node { flex_grow: 1.0, padding: UiRect::top(px(10)), ..default() }, children![crate::theme::text(rest, &fonts.body, 44.0, ink)]),
+                ],
+            ));
         }
     }
-    if number > 0 {
-        commands.entity(entity).with_children(|p| {
-            p.spawn((
-                Node { position_type: PositionType::Absolute, left: px(0), bottom: px(56), width: px(PAGE_PX.x as f32), justify_content: JustifyContent::Center, ..default() },
-                children![crate::theme::text(number.to_string(), &fonts.num, 40.0, ink.with_alpha(0.8))],
-            ));
-        });
-    }
 }
-
 /// The candle's light breathes, and its flame turns to face the camera.
 fn flicker(time: Res<Time>, mut lights: Query<(&Candle, &mut PointLight)>, mut flames: Query<&mut Transform, With<Flame>>, cam: Query<&Transform, (With<BookCamera>, Without<Flame>)>) {
     let t = time.elapsed_secs();

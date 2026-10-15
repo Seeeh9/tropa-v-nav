@@ -8,6 +8,7 @@ story-votes = Ready:
 story-close = Set out
 story-end = The tale ends
 chronicle-endings = Endings: { $n } of { $all }
+chronicle-secrets = Secrets of the book: { $n } of { $all }
 chronicle-ending-unknown = ? ? ?
 
 ## Prologue (the first run)
@@ -63,3 +64,9 @@ story-win_scarred_2 = "Nav gives it all back, if you come and take it yourself,"
 story-name-win_circle = The Path Is the Needle
 story-win_circle_1 = On the tenth circle the chest held neither duck nor egg. It held a mirror, and in the mirror was you, a thousand years stale. Koschei stood beside you. He smelled the same as you. "Do you see at last? The needle is the path. My death is whoever walks it. I remember the taste of every one of you."
 story-win_circle_2 = So there will be no end. There will be a stockade, a gate, and a path that devours walkers so that evil dies every time — and every time gets up. You come out into the dawn, sleep until evening, and rise. Your belt hangs on its nail. There is ash under your fingernails. The path is licking its lips.
+
+# Glued secret spreads, one per act: the narrator's own story (docs/book_secrets.md)
+story-secret-1 = I sat by this fire too. I was told this tale too, and I laughed at it. The Leshy led me for three days, and I thought I was lost. I was not lost. I was being led.
+story-secret-2 = My mother waited for me until the first snow, then she put up a cross. They scraped my name off themselves: that is what we do when a man walks into Nav alive. So he cannot find the way back.
+story-secret-3 = Mara gave me a choice: to freeze like all the others, or to serve. I chose to serve. Since then I tell the tale by the fires. Whoever hears it to the end follows me.
+story-secret-4 = Koschei is deathless not because his death is in a needle. It is because his tale is told again and again. While the circle holds, he lives. Only one who does not hear it to the end can break it.

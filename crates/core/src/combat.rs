@@ -447,9 +447,21 @@ impl<'a> Exec<'a> {
                 }
             }
         }
-        if fell {
+        if fell && !self.unfound(i) {
             self.down(i);
         }
+    }
+
+    /// The erased name: the first time in a fight a hero would fall, death, which looks for
+    /// them by name, does not find them, and they stand on at 1 HP.
+    fn unfound(&mut self, i: u8) -> bool {
+        let h = self.hero(i);
+        if !h.relics.iter().any(|r| r == crate::run::SECRET_RELICS[1]) || h.flags.contains_key("erased_name") {
+            return false;
+        }
+        h.flags.insert("erased_name".into(), 1);
+        h.hp = 1;
+        true
     }
 
     fn lose_hp(&mut self, u: UnitRef, n: i32) {
@@ -471,7 +483,7 @@ impl<'a> Exec<'a> {
                         }
                     }
                 }
-                if fell {
+                if fell && !self.unfound(i) {
                     self.down(i);
                 }
             }
@@ -613,9 +625,20 @@ impl<'a> Exec<'a> {
         let pos = h.hand.iter().position(|c| c.uid == uid).ok_or(ActionError::NoSuchCard)?;
         let card = h.hand[pos].clone();
         let def = self.c.cards.get(&card.def).ok_or(ActionError::NoSuchCard)?;
-        let view = def.view(card.upgraded, h.form);
+        let mut view = def.view(card.upgraded, h.form);
         if view.has(Keyword::Unplayable) {
-            return Err(ActionError::Unplayable);
+            // the icy tale: the dead listen to one who speaks so; a curse is told away for 1,
+            // burns, and leaves 4 block
+            let icy = view.kind == CardType::Curse && h.relics.iter().any(|r| r == crate::run::SECRET_RELICS[2]);
+            if !icy {
+                return Err(ActionError::Unplayable);
+            }
+            view.cost = 1;
+            view.x_cost = false;
+            view.target = CardTarget::None;
+            view.effects = vec![Effect::Block(Amount::N(4), Tgt::Me)];
+            view.keywords.retain(|k| *k != Keyword::Unplayable);
+            view.keywords.push(Keyword::Exhaust);
         }
         if view.kind == CardType::Attack && h.flags.contains_key("coiled") {
             return Err(ActionError::Coiled);

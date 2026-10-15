@@ -102,12 +102,16 @@ pub struct Unlocks {
     /// 1 and 2 are the shrine's alternatives.
     #[serde(default)]
     pub starters: Vec<u8>,
+    /// Relics of the tale's book whose secret someone has once found: from then on they turn up
+    /// like any other relic.
+    #[serde(default)]
+    pub secrets: Vec<Id>,
 }
 
 impl Unlocks {
     /// Everything open: tests, the simulator and dev shortcuts.
     pub fn all(players: usize) -> Unlocks {
-        Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![10; players], starters: vec![] }
+        Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![10; players], starters: vec![], secrets: vec![] }
     }
 
     fn relic_ok(&self, rarity: Rarity) -> bool {
@@ -148,6 +152,9 @@ pub struct Run {
     pub floors_cleared: u32,
     pub elites_slain: u32,
     pub bosses_slain: u32,
+    /// Acts whose secret in the tale's book has been found this run.
+    #[serde(default)]
+    pub secrets: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -176,7 +183,17 @@ pub enum RunAction {
     /// The player tore a page of the tale's book, losing this share of the leaf (percent).
     /// Whatever is torn from the tale is torn from the one who held it.
     TearPage { lost: u8 },
+    /// The player peeled a glued leaf of the tale's book apart, whole, and read the secret of
+    /// this act (1..=4): its relic is theirs.
+    FindSecret { act: u8 },
+    /// The player shut the book before the tale's chapter was done.
+    SkipTale,
 }
+
+/// The relics hidden in the tale's book, one per act's secret.
+pub const SECRET_RELICS: [&str; 4] = ["kotomka", "erased_name", "ice_tale", "unheard_tale"];
+/// What the unheard tale gives each time the book is shut early.
+pub const UNHEARD_GOLD: i32 = 15;
 
 /// The curse a torn page of the tale lays on whoever tore it.
 pub const BOOK_SPOIL: &str = "book_spoil";
@@ -397,6 +414,7 @@ impl Run {
             floors_cleared: 0,
             elites_slain: 0,
             bosses_slain: 0,
+            secrets: vec![],
         })
     }
 
@@ -732,6 +750,38 @@ impl Run {
                 }
                 pl.potions.remove(*i as usize);
             }
+            (RunAction::FindSecret { act }, _) => {
+                if self.stage == Stage::Combat {
+                    return Err(RunError::WrongStage);
+                }
+                let Some(relic) = act.checked_sub(1).and_then(|a| SECRET_RELICS.get(a as usize)) else { return Err(RunError::BadChoice) };
+                if self.secrets.contains(act) {
+                    return Err(RunError::AlreadyDone);
+                }
+                self.secrets.push(*act);
+                let pl = &mut self.players[p];
+                if !pl.relics.iter().any(|r| r == relic) {
+                    pl.relics.push((*relic).into());
+                    ev.push(RunEvent::RelicGained { player, relic: (*relic).into() });
+                }
+            }
+            (RunAction::SkipTale, _) => {
+                if self.stage == Stage::Combat {
+                    return Err(RunError::WrongStage);
+                }
+                let pl = &mut self.players[p];
+                if !pl.relics.iter().any(|r| r == SECRET_RELICS[3]) {
+                    return Err(RunError::BadChoice);
+                }
+                // who did not hear the tale out is not held by it
+                pl.gold += UNHEARD_GOLD;
+                ev.push(RunEvent::Gold { player, delta: UNHEARD_GOLD });
+                let curse = pl.deck.iter().position(|(id, _)| c.cards.get(id).is_some_and(|d| d.kind == CardType::Curse));
+                if let Some(i) = curse {
+                    let (card, _) = pl.deck.remove(i);
+                    ev.push(RunEvent::CardRemoved { player, card });
+                }
+            }
             (RunAction::TearPage { lost }, _) => {
                 // the book is read between fights, never in one; a nick that frees no paper costs nothing
                 if self.stage == Stage::Combat {
@@ -791,6 +841,12 @@ impl Run {
             }
             self.act += 1;
             self.at = None;
+            // the traveller's satchel: there is always something still in it
+            for q in 0..self.players.len() {
+                if self.players[q].relics.iter().any(|r| r == SECRET_RELICS[0]) {
+                    self.give_potion(c, q, ev);
+                }
+            }
             self.map = if self.act >= 4 { Map { floors: vec![] } } else { generate_map(&mut self.rng, Circle(self.circle)) };
             // the boss leaves a trophy: three are offered, the party votes for one, everyone gets it
             let mut offers: Vec<Id> = c.relics.values().filter(|r| r.pool == RelicPool::Boss && !self.players.iter().any(|p| p.relics.contains(&r.id))).map(|r| r.id.clone()).collect();
@@ -1161,7 +1217,7 @@ impl Run {
         let pool: Vec<&RelicDef> = c
             .relics
             .values()
-            .filter(|r| r.rarity != Rarity::Starter && r.pool == RelicPool::Any && (r.hero.is_empty() || r.hero == pl.hero))
+            .filter(|r| r.rarity != Rarity::Starter && (r.pool == RelicPool::Any || (r.pool == RelicPool::Book && self.unlocks.secrets.contains(&r.id))) && (r.hero.is_empty() || r.hero == pl.hero))
             .filter(|r| !pl.relics.contains(&r.id) && self.unlocks.relic_ok(r.rarity))
             .collect();
         self.rng.pick(&pool).map(|r| r.id.clone())

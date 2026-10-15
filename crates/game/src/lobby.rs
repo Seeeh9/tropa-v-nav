@@ -305,6 +305,7 @@ fn draw_lobby(
                     observe(|_: On<Activate>, mut net: ResMut<Net>, db: Res<Db>, time: Res<Time>, profile: Res<crate::profile::Profile>| {
                         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) ^ time.elapsed().as_nanos() as u64;
                         // the host's village decides which relics, potions and omens can turn up
+                        net.node.secrets = profile.secret_relics();
                         net.node.start(&db.0, seed, profile.village());
                     }),
                 ));

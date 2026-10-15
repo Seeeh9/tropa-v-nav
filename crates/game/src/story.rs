@@ -72,6 +72,8 @@ pub struct Tale {
     shown: Option<Entity>,
     /// Votes cast on each page, by its text key: player slot -> wants to skip.
     votes: HashMap<String, HashMap<u8, bool>>,
+    /// The book was shut before the scene was read out.
+    skipped: bool,
 }
 
 impl Tale {
@@ -90,6 +92,19 @@ impl Tale {
 
 fn page(id: &str) -> Page {
     Page { picture: format!("story/{id}"), text: format!("story-{id}"), title: None, closes: false }
+}
+
+/// The act whose glued secret lies under this page: the last page of each act's opening (the
+/// prologue's, or the greeting of a reader come back, for the first act).
+fn secret_of(page: &Page) -> Option<u8> {
+    match page.text.as_str() {
+        "story-pro_3" => Some(1),
+        t if t.starts_with("story-again") => Some(1),
+        "story-act2" => Some(2),
+        "story-act3" => Some(3),
+        "story-act4" => Some(4),
+        _ => None,
+    }
 }
 
 /// The ending this player has earned.
@@ -228,11 +243,33 @@ enum Turn {
 fn turn_pages(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
-    tale: Res<Tale>,
     mut turned: MessageReader<crate::book::Turned>,
     mut torn: MessageReader<crate::book::Torn>,
+    mut found: MessageReader<crate::book::Found>,
+    mut tale: ResMut<Tale>,
+    mut profile: ResMut<Profile>,
+    net: Option<Res<Net>>,
     mut run_outbox: ResMut<crate::session::RunOutbox>,
 ) {
+    // a secret peeled open whole by this reader: its relic, and the chronicle remembers it
+    for f in found.read() {
+        if f.whole && f.mine {
+            run_outbox.0.push(RunAction::FindSecret { act: f.act });
+            if !net.as_ref().is_some_and(|n| n.ephemeral) {
+                profile.note_secret(f.act);
+                profile.save();
+            }
+        }
+    }
+    // the book shut before its chapter was done: the unheard tale pays one who has it
+    if std::mem::take(&mut tale.skipped) {
+        let mine = net.as_ref().and_then(|n| Some((n.node.state.as_ref()?, n.node.my_slot()?)));
+        if let Some((run, me)) = mine {
+            if run.players.get(me as usize).is_some_and(|p| p.relics.iter().any(|r| r == nav_core::SECRET_RELICS[3])) {
+                run_outbox.0.push(RunAction::SkipTale);
+            }
+        }
+    }
     // what is torn from the tale is torn from the one who held it: the curse «Порча книги»,
     // and max HP for a great piece (the run decides, see `RunAction::TearPage`)
     for t in torn.read() {
@@ -282,6 +319,7 @@ fn advance(commands: &mut Commands, tale: &mut Tale, speaking: &Query<Entity, Wi
         commands.entity(e).despawn();
     }
     if skip {
+        tale.skipped = tale.pages.len() > 1;
         tale.pages.clear();
     } else {
         tale.pages.pop_front();
@@ -415,12 +453,29 @@ fn show_page(
         ))
         .id();
     // the book on the table, rendered in 3D; the page's painting and text are printed in it, and
-    // the next page waits under the leaf for the reader to turn it (by hand only when reading alone)
-    let spread = |page: &Page, at: usize| crate::book::Spread {
-        picture: page.picture.clone(),
-        title: page.title.as_ref().map(|t| l10n.t(t)),
-        text: l10n.t(&page.text),
-        numbers: (at as u32 * 2, at as u32 * 2 + 1),
+    // the next page waits under the leaf for the reader to turn it. The last page of an act's
+    // opening is glued over that act's secret: the only sign is the numbering, which jumps by two
+    let spread = |page: &Page, at: usize| {
+        let at = at as u32;
+        let secret = secret_of(page).map(|act| {
+            let hidden = crate::book::Spread {
+                picture: format!("story/secret_{act}"),
+                title: None,
+                text: l10n.t(&format!("story-secret-{act}")),
+                numbers: (at * 2 + 1, at * 2 + 2),
+                secret: None,
+                peeled: true,
+            };
+            (act, Box::new(hidden))
+        });
+        crate::book::Spread {
+            picture: page.picture.clone(),
+            title: page.title.as_ref().map(|t| l10n.t(t)),
+            text: l10n.t(&page.text),
+            numbers: (at * 2, if secret.is_some() { at * 2 + 3 } else { at * 2 + 1 }),
+            secret,
+            peeled: false,
+        }
     };
     book.spread = spread(page, at);
     book.next = tale.pages.get(1).map(|p| spread(p, at + 1));

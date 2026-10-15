@@ -498,7 +498,7 @@ fn report_endless_fights() {
 #[test]
 fn a_bare_village_offers_only_the_common_shelf() {
     let c = content();
-    let bare = Unlocks { relic_tier: 0, potion_tier: 0, omen_tier: 0, hero_levels: vec![1], starters: vec![] };
+    let bare = Unlocks { relic_tier: 0, potion_tier: 0, omen_tier: 0, hero_levels: vec![1], starters: vec![], secrets: vec![] };
     for seed in 0..30 {
         let mut run = Run::new_with(&c, &["bogatyr".to_string()], seed, 0, bare.clone()).unwrap();
         run.force_stage(&c, NodeKind::Shop);
@@ -523,7 +523,7 @@ fn hero_level_opens_the_better_cards() {
     let seen = |level: u32| -> std::collections::BTreeSet<Rarity> {
         let mut out = std::collections::BTreeSet::new();
         for seed in 0..40 {
-            let unlocks = Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![level], starters: vec![] };
+            let unlocks = Unlocks { relic_tier: 2, potion_tier: 2, omen_tier: 2, hero_levels: vec![level], starters: vec![], secrets: vec![] };
             let mut run = Run::new_with(&c, &["volhv".to_string()], seed, 0, unlocks).unwrap();
             run.force_stage(&c, NodeKind::Shop);
             let Stage::Shop { stock, .. } = &run.stage else { panic!() };
@@ -798,4 +798,32 @@ fn a_torn_page_curses_whoever_tore_it() {
     assert_eq!(run.apply(&c, 0, &RunAction::TearPage { lost: 0 }), Err(RunError::BadChoice));
     // and the curse is a real card of the game
     assert!(c.cards.contains_key(BOOK_SPOIL));
+}
+
+#[test]
+fn a_secret_of_the_book_gives_its_relic_once() {
+    let c = content();
+    let mut run = party(&c, 2, 11, 0);
+    run.apply(&c, 1, &RunAction::FindSecret { act: 2 }).unwrap();
+    assert!(run.players[1].relics.iter().any(|r| r == "erased_name"));
+    assert!(!run.players[0].relics.iter().any(|r| r == "erased_name"));
+    // the same secret is not found twice in a run, and there are only four
+    assert_eq!(run.apply(&c, 0, &RunAction::FindSecret { act: 2 }), Err(RunError::AlreadyDone));
+    assert_eq!(run.apply(&c, 0, &RunAction::FindSecret { act: 5 }), Err(RunError::BadChoice));
+    for id in SECRET_RELICS {
+        assert_eq!(c.relics[id].pool, RelicPool::Book, "{id}");
+    }
+}
+
+#[test]
+fn the_unheard_tale_pays_for_a_book_shut_early() {
+    let c = content();
+    let mut run = party(&c, 1, 12, 0);
+    assert_eq!(run.apply(&c, 0, &RunAction::SkipTale), Err(RunError::BadChoice), "without the relic nothing happens");
+    run.apply(&c, 0, &RunAction::FindSecret { act: 4 }).unwrap();
+    run.apply(&c, 0, &RunAction::TearPage { lost: 5 }).unwrap();
+    let gold = run.players[0].gold;
+    run.apply(&c, 0, &RunAction::SkipTale).unwrap();
+    assert_eq!(run.players[0].gold, gold + UNHEARD_GOLD);
+    assert!(!run.players[0].deck.iter().any(|(id, _)| id == BOOK_SPOIL), "the curse is gone");
 }

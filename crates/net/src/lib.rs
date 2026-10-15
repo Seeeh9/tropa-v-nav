@@ -137,6 +137,9 @@ pub enum Note {
 
 pub struct Node {
     pub me: Peer,
+    /// Host: relics of the tale's book whose secrets the host has ever found; they join the
+    /// run's pools like the village's unlocks.
+    pub secrets: Vec<Id>,
     pub name: String,
     pub lobby: Lobby,
     pub state: Option<Run>,
@@ -183,6 +186,7 @@ impl Node {
     fn blank(me: Peer, name: &str) -> Node {
         Node {
             me,
+            secrets: Vec::new(),
             name: name.into(),
             lobby: Lobby::default(),
             state: None,
@@ -301,7 +305,7 @@ impl Node {
         let heroes: Option<Vec<Id>> = self.lobby.players.iter().map(|p| p.hero.clone().filter(|h| c.heroes.contains_key(h))).collect();
         let Some(heroes) = heroes else { return false };
         self.lobby.started = true;
-        let unlocks = Unlocks { relic_tier: village.0, potion_tier: village.1, omen_tier: village.2, hero_levels: self.lobby.players.iter().map(|p| p.level.max(1)).collect(), starters: self.lobby.players.iter().map(|p| p.starter).collect() };
+        let unlocks = Unlocks { relic_tier: village.0, potion_tier: village.1, omen_tier: village.2, hero_levels: self.lobby.players.iter().map(|p| p.level.max(1)).collect(), starters: self.lobby.players.iter().map(|p| p.starter).collect(), secrets: self.secrets.clone() };
         let info = StartInfo { seed, heroes, circle: self.lobby.circle, unlocks };
         self.out.push((To::All, Msg::Lobby(self.lobby.clone())));
         self.out.push((To::All, Msg::Start(info.clone())));

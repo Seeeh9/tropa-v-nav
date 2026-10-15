@@ -477,6 +477,14 @@ move-intercept = Intercept
 move-intercept-desc = Strikes whoever holds the needle. Hand the needle to an ally by dragging it onto them (1 Energy).
 move-black_tide = Black Tide
 
+relic-kotomka = Traveller's Satchel
+relic-kotomka-desc = At the start of each act: gain a random potion. Someone else's satchel: there is still something in it.
+relic-erased_name = Erased Name
+relic-erased_name-desc = The first time each combat a hero would fall, they stay at 1 HP. Death looks for you by name. It does not have yours.
+relic-ice_tale = Icy Tale
+relic-ice_tale-desc = Curses can be played for 1: the card burns and you gain 4 Block. He learned to speak so that even the dead listen.
+relic-unheard_tale = Unheard Tale
+relic-unheard_tale-desc = When you close the book before the chapter ends: gain 15 gold and remove a curse from your deck. The tale has no hold on one who did not hear it out.
 relic-clay_whistle = Clay Whistle
 relic-clay_whistle-desc = At the start of combat: a random enemy gets 2 Muted.
 relic-bast_shoe = Bast Shoe

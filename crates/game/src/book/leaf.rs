@@ -29,6 +29,26 @@ const BEND: f32 = 0.6;
 const TEAR: f32 = 0.18;
 /// Edges that may give way in one step: a tear runs, it does not burst.
 const TEARS_PER_STEP: usize = 1;
+/// Glue: how hard a glued point is held to the page under it each solver pass, and how far it
+/// may be drawn off before it lets go. A peel runs only so fast, though: no more than
+/// `GLUE_GIVE` points come away in a step, the worst drawn first. A patient pull keeps within
+/// that, and the glue lets go along the front of the peel; a jerk outruns it, the paper between
+/// the hand and the glue is stretched, and tears. With these, a leaf peeled over a second or more
+/// comes away whole, one snatched in a quarter of a second tears.
+const GLUE_HOLD: f32 = 0.2;
+const GLUE_SLACK: f32 = 0.004;
+const GLUE_GIVE: usize = 8;
+/// Speed of the hand, in scene units a second, past which peeling a glued leaf is a jerk that
+/// tears it: a calm turn carries the corner at one to three.
+const JERK: f32 = 6.0;
+
+/// A point of the leaf glued down where it lay.
+struct Glue {
+    point: usize,
+    at: Vec3,
+    /// The glue has let go.
+    gone: bool,
+}
 
 /// Where a leaf lies: the book's two pages, and the table round it.
 #[derive(Clone, Copy)]
@@ -83,11 +103,16 @@ pub struct Leaf {
     links: Vec<Link>,
     /// The point a hand holds, and where the hand is.
     pub grab: Option<(usize, Vec3)>,
+    /// How fast the hand has lately been moving, and where it was a step ago.
+    hand_speed: f32,
+    last_hand: Option<Vec3>,
     /// Does the paper tear of itself when pulled too far? Not when another reader's machine
     /// holds the leaf: then its tears come from there, edge by edge, in their order.
     pub tearing: bool,
     /// Edges torn since last asked, in order.
     fresh: Vec<usize>,
+    /// Points glued to the page beneath, while the glue holds.
+    glue: Vec<Glue>,
     gap: f32,
     width: f32,
     height: f32,
@@ -126,8 +151,11 @@ impl Leaf {
             cut: vec![false; EDGES],
             links: Vec::new(),
             grab: None,
+            hand_speed: 0.0,
+            last_hand: None,
             tearing: true,
             fresh: Vec::new(),
+            glue: Vec::new(),
             gap,
             width,
             height,
@@ -353,6 +381,16 @@ impl Leaf {
 
     pub fn step(&mut self, dt: f32) {
         let dt = dt.min(1.0 / 30.0);
+        // fingers lift the corner they take: under them the glue is gone at once
+        if let Some((held, _)) = self.grab {
+            self.glue.retain(|g| g.point != held);
+        }
+        let moved = match (self.grab, self.last_hand) {
+            (Some((_, to)), Some(was)) => to.distance(was) / dt,
+            _ => 0.0,
+        };
+        self.hand_speed += (moved - self.hand_speed) * 0.3;
+        self.last_hand = self.grab.map(|(_, to)| to);
         for p in 0..self.points.len() {
             if self.pinned(p) {
                 continue;
@@ -365,6 +403,7 @@ impl Leaf {
         for _ in 0..ITERATIONS {
             if let Some((p, to)) = self.grab {
                 self.points[p] = to;
+
             }
             for l in &self.links {
                 let (a, b) = (self.points[l.a], self.points[l.b]);
@@ -384,6 +423,11 @@ impl Leaf {
                     }
                 }
             }
+            // glued points are held to the page beneath, as long as their glue holds
+            for g in &self.glue {
+                let q = &mut self.points[g.point];
+                *q += (g.at - *q) * GLUE_HOLD;
+            }
             // the leaf lies on paper or on the table: it cannot sink into either
             let floor = self.floor;
             for q in &mut self.points {
@@ -400,6 +444,15 @@ impl Leaf {
                 prev.z = q.z + (prev.z - q.z) * 0.9;
             }
         }
+        // glue drawn off past its slack lets go, but a peel runs only so fast: of the points
+        // drawn off, only the worst few come away in a step
+        let mut drawn: Vec<(f32, usize)> =
+            self.glue.iter().enumerate().map(|(k, g)| (self.points[g.point].distance(g.at), k)).filter(|(off, _)| *off > GLUE_SLACK).collect();
+        drawn.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (_, k) in drawn.into_iter().take(GLUE_GIVE) {
+            self.glue[k].gone = true;
+        }
+        self.glue.retain(|g| !g.gone);
         // what the solver could not take up, the paper's fibres must: of the edges stretched past
         // bearing, the worst gives way. Paper tears from an edge of the sheet or from the tip of
         // a tear already started, where the pull gathers, so only such edges may give
@@ -420,7 +473,10 @@ impl Leaf {
                 Some((s, best))
             })
             .collect();
-        if self.tearing && !strained.is_empty() {
+        // while glue holds the leaf down, the paper strains wherever it is peeled; only a jerk,
+        // the hand flying faster than glue can give, tears it
+        let jerked = self.glue.is_empty() || self.hand_speed > JERK;
+        if self.tearing && jerked && !strained.is_empty() {
             strained.sort_by(|a, b| b.0.total_cmp(&a.0));
             for (_, e) in strained.into_iter().take(TEARS_PER_STEP) {
                 if !self.cut[e] {
@@ -469,6 +525,18 @@ impl Leaf {
             }
         }
         out
+    }
+
+    /// Glues the whole leaf down where it lies, to the page beneath.
+    pub fn glue_down(&mut self) {
+        self.glue = (0..self.points.len()).filter(|p| !self.pinned(*p)).map(|point| Glue { point, at: self.points[point], gone: false }).collect();
+    }
+
+    /// Share of the glue still holding: 1 glued all over, 0 peeled clean away.
+    #[cfg(test)]
+    pub fn glued(&self) -> f32 {
+        let total = (self.points.len() - NZ).max(1) as f32;
+        self.glue.len() as f32 / total
     }
 
     /// Tears an edge torn on another machine. The same edges torn in the same order give the
@@ -542,6 +610,18 @@ impl Leaf {
     /// The particle nearest to `to`, for a hand to take hold of.
     pub fn nearest(&self, to: Vec3) -> usize {
         (0..self.points.len()).filter(|p| !self.pinned(*p)).min_by(|a, b| self.points[*a].distance_squared(to).total_cmp(&self.points[*b].distance_squared(to))).unwrap_or(NX - 1)
+    }
+
+    /// The point on the leaf's free border (its head, foot or outer edge) nearest to `to`: a
+    /// glued leaf is peeled from its border, never lifted from the middle.
+    pub fn nearest_border(&self, to: Vec3) -> usize {
+        (0..self.points.len())
+            .filter(|p| {
+                let (i, j) = self.home[*p];
+                i > 0 && (i == CX || j == 0 || j == CZ)
+            })
+            .min_by(|a, b| self.points[*a].distance_squared(to).total_cmp(&self.points[*b].distance_squared(to)))
+            .unwrap_or(NX - 1)
     }
 
     /// The surface normal at every particle, facing up while the leaf lies on the right.
@@ -653,6 +733,45 @@ mod tests {
         }
         assert_eq!(here.points.len(), there.points.len());
         assert_eq!(here.cells, there.cells);
+    }
+
+    /// Carries the corner of a glued leaf over the spine in `seconds`, then lets go.
+    fn peel(seconds: f32) -> Leaf {
+        let mut l = leaf();
+        l.glue_down();
+        let corner = at(NX - 1, NZ - 1);
+        let z = l.points[corner].z;
+        let steps = (seconds * 60.0) as usize;
+        for k in 0..=steps {
+            let a = std::f32::consts::PI * k as f32 / steps as f32;
+            l.grab = Some((corner, Vec3::new(a.cos() * 1.0, 0.094 + a.sin() * 0.6, z)));
+            l.step(1.0 / 60.0);
+        }
+        l.grab = None;
+        for _ in 0..240 {
+            l.step(1.0 / 60.0);
+        }
+        l
+    }
+
+    #[test]
+    fn glued_leaves_peel_slowly_and_tear_when_jerked() {
+        let slow = peel(4.0);
+        assert!(!slow.torn(), "a patient peel tore the page");
+        assert!(slow.glued() < 0.02, "glue left {}", slow.glued());
+        assert!(slow.side() < -0.8, "side {}", slow.side());
+        let jerk = peel(0.25);
+        assert!(jerk.torn(), "a jerk peeled it clean");
+    }
+
+    #[test]
+    fn glue_holds_a_leaf_left_alone() {
+        let mut l = leaf();
+        l.glue_down();
+        for _ in 0..300 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(l.glued() > 0.99);
     }
 
     #[test]

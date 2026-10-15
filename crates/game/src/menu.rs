@@ -326,6 +326,13 @@ fn enter_chronicle(mut commands: Commands, stage: Single<Entity, With<Stage>>, f
             22.0,
             theme::CANDLE,
         ));
+        // the glued leaves of the tale's book: what of the storyteller has been read
+        p.spawn(theme::text(
+            l10n.tf("chronicle-secrets", &[("n", (profile.secrets.len() as i32).into()), ("all", (nav_core::SECRET_RELICS.len() as i32).into())]),
+            &fonts.body,
+            22.0,
+            theme::CANDLE,
+        ));
         p.spawn(Node { width: px(1640), flex_wrap: FlexWrap::Wrap, column_gap: px(20), row_gap: px(4), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
             for id in crate::story::ENDINGS {
                 let (label, color) = match profile.endings.get(id) {

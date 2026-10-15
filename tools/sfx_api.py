@@ -49,6 +49,7 @@ SOUNDS = {
     "map_nudge": ("Impatient double knock of knuckles on an old wooden table, short, dry, no music", 0.6),
     "lot_tick": ("Single dry wooden click of a spinning fortune wheel peg, very short, no music", 0.3),
     "lot_land": ("Fortune wheel stops with a heavy wooden thunk and a low ominous bell toll, no music", 2.0),
+    "card_shuffle": ("Deck of old parchment cards riffle-shuffled by hand, quick fluttering paper riffle then a soft tap square, no music", 1.2),
     "card_gain": ("Parchment card swooping through the air and sliding into a deck, quick whoosh then a soft paper slap, no music", 0.8),
 }
 

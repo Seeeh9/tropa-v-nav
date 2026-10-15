@@ -30,9 +30,10 @@ const UNIT_W: f32 = 280.0;
 
 mod aim;
 mod impact;
+mod piles;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((aim::plugin, impact::plugin));
+    app.add_plugins((aim::plugin, impact::plugin, piles::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -113,6 +114,8 @@ struct UnitSprite {
     stem: String,
     t: f32,
     anim: Option<(Anim, f32)>,
+    /// Drawn height, so a stretch can be taken from the feet and not from the middle.
+    height: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -186,6 +189,8 @@ struct CardWidget {
     dragging: bool,
     /// Lifted out of the hand and waiting above it for a target (see `aim`).
     aiming: bool,
+    /// Upgraded, and made free: either changing in hand reprints the card where it is.
+    look: (bool, bool),
 }
 
 #[derive(Component)]
@@ -473,24 +478,9 @@ fn enter(
                 ],
             ));
 
-            let pile = |left: f32, label: Label| {
-                (
-                    theme::panel(Node {
-                        position_type: PositionType::Absolute,
-                        left: px(left),
-                        top: px(980),
-                        width: px(200),
-                        padding: UiRect::axes(px(12), px(8)),
-                        border: UiRect::all(px(2)),
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    }),
-                    Pickable::IGNORE,
-                    children![(label, theme::text("", &fonts.body, 20.0, theme::BONE))],
-                )
-            };
-            p.spawn(pile(40.0, Label::Draw));
-            p.spawn(pile(1680.0, Label::Discard));
+            // the piles: pressed, each spreads its cards out (see `piles`)
+            p.spawn(piles::pile_plate(40.0, piles::PileKind::Draw, Label::Draw, &fonts));
+            p.spawn(piles::pile_plate(1680.0, piles::PileKind::Discard, Label::Discard, &fonts));
 
             // the Ready seal
             p.spawn((
@@ -670,7 +660,7 @@ fn sync_units(
                 let sprite = art.node(&assets, &stem, color);
                 let base = sprite.0.color;
                 u.spawn((
-                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None },
+                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y },
                     {
                         Node {
                             width: px(draw.x),
@@ -793,7 +783,7 @@ fn animate_sprites(
         // idle: slow breathing, feet planted
         let breath = (s.t * 2.5).sin();
         let mut scale = Vec2::new(1.0 - breath * 0.006, 1.0 + breath * 0.012);
-        let mut offset = Vec2::new(0.0, -breath * 2.0);
+        let mut offset = Vec2::ZERO;
         let toward = if matches!(s.unit, UnitRef::Hero(_)) { 1.0 } else { -1.0 };
         let mut tint = s.base;
 
@@ -849,10 +839,13 @@ fn animate_sprites(
             if session.shown.hero(i).is_some_and(|h| h.downed) {
                 // on the Edge: slumped and dark
                 tint = s.base.mix(&Color::srgb(0.05, 0.05, 0.08), 0.72);
-                offset.y += 46.0;
+                offset.y += 16.0;
                 scale *= Vec2::new(1.0, 0.86);
             }
         }
+        // a transform stretches about the middle: lift by as much as the stretch lowers the feet,
+        // so they stay on the ground through every breath
+        offset.y -= (scale.y - 1.0) * s.height / 2.0;
         tf.translation = Val2::px(offset.x, offset.y);
         tf.scale = scale;
         if image.color != tint {
@@ -1077,6 +1070,9 @@ pub fn card_frame(def: &CardDef) -> Color {
 
 /// Spawns a card face under `parent`: free-floating at `pos`, or in the parent's flow when `pos` is `None`.
 /// `extra` carries whatever makes the card behave (drag in the hand, a button in a reward).
+/// The cost of a card made free, and its glow.
+const FREE_INK: Color = Color::srgb(0.52, 0.95, 0.42);
+
 pub fn spawn_card<B: Bundle>(
     commands: &mut Commands,
     parent: Entity,
@@ -1098,9 +1094,13 @@ pub fn spawn_card<B: Bundle>(
         String::new()
     } else if view.x_cost {
         "X".into()
+    } else if card.free {
+        "0".into()
     } else {
         view.cost.to_string()
     };
+    // a card made free this fight wears its new cost in green, glowing, as the Spire shows it
+    let (cost_ink, cost_glow) = if card.free && !view.x_cost { (FREE_INK, Some(FREE_INK)) } else { (theme::CANDLE, None) };
     let id = commands
         .spawn((
             extra,
@@ -1132,9 +1132,9 @@ pub fn spawn_card<B: Bundle>(
                 return;
             }
             let name = l10n.card_name(&card.def, card.upgraded);
-            // long names shrink to stay on one line: the title face runs about 0.62 em a letter,
-            // and the strip leaves 170 px beside the cost
-            let size = (170.0 / (name.chars().count().max(1) as f32 * 0.62)).clamp(10.0, 19.0);
+            // long names shrink to stay on one line: the title face runs up to 0.72 em a letter
+            // (its capitals are broad), and the strip leaves 170 px beside the cost
+            let size = (170.0 / (name.chars().count().max(1) as f32 * 0.72)).clamp(8.0, 19.0);
             c.spawn((
                 theme::text(name.clone(), &fonts.title, size, if card.upgraded { theme::ROTLIGHT } else { theme::BONE }),
                 TextLayout::default().with_no_wrap(),
@@ -1167,9 +1167,10 @@ pub fn spawn_card<B: Bundle>(
                         ..default()
                     },
                     BackgroundColor(theme::SOOT),
-                    BorderColor::all(theme::CANDLE),
+                    BorderColor::all(cost_ink),
+                    cost_glow.map(|g| BoxShadow::new(g.with_alpha(0.85), px(0), px(0), px(4), px(14))).unwrap_or_default(),
                     Pickable::IGNORE,
-                    children![theme::text(cost, &fonts.num, 28.0, theme::CANDLE)],
+                    children![(theme::text(cost, &fonts.num, 28.0, cost_ink), TextShadow { offset: Vec2::ZERO, color: cost_glow.unwrap_or(Color::NONE) })],
                 ));
             }
         })
@@ -1190,18 +1191,24 @@ fn sync_hand(
 ) {
     let h = session.my_hero();
     let blind = h.flags.contains_key("blind");
+    let mut reprint = Vec::new();
     for (entity, w) in &cards {
+        let held = h.hand.iter().find(|c| c.uid == w.uid);
         // a form change flips every card, so the widget is rebuilt
-        if !h.hand.iter().any(|c| c.uid == w.uid) || w.form != h.form || w.hidden != blind {
+        if held.is_none() || w.form != h.form || w.hidden != blind {
             commands.entity(entity).despawn();
+        } else if held.is_some_and(|c| (c.upgraded, c.free) != w.look) {
+            commands.entity(entity).despawn();
+            reprint.push((w.uid, w.pos));
         }
     }
     for card in &h.hand {
-        if !cards.iter().any(|(_, w)| w.uid == card.uid && w.form == h.form && w.hidden == blind) {
-            // new cards slide in from the draw pile
-            let from = Vec2::new(60.0, 900.0);
+        let current = |w: &CardWidget| w.uid == card.uid && w.form == h.form && w.hidden == blind && w.look == (card.upgraded, card.free);
+        if !cards.iter().any(|(_, w)| current(w)) {
+            // new cards slide in from the draw pile; a reprinted one stays where it was
+            let from = reprint.iter().find(|(uid, _)| *uid == card.uid).map(|(_, p)| *p).unwrap_or(Vec2::new(60.0, 900.0));
             let widget = (
-                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false, aiming: false },
+                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false, aiming: false, look: (card.upgraded, card.free) },
                 // let the pointer through, so a dragged card can be dropped on the unit under it
                 Pickable { should_block_lower: false, is_hoverable: true },
             );

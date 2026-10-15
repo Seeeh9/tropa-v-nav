@@ -5,6 +5,7 @@ mod audio;
 mod battle;
 mod book;
 #[cfg(feature = "dev")]
+mod deck_fx;
 mod dev;
 #[cfg(feature = "dev")]
 mod lan;
@@ -116,7 +117,7 @@ fn main() {
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(PostStartup, menu::apply_settings)
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins((dev::plugin, lan::plugin));

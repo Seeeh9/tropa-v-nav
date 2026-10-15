@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 const SFX: &[&str] = &[
     "card_play", "card_draw", "hit", "hit_heavy", "block", "heal", "status", "death", "downed", "raised", "click", "ready", "round", "rune", "potion", "gold", "victory",
-    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain",
+    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain", "card_shuffle",
 ];
 
 pub fn plugin(app: &mut App) {

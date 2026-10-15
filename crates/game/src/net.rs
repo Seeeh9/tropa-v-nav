@@ -68,6 +68,8 @@ pub struct NetStatus {
     pub story_votes: Vec<(u8, String, bool)>,
     /// Other players' hands on the book, tears and turns, not yet shown (`Note::Book*`).
     pub book: Vec<Note>,
+    /// What happened to this player's deck, not yet shown (see `deck_fx`).
+    pub deck: Vec<RunEvent>,
 }
 
 enum SteamEv {
@@ -487,6 +489,11 @@ fn notes(
             Note::Applied { events, .. } => {
                 status.run_dirty = true;
                 let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { continue };
+                status.deck.extend(events.iter().filter(|e| match e {
+                    RunEvent::CardGained { player, .. } | RunEvent::Upgraded { player, .. } | RunEvent::CardRemoved { player, .. } => *player == me,
+                    RunEvent::CardTaken { player, card } => *player == me && card.is_some(),
+                    _ => false,
+                }).cloned());
                 let combat_events: Vec<nav_core::Event> = events.iter().filter_map(|e| if let RunEvent::Combat(c) = e { Some(c.clone()) } else { None }).collect();
                 let started = events.iter().any(|e| matches!(e, RunEvent::CombatStarted));
                 match (session.as_mut(), run.combat.as_ref()) {

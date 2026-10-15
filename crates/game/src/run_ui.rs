@@ -28,7 +28,64 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_rest.run_if(in_state(AppState::Rest)))
         .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
         .add_systems(Update, (draw_omen, draw_trophy).run_if(in_state(AppState::Omen)))
-        .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)));
+        .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)))
+        .add_systems(Update, explain_cards);
+}
+
+/// What a card shown away from the fight mentions — its keywords and the statuses it lays — told
+/// beside it while it is hovered, so nobody has to guess what Weak or Brew means.
+#[derive(Component)]
+pub struct CardHints {
+    lines: Vec<(String, String)>,
+    open: Option<Entity>,
+}
+
+impl CardHints {
+    pub fn new(lines: Vec<(String, String)>) -> CardHints {
+        CardHints { lines, open: None }
+    }
+}
+
+fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHints, &Hovered)>, fonts: Res<Fonts>) {
+    for (card, mut hints, hovered) in &mut cards {
+        match (hovered.get(), hints.open) {
+            (true, None) if !hints.lines.is_empty() => {
+                let panel = commands
+                    .spawn((
+                        theme::panel(Node {
+                            position_type: PositionType::Absolute,
+                            left: percent(100),
+                            top: px(0),
+                            margin: UiRect::left(px(14)),
+                            width: px(320),
+                            padding: UiRect::all(px(12)),
+                            border: UiRect::all(px(2)),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: px(10),
+                            ..default()
+                        }),
+                        GlobalZIndex(400),
+                        Pickable::IGNORE,
+                        ChildOf(card),
+                    ))
+                    .with_children(|p| {
+                        for (name, help) in &hints.lines {
+                            p.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2), ..default() }, Pickable::IGNORE)).with_children(|e| {
+                                e.spawn(theme::text(name.clone(), &fonts.title, 22.0, theme::CANDLE));
+                                e.spawn(theme::text(help.clone(), &fonts.body, 20.0, theme::BONE));
+                            });
+                        }
+                    })
+                    .id();
+                hints.open = Some(panel);
+            }
+            (false, Some(panel)) => {
+                commands.entity(panel).try_despawn();
+                hints.open = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Component)]
@@ -312,7 +369,8 @@ fn draw_reward(
     for (i, id) in r.cards.iter().enumerate() {
         let card = Card { uid: i as u32, def: id.clone(), upgraded: false, free: false };
         let frame = db.0.cards.get(id).map(crate::battle::card_frame).unwrap_or(theme::PEAT);
-        if let Some(e) = spawn_card(&mut commands, row, &card, Form::Human, None, false, (Button, Btn(frame)), &db.0, &l10n, &fonts, &art, &assets) {
+        let hints = db.0.cards.get(id).map(|def| l10n.card_glossary(&def.view(false, Form::Human))).unwrap_or_default();
+        if let Some(e) = spawn_card(&mut commands, row, &card, Form::Human, None, false, (Button, Btn(frame), CardHints::new(hints)), &db.0, &l10n, &fonts, &art, &assets) {
             commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::TakeCard(Some(i as u8))));
         }
     }

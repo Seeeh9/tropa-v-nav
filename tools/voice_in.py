@@ -119,20 +119,15 @@ def take(f, lang, key, text, reject_name):
     if os.environ.get("TROPA_NO_HEAR"):
         with wave.open(f) as w:
             seconds = w.getnframes() / w.getframerate()
-        heard, s = "(not heard)", 1.0
+        heard = "(not heard)"
         os.makedirs(os.path.join(ROOT, "_inbox", "voice"), exist_ok=True)
         with open(os.path.join(ROOT, "_inbox", "voice", "unheard.txt"), "a", encoding="utf-8") as u:
             u.write(f"{lang} {key}\n")
+        # unheard, only the length can be judged: take the words as said
+        ok, s = passes(lang, key, text[key], text[key], seconds)
     else:
         heard, seconds = hear(f, lang.split("-")[0])
-        s = score(text[key], heard)
-    # a short battle cry gives Whisper little to go on: ask less of it
-    ok = s >= ENOUGH.get(lang, 0.85) * (0.6 if key.startswith("bark-") else 1.0)
-    # one or two words: Whisper cannot judge them, a clip of the right length will do
-    if len(text[key].split()) <= 2:
-        ok = seconds >= 0.8
-    # a clip cut short is also much shorter than its text takes to say
-    ok = ok and seconds * FASTEST.get(lang, 17) >= len(text[key])
+        ok, s = passes(lang, key, text[key], heard, seconds)
     if ok:
         out_dir = os.path.join(ROOT, "assets", "voice", lang)
         os.makedirs(out_dir, exist_ok=True)
@@ -147,7 +142,56 @@ def take(f, lang, key, text, reject_name):
     return ok
 
 
+def passes(lang, key, text, heard, seconds):
+    """Would `take` accept a clip of this length in which Whisper heard this?"""
+    s = score(text, heard)
+    # a short battle cry gives Whisper little to go on: ask less of it
+    ok = s >= ENOUGH.get(lang, 0.85) * (0.6 if key.startswith("bark-") else 1.0)
+    # one or two words: Whisper cannot judge them, a clip of the right length will do
+    if len(text.split()) <= 2:
+        ok = seconds >= 0.8
+    # a clip cut short is also much shorter than its text takes to say
+    return ok and seconds * FASTEST.get(lang, 17) >= len(text), s
+
+
+def rehear():
+    """Listens at last to the clips taken in unheard (TROPA_NO_HEAR) and lists the doubtful ones.
+
+    Nothing is moved: the doubtful clips stay in the game until someone listens to them and records
+    them again. Heard clips leave unheard.txt; the doubtful go to _inbox/voice/doubtful.txt.
+    """
+    inbox = os.path.join(ROOT, "_inbox", "voice")
+    todo_path = os.path.join(inbox, "unheard.txt")
+    with open(todo_path, encoding="utf-8") as u:
+        seen = []
+        for line in u:
+            parts = tuple(line.split())
+            if len(parts) == 2 and parts not in seen:
+                seen.append(parts)
+    texts, doubtful = {}, []
+    for lang, key in seen:
+        clip = os.path.join(ROOT, "assets", "voice", lang, f"{key}.wav")
+        if not os.path.exists(clip):
+            continue
+        texts.setdefault(lang, lines(lang))
+        text = texts[lang].get(key)
+        if text is None:
+            continue
+        heard, seconds = hear(clip, lang.split("-")[0])
+        ok, s = passes(lang, key, text, heard, seconds)
+        print(f"{'ok ' if ok else 'BAD'} {lang} {key}: {seconds:.1f}s heard {s:.0%}    {heard}")
+        if not ok:
+            doubtful.append(f"{lang} {key}\t{text}\theard: {heard}\n")
+    with open(os.path.join(inbox, "doubtful.txt"), "a", encoding="utf-8") as d:
+        d.writelines(doubtful)
+    open(todo_path, "w", encoding="utf-8").close()
+    print(f"{len(seen)} heard, {len(doubtful)} doubtful (listed in _inbox/voice/doubtful.txt)")
+
+
 def main():
+    if sys.argv[1:2] == ["--unheard"]:
+        rehear()
+        return
     if sys.argv[1:2] == ["--named"]:
         texts = {}
         files = sorted(glob.glob(os.path.join(DOWNLOADS, "tropa__*__*.wav")), key=os.path.getmtime)

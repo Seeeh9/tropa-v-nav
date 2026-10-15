@@ -1176,16 +1176,21 @@ fn print_peeled(p: &mut ChildSpawnerCommands, spread: &Spread, half: Half, fonts
         let size = Vec2::new(120.0 + r(1) * 260.0, 80.0 + r(2) * 200.0);
         (Vec2::new(r(3) * (w - size.x), 120.0 + r(4) * (h - 300.0 - size.y)), size)
     };
-    // the bared paper, where this page's own ink left with the other
-    let fibres = art.image(assets, "book/fibres");
+    // the bared paper, where this page's own ink left with the other: a ragged fibrous patch
+    // (assets/book/bare-cut.png), turned this way or that so no two look alike
+    let bare = art.find("book/bare", "png", "cut").map(|f| assets.load::<Image>(f));
     for k in 0..5 {
         let (at, size) = patch(k);
-        let mut bare = p.spawn((
-            Node { position_type: PositionType::Absolute, left: px(at.x), top: px(at.y), width: px(size.x), height: px(size.y), border_radius: BorderRadius::all(px(size.min_element() * 0.45)), ..default() },
+        // the patch fills only the middle of its picture
+        let size = size * 1.6;
+        let flip = Vec2::new(if hash(seed + k * 3) < 0.5 { -1.0 } else { 1.0 }, if hash(seed + k * 5) < 0.5 { -1.0 } else { 1.0 });
+        let mut node = p.spawn((
+            Node { position_type: PositionType::Absolute, left: px(at.x - size.x * 0.2), top: px(at.y - size.y * 0.2), width: px(size.x), height: px(size.y), ..default() },
+            UiTransform { scale: flip, ..default() },
         ));
-        match &fibres {
-            Some(f) => bare.insert(ImageNode::new(f.clone()).with_mode(NodeImageMode::Stretch).with_color(Color::WHITE.with_alpha(0.55))),
-            None => bare.insert(BackgroundColor(Color::srgba(0.95, 0.92, 0.85, 0.55))),
+        match &bare {
+            Some(b) => node.insert(ImageNode::new(b.clone()).with_mode(NodeImageMode::Stretch).with_color(Color::WHITE.with_alpha(0.85))),
+            None => node.insert(BackgroundColor(Color::srgba(0.95, 0.92, 0.85, 0.45))),
         };
     }
     // and the other page's ink, mirrored, where it came away onto this one

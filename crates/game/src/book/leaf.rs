@@ -10,10 +10,10 @@
 //! two cells beside it, and every point along the tear is split into one particle per side, so
 //! the cut opens cleanly, and a piece cut loose from the spine falls where it will.
 
-use bevy::math::Vec3;
+use bevy::math::{Vec2, Vec3};
 
-pub const NX: usize = 16;
-pub const NZ: usize = 22;
+pub const NX: usize = 24;
+pub const NZ: usize = 33;
 const CX: usize = NX - 1;
 const CZ: usize = NZ - 1;
 
@@ -21,14 +21,14 @@ const CZ: usize = NZ - 1;
 const GRAVITY: f32 = 5.5;
 /// Share of its speed a point keeps from one step to the next: air on a sheet of paper.
 const KEEP: f32 = 0.985;
-const ITERATIONS: usize = 20;
+const ITERATIONS: usize = 36;
 /// How strongly the links across two cells resist bending, 0..1: paper holds its shape but gives.
 const BEND: f32 = 0.6;
 /// Stretch, as a share of its length, at which an edge of paper gives way: twice what the
 /// briskest calm turn asks of it (about 0.09), so only a pull or a jerk tears.
 const TEAR: f32 = 0.18;
 /// Edges that may give way in one step: a tear runs, it does not burst.
-const TEARS_PER_STEP: usize = 1;
+const TEARS_PER_STEP: usize = 2;
 /// Glue: how hard a glued point is held to the page under it each solver pass, and how far it
 /// may be drawn off before it lets go. A peel runs only so fast, though: no more than
 /// `GLUE_GIVE` points come away in a step, the worst drawn first. A patient pull keeps within
@@ -37,7 +37,7 @@ const TEARS_PER_STEP: usize = 1;
 /// comes away whole, one snatched in a quarter of a second tears.
 const GLUE_HOLD: f32 = 0.2;
 const GLUE_SLACK: f32 = 0.004;
-const GLUE_GIVE: usize = 8;
+const GLUE_GIVE: usize = 12;
 /// Speed of the hand, in scene units a second, past which peeling a glued leaf is a jerk that
 /// tears it: a calm turn carries the corner at one to three.
 const JERK: f32 = 6.0;
@@ -119,6 +119,15 @@ pub struct Leaf {
     floor: Floor,
 }
 
+/// A repeatable hash of a number to 0..1, the same on every machine.
+fn wobble(n: usize) -> f32 {
+    let mut x = (n as u32).wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x & 0xFFFF) as f32 / 65535.0
+}
+
 /// The particle first standing for grid point `(i, j)`.
 pub fn at(i: usize, j: usize) -> usize {
     j * NX + i
@@ -177,9 +186,24 @@ impl Leaf {
         leaf
     }
 
-    /// Where grid point `(i, j)` lies on the flat leaf, at height 0.
+    /// Where grid point `(i, j)` lies on the flat leaf, at height 0. Inside the sheet the points
+    /// stand a little off the square grid, each its own way, so a tear running from point to
+    /// point wanders as paper does and never runs ruler-straight.
     fn rest(&self, i: usize, j: usize) -> Vec3 {
-        Vec3::new(self.gap + self.width * i as f32 / CX as f32, 0.0, self.height * (j as f32 / CZ as f32 - 0.5))
+        let (mut x, mut z) = (i as f32, j as f32);
+        if i > 0 && i < CX && j > 0 && j < CZ {
+            x += (wobble(i * 977 + j * 131) - 0.5) * 0.6;
+            z += (wobble(i * 389 + j * 1013 + 7) - 0.5) * 0.6;
+        }
+        Vec3::new(self.gap + self.width * x / CX as f32, 0.0, self.height * (z / CZ as f32 - 0.5))
+    }
+
+    /// Where on the printed page a particle's paper is, 0..1 across from the spine and down from
+    /// the head: its place on the flat leaf.
+    pub fn uv(&self, p: usize) -> [f32; 2] {
+        let (i, j) = self.home[p];
+        let r = self.rest(i, j);
+        [(r.x - self.gap) / self.width, r.z / self.height + 0.5]
     }
 
     pub fn height(&self) -> f32 {
@@ -527,6 +551,17 @@ impl Leaf {
         out
     }
 
+    /// Lays the leaf over on the left-hand page, as a leaf lies once turned: turned about the
+    /// spine, its back up.
+    pub fn lay_left(&mut self) {
+        let y = self.floor.left;
+        for p in 0..self.points.len() {
+            let q = &mut self.points[p];
+            *q = Vec3::new(-q.x, y, q.z);
+            self.prev[p] = *q;
+        }
+    }
+
     /// Glues the whole leaf down where it lies, to the page beneath.
     pub fn glue_down(&mut self) {
         self.glue = (0..self.points.len()).filter(|p| !self.pinned(*p)).map(|point| Glue { point, at: self.points[point], gone: false }).collect();
@@ -607,6 +642,43 @@ impl Leaf {
         self.grab.is_none() && self.points.iter().zip(&self.prev).all(|(p, q)| p.distance_squared(*q) < 1e-8)
     }
 
+    /// The free particle nearest the hand's line of sight within `within`, for a hand picking
+    /// paper up off the book or the table: `sight` gives where that line meets a level, so paper
+    /// lying low on the table is found where it is seen. Of the pieces torn loose only, or
+    /// anywhere on the paper, but never under a page (lower than `above`).
+    pub fn pick(&self, sight: impl Fn(f32) -> Option<Vec3>, within: f32, only_loose: bool, above: f32) -> Option<usize> {
+        let held = self.held();
+        let mut loose = vec![!only_loose; self.points.len()];
+        if only_loose {
+            for (c, corners) in self.cells.iter().enumerate() {
+                if !held[c] {
+                    for p in corners {
+                        loose[*p] = true;
+                    }
+                }
+            }
+        }
+        let flat = |p: Vec3| sight(p.y).map_or(f32::MAX, |to| Vec2::new(p.x - to.x, p.z - to.z).length());
+        (0..self.points.len())
+            .filter(|p| loose[*p] && !self.pinned(*p) && self.points[*p].y > above)
+            .min_by(|a, b| flat(self.points[*a]).total_cmp(&flat(self.points[*b])))
+            .filter(|p| flat(self.points[*p]) < within)
+    }
+
+    /// Lays the paper where `covered` says a page now lies over it down under that page, out of
+    /// sight, at rest.
+    pub fn sink(&mut self, covered: impl Fn(Vec3) -> bool, y: f32) -> bool {
+        let mut any = false;
+        for p in 0..self.points.len() {
+            if !self.pinned(p) && covered(self.points[p]) && self.points[p].y > y {
+                self.points[p].y = y;
+                self.prev[p] = self.points[p];
+                any = true;
+            }
+        }
+        any
+    }
+
     /// The particle nearest to `to`, for a hand to take hold of.
     pub fn nearest(&self, to: Vec3) -> usize {
         (0..self.points.len()).filter(|p| !self.pinned(*p)).min_by(|a, b| self.points[*a].distance_squared(to).total_cmp(&self.points[*b].distance_squared(to))).unwrap_or(NX - 1)
@@ -682,6 +754,54 @@ mod tests {
         assert!(!l.torn(), "a calm turn tore the page");
         let w = l.points[at(0, NZ / 2)].distance(l.points[at(NX - 1, NZ / 2)]);
         assert!(w < 1.02, "width {w}");
+    }
+
+    #[test]
+    fn turned_back_from_the_left_it_lands_on_the_right_whole() {
+        let mut l = leaf();
+        l.lay_left();
+        for _ in 0..60 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(!l.torn(), "lying on the left tore it");
+        let corner = at(NX - 1, NZ - 1);
+        let z = l.points[corner].z;
+        for k in 0..=60 {
+            let a = std::f32::consts::PI * (1.0 - k as f32 / 60.0);
+            l.grab = Some((corner, Vec3::new(a.cos() * 0.95, 0.1 + a.sin() * 0.5, z)));
+            l.step(1.0 / 60.0);
+        }
+        l.grab = None;
+        for _ in 0..240 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(!l.torn(), "a calm turn back tore the page");
+        assert!(l.side() > 0.85, "side {}", l.side());
+    }
+
+    #[test]
+    fn turned_back_by_the_middle_it_lands_whole() {
+        for forward in [true, false] {
+            let mut l = leaf();
+            if !forward {
+                l.lay_left();
+            }
+            let p = at(14, 23);
+            let reach = 0.005 + 14.0 / CX as f32;
+            let z = l.points[p].z;
+            for k in 0..=120 {
+                let t = k as f32 / 120.0;
+                let x = if forward { reach - 2.0 * reach * t } else { -reach + 2.0 * reach * t };
+                let y = 0.094 + (reach * reach - x * x).max(0.0).sqrt() * 0.75;
+                l.grab = Some((p, Vec3::new(x, y, z)));
+                l.step(1.0 / 60.0);
+            }
+            l.grab = None;
+            for _ in 0..240 {
+                l.step(1.0 / 60.0);
+            }
+            assert!(!l.torn(), "forward {forward}: tore");
+        }
     }
 
     #[test]

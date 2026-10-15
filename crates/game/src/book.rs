@@ -63,15 +63,20 @@ pub fn plugin(app: &mut App) {
     #[cfg(feature = "dev")]
     app.add_systems(Update, dev_ghost.before(follow_ghosts));
     app.add_message::<Turned>()
+        .add_message::<TurnedBack>()
         .add_message::<Torn>()
         .add_message::<Found>()
         .add_systems(Startup, setup)
-        .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, move_leaf, redraw_pages, keep_scraps).chain(), flicker, sway_camera, fit_pages));
+        .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, move_leaf, redraw_pages, keep_scraps, run_scraps).chain(), flicker, sway_camera, fit_pages));
 }
 
 /// Sent when the reader has turned the page by hand: the story reads on.
 #[derive(Message)]
 pub struct Turned;
+
+/// Sent when the reader has turned the left-hand page back by hand: the story goes back a page.
+#[derive(Message)]
+pub struct TurnedBack;
 
 /// Sent when a torn leaf has come to rest having lost more paper: `lost` is the share of the
 /// leaf newly cut loose from the spine, and `mine` says this reader's hand held it, so the cost
@@ -162,6 +167,8 @@ enum Hand {
     Remote(u8),
     /// The story, by its button: carried over in an arc, `t` from 0 to 1.
     Unseen { t: f32, point: usize, z: f32 },
+    /// The reader, carrying a piece torn loose: it goes wherever the hand goes.
+    Loose,
     /// Nobody: the leaf falls where it will.
     Gone,
 }
@@ -180,10 +187,15 @@ struct Turning {
     mine: bool,
     /// The leaf is the top of a glued pair being peeled off its secret (that act's).
     peel: Option<u8>,
+    /// The leaf is the left-hand page, turned back over to the right.
+    back: bool,
 }
 
 /// How long a let-go leaf may keep stirring before it is taken as come to rest, in seconds.
 const SETTLE: f32 = 4.0;
+/// How near the hand must come to loose paper to pick it up, and how high it carries it.
+const LOOSE_REACH: f32 = 0.06;
+const LIFT: f32 = 0.07;
 
 #[derive(Resource)]
 pub struct Book {
@@ -195,6 +207,9 @@ pub struct Book {
     pub spread: Spread,
     /// The spread after this one, when there is one: what turning the leaf uncovers.
     pub next: Option<Spread>,
+    /// The spread before this one, when the tale has one: what turning the left-hand page back
+    /// over uncovers.
+    pub prev: Option<Spread>,
     /// May the reader turn the leaf by hand.
     pub drag_ok: bool,
     /// Is the page read together: the reader's hand is shown to the others through `news`.
@@ -223,6 +238,9 @@ pub struct Book {
     /// Torn leaves set aside for a fresh one, with what their two faces wear: they stay in the
     /// scene as scraps (`keep_scraps`).
     scraps_out: Vec<(Leaf, (Spread, Half), (Spread, Half))>,
+    /// Pages that have come to show something new since the scraps last heard: whatever scrap
+    /// lay on them now lies under the new leaf, out of sight.
+    covered: Vec<Half>,
     leaf_meshes: (Handle<Mesh>, Handle<Mesh>),
     /// The fibres along the leaf's tears.
     fringe: Handle<Mesh>,
@@ -234,14 +252,24 @@ pub struct Book {
 
 impl Book {
     fn wear(&mut self, face: Face, spread: &Spread, half: Half) {
-        self.faces[face as usize] = Some((spread.clone(), half));
+        let new = Some((spread.clone(), half));
+        // a leaf come down on the left lies over the scraps that lay there
+        if face == Face::Left && self.faces[face as usize] != new {
+            self.covered.push(Half::Left);
+        }
+        self.faces[face as usize] = new;
     }
 
     /// Readies the leaf to be turned. A torn leaf left lying on the right-hand page is taken up
     /// as it is, torn; one lying elsewhere stays where it lies, as a scrap, and a fresh leaf is
     /// taken.
     fn fresh_leaf(&mut self) {
-        let reuse = self.kept && self.leaf.side() > 0.5;
+        self.fresh_leaf_for(true);
+    }
+
+    /// As `fresh_leaf`; a leaf to be turned back is never the torn one on the right.
+    fn fresh_leaf_for(&mut self, forward: bool) {
+        let reuse = forward && self.kept && self.leaf.side() > 0.5;
         if !reuse {
             let old = std::mem::replace(&mut self.leaf, Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR));
             self.charged = 0.0;
@@ -298,7 +326,23 @@ impl Book {
         self.wear(Face::LeafBack, &to, Half::Left);
         self.wear(Face::Right, &to, Half::Right);
         let mine = matches!(hand, Hand::Reader);
-        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel });
+        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel, back: false });
+        true
+    }
+
+    /// Starts turning the left-hand page back over to the spread before: the left page shows
+    /// that spread at once, and the leaf, lying on the left, wears this one's left side up and
+    /// the one before's right side under it.
+    fn take_up_back(&mut self, hand: Hand) -> bool {
+        let (Some(shown), Some(to)) = (self.shown.clone(), self.prev.clone()) else { return false };
+        self.fresh_leaf_for(false);
+        self.leaf.lay_left();
+        self.leaf.tearing = true;
+        self.wear(Face::LeafBack, &shown, Half::Left);
+        self.wear(Face::LeafFront, &to, Half::Right);
+        self.wear(Face::Left, &to, Half::Left);
+        let mine = matches!(hand, Hand::Reader);
+        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel: None, back: true });
         true
     }
 }
@@ -455,9 +499,8 @@ fn shape_leaf(mesh: &mut Mesh, leaf: &Leaf, back: bool) {
     let normals: Vec<[f32; 3]> = leaf.normals().iter().map(|n| if back { (-*n).to_array() } else { n.to_array() }).collect();
     let uvs: Vec<[f32; 2]> = (0..leaf.points.len())
         .map(|p| {
-            let (i, j) = leaf.home(p);
-            let u = i as f32 / (NX - 1) as f32;
-            [if back { 1.0 - u } else { u }, j as f32 / (NZ - 1) as f32]
+            let [u, v] = leaf.uv(p);
+            [if back { 1.0 - u } else { u }, v]
         })
         .collect();
     let mut indices = Vec::with_capacity(leaf.cells().len() * 6);
@@ -646,6 +689,7 @@ fn setup(
         wanted: false,
         spread: Spread::default(),
         next: None,
+        prev: None,
         drag_ok: false,
         shared: false,
         news: Vec::new(),
@@ -661,6 +705,7 @@ fn setup(
         charged: 0.0,
         leaf_clock: 0.0,
         scraps_out: Vec::new(),
+        covered: Vec::new(),
         leaf_meshes: (front, back),
         fringe,
         open: 0.0,
@@ -734,14 +779,17 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
     }
     match book.shown.take() {
         // the book has only just opened, or a turn is under way: no time for the leaf, the pages change
-        Some(from) if book.open >= 1.0 && book.turn.is_none() => {
+        // going back a page the unseen hand does not turn: the pages change
+        Some(from) if book.open >= 1.0 && book.turn.is_none() && spread.numbers.0 >= from.numbers.0 => {
             book.fresh_leaf();
+            // the story's own hand is sure: it never tears what it turns
+            book.leaf.tearing = false;
             let point = book.leaf.nearest(Vec3::new(GUTTER + PAGE_W, LEAF_FLOOR.right, PAGE_H * 0.4));
             let z = book.leaf.points[point].z;
             book.wear(Face::LeafFront, &from, Half::Right);
             book.wear(Face::LeafBack, &spread, Half::Left);
             book.wear(Face::Right, &spread, Half::Right);
-            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false, peel: None });
+            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false, peel: None, back: false });
             play(&mut commands, &art, &assets, &mixer, "book_flip");
         }
         _ => {
@@ -749,6 +797,8 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
             book.fresh_leaf();
             book.wear(Face::Left, &spread, Half::Left);
             book.wear(Face::Right, &spread, Half::Right);
+            // the book opened at another place: its old scraps lie somewhere far back in it
+            book.covered.push(Half::Right);
         }
     }
     book.shown = Some(spread);
@@ -774,6 +824,8 @@ fn hold_leaf(
     scale: Res<UiScale>,
     camera: Query<(&Camera, &GlobalTransform), With<BookCamera>>,
     mut turned: MessageWriter<Turned>,
+    mut turned_back: MessageWriter<TurnedBack>,
+    mut scraps: Query<(Entity, &mut ScrapLeaf)>,
     art: Res<Art>,
     assets: Res<AssetServer>,
     mixer: Res<Mixer>,
@@ -793,6 +845,58 @@ fn hold_leaf(
             book.news.push(HandNews::Hand { at: at.to_array(), hold: hold.map(|p| p as u16) });
         }
     };
+    // a scrap of an older leaf in the hand: it goes where the hand goes, and falls when let go
+    if let Some((_, mut scrap)) = scraps.iter_mut().find(|(_, s)| s.held) {
+        match cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right + LIFT)) {
+            Some(hand) if down => {
+                if let Some((p, _)) = scrap.leaf.grab {
+                    scrap.leaf.grab = Some((p, hand));
+                }
+            }
+            _ => {
+                scrap.held = false;
+                scrap.leaf.grab = None;
+                scrap.active = SETTLE;
+            }
+        }
+        return;
+    }
+    // paper torn loose is picked up again where it lies, on the book or on the table: first a
+    // piece of the leaf in play, then the newest scrap under the hand
+    if pressed && book.open >= 1.0 {
+        if let Some(c) = cursor.filter(|c| c.y <= crate::STAGE_H - BUTTON_BAND) {
+            let free = match book.turn.as_ref() {
+                None => book.kept,
+                Some(t) => matches!(t.hand, Hand::Gone),
+            };
+            let sight = |y: f32| cursor_on(camera, at, c, y);
+            if let Some(p) = free.then(|| book.leaf.pick(sight, LOOSE_REACH, true, TOP)).flatten() {
+                match book.turn.as_mut() {
+                    Some(turn) => {
+                        turn.hand = Hand::Loose;
+                        turn.loose = 0.0;
+                    }
+                    None => {
+                        let Some(shown) = book.shown.clone() else { return };
+                        book.turn = Some(Turning { from: shown.clone(), to: shown, committed: false, hand: Hand::Loose, loose: 0.0, mine: true, peel: None, back: false });
+                    }
+                }
+                book.leaf.grab = Some((p, book.leaf.points[p]));
+                play(&mut commands, &art, &assets, &mixer, "book_rustle");
+                return;
+            }
+            let newest = scraps.iter().filter_map(|(e, s)| s.leaf.pick(sight, LOOSE_REACH, false, TOP).map(|p| (s.age, e, p))).max_by_key(|(age, ..)| *age);
+            if let Some((_, e, p)) = newest {
+                if let Ok((_, mut scrap)) = scraps.get_mut(e) {
+                    let from = scrap.leaf.points[p];
+                    scrap.leaf.grab = Some((p, from));
+                    scrap.held = true;
+                    play(&mut commands, &art, &assets, &mixer, "book_rustle");
+                    return;
+                }
+            }
+        }
+    }
     // take hold: only of a page lying still, with a page after it to uncover
     if pressed && book.turn.is_none() && book.drag_ok && book.open >= 1.0 {
         let Some(c) = cursor else { return };
@@ -800,7 +904,18 @@ fn hold_leaf(
             return;
         }
         let Some(hit) = cursor_on(camera, at, c, LEAF_FLOOR.right) else { return };
-        if !(GUTTER..GUTTER + PAGE_W).contains(&hit.x) || hit.z.abs() > PAGE_H / 2.0 || !book.take_up(Hand::Reader) {
+        if hit.z.abs() > PAGE_H / 2.0 {
+            return;
+        }
+        // the left-hand page turns back to the spread before, when the tale has one
+        let taken = if (GUTTER..GUTTER + PAGE_W).contains(&hit.x) {
+            book.take_up(Hand::Reader)
+        } else if (-(GUTTER + PAGE_W)..-GUTTER).contains(&hit.x) {
+            book.take_up_back(Hand::Reader)
+        } else {
+            false
+        };
+        if !taken {
             return;
         }
         // a glued leaf is taken by its border, to be peeled
@@ -809,6 +924,24 @@ fn hold_leaf(
         book.leaf.grab = Some((point, book.leaf.points[point]));
         tell(book, hit, Some(point), true);
         play(&mut commands, &art, &assets, &mixer, "book_rustle");
+        return;
+    }
+    // a piece torn loose, carried: lifted a little over whatever it is carried across
+    if matches!(book.turn.as_ref().map(|t| &t.hand), Some(Hand::Loose)) {
+        match cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right + LIFT)) {
+            Some(hand) if down => {
+                if let Some((p, _)) = book.leaf.grab {
+                    book.leaf.grab = Some((p, hand));
+                }
+                tell(book, hand, None, false);
+            }
+            _ => {
+                book.leaf.grab = None;
+                if let Some(turn) = book.turn.as_mut() {
+                    turn.hand = Hand::Gone;
+                }
+            }
+        }
         return;
     }
     let holding = matches!(book.turn.as_ref().map(|t| &t.hand), Some(Hand::Reader));
@@ -824,9 +957,18 @@ fn hold_leaf(
         let hand = book.leaf.grab.map(|(_, h)| h).unwrap_or_default();
         tell(book, hand, None, true);
         book.leaf.grab = None;
-        let over = book.leaf.side() < 0.15;
+        let back = book.turn.as_ref().is_some_and(|t| t.back);
+        let over = if back { book.leaf.side() > -0.15 } else { book.leaf.side() < 0.15 };
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
+        if back {
+            if over {
+                turn.committed = true;
+                turned_back.write(TurnedBack);
+                play(&mut commands, &art, &assets, &mixer, "book_flip");
+            }
+            return;
+        }
         // a leaf peeled off a secret opens the book's own spread: the story does not read on
         if over && turn.peel.is_none() {
             turn.committed = true;
@@ -854,7 +996,10 @@ fn hold_leaf(
     let pull = out.normalize_or_zero() * beyond * PULL;
     let hand = Vec3::new(x + pull.x, y, z + pull.y);
     book.leaf.grab = Some((point, hand));
-    tell(book, hand, Some(point), false);
+    // a page turned back is told the others whole when it lands, not hand by hand: there the
+    // hand would take up the right-hand page instead
+    let back = book.turn.as_ref().is_some_and(|t| t.back);
+    tell(book, hand, (!back).then_some(point), false);
 }
 
 /// Dev: `TROPA_GHOST=1` plays a second reader, as their machine would tell of them: a hand that
@@ -1024,7 +1169,7 @@ fn move_leaf(
     }
     // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned;
     // a torn leaf stays as it lies, holes and loose pieces and all, over the page beneath
-    let (from, to, committed, turn_mine, peel) = (turn.from.clone(), turn.to.clone(), turn.committed, turn.mine, turn.peel);
+    let (from, to, committed, turn_mine, peel, back) = (turn.from.clone(), turn.to.clone(), turn.committed, turn.mine, turn.peel, turn.back);
     book.turn = None;
     // a leaf peeled over onto the left has opened its secret, whoever's hand it was in
     if let Some(act) = peel.filter(|_| book.leaf.side() < 0.0) {
@@ -1040,6 +1185,13 @@ fn move_leaf(
         if lost - book.charged > 0.005 {
             torn.write(Torn { lost: lost - book.charged, mine: turn_mine });
             book.charged = lost;
+        }
+    } else if back {
+        // turned back over, the leaf is the right-hand page before; fallen back, the left again
+        if committed && book.leaf.side() > 0.0 {
+            book.wear(Face::Right, &to, Half::Right);
+        } else {
+            book.wear(Face::Left, &from, Half::Left);
         }
     } else if committed && book.leaf.side() < 0.0 {
         book.wear(Face::Left, &to, Half::Left);
@@ -1094,7 +1246,8 @@ fn keep_scraps(
         let part = ScrapPart { age };
         // a hair lower than a leaf lying where it lay, so the next leaf settles over it cleanly
         let place = Transform::from_xyz(0.0, -0.0015, 0.0);
-        for ((spread, half), back_side) in [(front, false), (back, true)] {
+        let shapes = [meshes.add(leaf_mesh(&leaf, false)), meshes.add(leaf_mesh(&leaf, true))];
+        for (((spread, half), back_side), shape) in [(front, false), (back, true)].into_iter().zip(shapes.clone()) {
             let tex = target(&mut images, PAGE_PX);
             let cam = commands
                 .spawn((ScrapPart { age }, PageCamera, Camera2d, Camera { order: -20, clear_color: ClearColorConfig::Custom(Color::srgb(0.93, 0.88, 0.76)), ..default() }, RenderTarget::Image(tex.clone().into())))
@@ -1102,7 +1255,7 @@ fn keep_scraps(
             let canvas = commands.spawn((ScrapPart { age }, Node { width: px(PAGE_PX.x as f32), height: px(PAGE_PX.y as f32), ..default() }, UiTargetCamera(cam))).id();
             print_page(&mut commands, canvas, &spread, half, &fonts, &art, &assets);
             let material = materials.add(StandardMaterial { base_color_texture: Some(tex), perceptual_roughness: 0.95, ..default() });
-            let mut mesh = commands.spawn((ScrapPart { age }, Mesh3d(meshes.add(leaf_mesh(&leaf, back_side))), MeshMaterial3d(material), place, bevy::light::NotShadowReceiver));
+            let mut mesh = commands.spawn((ScrapPart { age }, Mesh3d(shape), MeshMaterial3d(material), place, bevy::light::NotShadowReceiver));
             if back_side {
                 mesh.insert(bevy::light::NotShadowCaster);
             }
@@ -1117,7 +1270,67 @@ fn keep_scraps(
             perceptual_roughness: 0.95,
             ..default()
         });
-        commands.spawn((part, Mesh3d(meshes.add(fringe)), MeshMaterial3d(fibres), place, bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver));
+        let fringe = meshes.add(fringe);
+        commands.spawn((part, Mesh3d(fringe.clone()), MeshMaterial3d(fibres), place, bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver));
+        let [front, back] = shapes;
+        commands.spawn((ScrapPart { age }, ScrapLeaf { age, leaf, meshes: [front, back, fringe], held: false, active: 0.0 }));
+    }
+}
+
+/// A scrap's paper: still, until a hand takes it up, then run until it lies still again.
+#[derive(Component)]
+struct ScrapLeaf {
+    age: u32,
+    leaf: Leaf,
+    /// Its two faces and the fibres along its tears.
+    meshes: [Handle<Mesh>; 3],
+    held: bool,
+    /// Seconds it may yet stir after being let go.
+    active: f32,
+}
+
+/// Runs the scraps that are in the hand or falling, and lays those under a page that has come
+/// down over them out of sight.
+fn run_scraps(time: Res<Time>, mut book: ResMut<Book>, mut scraps: Query<&mut ScrapLeaf>, mut meshes: ResMut<Assets<Mesh>>) {
+    let covered = std::mem::take(&mut book.covered);
+    let dt = time.delta_secs();
+    let steps = ((dt * LEAF_RATE).round() as usize).clamp(1, 4);
+    for mut scrap in &mut scraps {
+        let scrap = &mut *scrap;
+        let mut changed = false;
+        for half in &covered {
+            let on = move |p: Vec3| {
+                let x = match half {
+                    Half::Left => -p.x,
+                    Half::Right => p.x,
+                };
+                x > 0.0 && x < GUTTER + PAGE_W + 0.01 && p.z.abs() < PAGE_H / 2.0 + 0.01
+            };
+            changed |= scrap.leaf.sink(on, TOP - 0.003);
+        }
+        if scrap.held || scrap.active > 0.0 {
+            for _ in 0..steps {
+                scrap.leaf.step(1.0 / LEAF_RATE);
+            }
+            if !scrap.held {
+                scrap.active -= dt;
+                if scrap.leaf.still() {
+                    scrap.active = 0.0;
+                }
+            }
+            changed = true;
+        }
+        if changed {
+            let [front, back, fringe] = &scrap.meshes;
+            for (handle, back_side) in [(front, false), (back, true)] {
+                if let Some(mut mesh) = meshes.get_mut(handle) {
+                    shape_leaf(&mut mesh, &scrap.leaf, back_side);
+                }
+            }
+            if let Some(mut mesh) = meshes.get_mut(fringe) {
+                shape_fringe(&mut mesh, &scrap.leaf);
+            }
+        }
     }
 }
 

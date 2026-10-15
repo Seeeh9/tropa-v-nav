@@ -74,12 +74,15 @@ pub struct Tale {
     votes: HashMap<String, HashMap<u8, bool>>,
     /// The book was shut before the scene was read out.
     skipped: bool,
+    /// Pages of the scene already read, the last read last: turning back goes to them.
+    past: Vec<Page>,
 }
 
 impl Tale {
     fn tell(&mut self, pages: Vec<Page>) {
         if self.pages.is_empty() {
             self.total = 0;
+            self.past.clear();
         }
         self.total += pages.len();
         self.pages.extend(pages);
@@ -89,6 +92,9 @@ impl Tale {
         !self.pages.is_empty()
     }
 }
+
+/// A page turned back is told the others as its key behind this mark.
+const BACK: &str = "<";
 
 fn page(id: &str) -> Page {
     Page { picture: format!("story/{id}"), text: format!("story-{id}"), title: None, closes: false }
@@ -257,12 +263,17 @@ enum Turn {
     Leaf,
     /// Another reader turned the leaf by hand.
     TheirLeaf,
+    /// The reader turned the left-hand page back, by hand or key: back a page.
+    Back,
+    /// Another reader turned a page back.
+    TheirBack,
 }
 
 fn turn_pages(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut turned: MessageReader<crate::book::Turned>,
+    mut turned_back: MessageReader<crate::book::TurnedBack>,
     mut torn: MessageReader<crate::book::Torn>,
     mut found: MessageReader<crate::book::Found>,
     mut tale: ResMut<Tale>,
@@ -299,11 +310,14 @@ fn turn_pages(
     }
     if !tale.open() {
         turned.clear();
+        turned_back.clear();
         return;
     }
     // the reader turned the leaf by hand
     if turned.read().count() > 0 {
         commands.trigger(Turn::Leaf);
+    } else if turned_back.read().count() > 0 || keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::Backspace]) {
+        commands.trigger(Turn::Back);
     } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
@@ -314,6 +328,31 @@ fn turn_pages(
 fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, net: Option<ResMut<Net>>, speaking: Query<Entity, With<Narration>>) {
     let skip = matches!(*turn, Turn::Skip);
     let by_hand = matches!(*turn, Turn::Leaf | Turn::TheirLeaf);
+    // back a page: for everyone, when the page is read together
+    if matches!(*turn, Turn::Back | Turn::TheirBack) {
+        if tale.past.is_empty() {
+            return;
+        }
+        if let (Some(mut net), Some(page)) = (net, tale.pages.front()) {
+            if shared(&net, page) && matches!(*turn, Turn::Back) {
+                net.node.book_turn(&format!("{BACK}{}", page.text));
+            }
+        }
+        for e in &speaking {
+            commands.entity(e).despawn();
+        }
+        if let Some(page) = tale.pages.front() {
+            let key = page.text.clone();
+            tale.votes.remove(&key);
+        }
+        if let Some(page) = tale.past.pop() {
+            tale.pages.push_front(page);
+        }
+        if let Some(e) = tale.shown.take() {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
     if let (Some(mut net), Some(page)) = (net, tale.pages.front()) {
         let together = shared(&net, page);
         let key = page.text.clone();
@@ -340,8 +379,8 @@ fn advance(commands: &mut Commands, tale: &mut Tale, speaking: &Query<Entity, Wi
     if skip {
         tale.skipped = tale.pages.len() > 1;
         tale.pages.clear();
-    } else {
-        tale.pages.pop_front();
+    } else if let Some(page) = tale.pages.pop_front() {
+        tale.past.push(page);
     }
     if let Some(e) = tale.shown.take() {
         commands.entity(e).despawn();
@@ -412,6 +451,7 @@ fn book_hands(mut commands: Commands, tale: Res<Tale>, net: Option<ResMut<Net>>,
             }
             Note::BookTear { page: p, edge, .. } if p == page => book.remote_tear(edge),
             Note::BookTurn { page: p, .. } if p == page => commands.trigger(Turn::TheirLeaf),
+            Note::BookTurn { page: p, .. } if p.strip_prefix(BACK) == Some(page.as_str()) => commands.trigger(Turn::TheirBack),
             _ => {}
         }
     }
@@ -525,6 +565,7 @@ fn show_page(
     };
     book.spread = spread(page, at);
     book.next = tale.pages.get(1).map(|p| spread(p, at + 1));
+    book.prev = tale.past.last().filter(|_| at > 1).map(|p| spread(p, at - 1));
     book.drag_ok = true;
     book.shared = together;
     commands.spawn((

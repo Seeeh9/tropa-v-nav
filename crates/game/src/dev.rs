@@ -11,6 +11,8 @@
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release)
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
+//!   TROPA_STORY=<scene>         open a story scene in the book at once (see story.rs), TROPA_STORY_PAGE=<n> on its n-th page
+//!   TROPA_GHOST=1               a second reader's hand turns the book's leaf, as their machine would tell it
 
 use crate::session::Db;
 use crate::AppState;

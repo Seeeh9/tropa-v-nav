@@ -182,6 +182,8 @@ pub struct Book {
     /// A torn leaf lies where it came to rest, in place of a whole page.
     kept: bool,
     leaf_meshes: (Handle<Mesh>, Handle<Mesh>),
+    /// The fibres along the leaf's tears.
+    fringe: Handle<Mesh>,
     /// 0 closed .. 1 open.
     open: f32,
     /// The cover's sounds have been played for this opening.
@@ -286,6 +288,97 @@ fn leaf_mesh(leaf: &Leaf, back: bool) -> Mesh {
     mesh
 }
 
+/// How far the fringe of a torn edge reaches into the paper (a band of bared white fibres over
+/// the print) and out past the edge (loose fibres), in scene units; a page is one unit wide.
+const FRINGE_IN: f32 = 0.012;
+const FRINGE_OUT: f32 = 0.01;
+/// Length of torn edge one repeat of the fringe's picture covers.
+const FRINGE_SPAN: f32 = 0.12;
+
+/// A cheap, repeatable hash of a number to 0..1.
+fn hash(n: u32) -> f32 {
+    let mut x = n.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x & 0xFFFF) as f32 / 65535.0
+}
+
+/// The picture laid along a torn edge: across it (rows) from inside the paper to beyond the edge,
+/// along it (columns, repeating). Inside, the paper's top layer is torn away and its pale fibres
+/// show, fading into the print; the edge itself wanders; past it, loose fibres hang out.
+fn fringe_picture() -> Image {
+    use bevy::render::render_resource::{Extent3d, TextureDimension};
+    const W: u32 = 256;
+    const H: u32 = 64;
+    // value noise along the edge, wrapping so the picture repeats without a seam
+    let wander = |x: u32| -> f32 {
+        let mut sum = 0.0;
+        for (period, weight, salt) in [(64u32, 0.6, 1u32), (16, 0.3, 2), (4, 0.1, 3)] {
+            let cells = W / period;
+            let k = x / period;
+            let t = (x % period) as f32 / period as f32;
+            let s = t * t * (3.0 - 2.0 * t);
+            let a = hash(k % cells + salt * 1000);
+            let b = hash((k + 1) % cells + salt * 1000);
+            sum += weight * (a + (b - a) * s);
+        }
+        sum
+    };
+    let edge_at = FRINGE_IN / (FRINGE_IN + FRINGE_OUT);
+    let mut data = Vec::with_capacity((W * H * 4) as usize);
+    for y in 0..H {
+        let v = y as f32 / (H - 1) as f32;
+        for x in 0..W {
+            let edge = edge_at + (wander(x) - 0.5) * 0.35;
+            // a loose fibre here and there, hanging out past the edge a way
+            let strand = hash(x * 7 + 11) < 0.22 && v < edge + 0.06 + hash(x * 13 + 5) * 0.4;
+            let alpha = if v <= edge {
+                // the bared fibres fade in from the print towards the edge
+                let t = (v / edge).clamp(0.0, 1.0);
+                t * t * 0.95
+            } else if strand {
+                0.75
+            } else {
+                0.0
+            };
+            let grain = 0.9 + 0.1 * hash(x * 131 + y * 977);
+            let cream = [0.95, 0.92, 0.85].map(|c: f32| (c * grain * 255.0) as u8);
+            data.extend_from_slice(&[cream[0], cream[1], cream[2], (alpha * 255.0) as u8]);
+        }
+    }
+    let mut image = Image::new(Extent3d { width: W, height: H, depth_or_array_layers: 1 }, TextureDimension::D2, data, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    image.sampler = ImageSampler::linear();
+    image.sampler.get_or_init_descriptor().set_address_mode(ImageAddressMode::Repeat);
+    image
+}
+
+/// The fringes of every torn edge, on both faces of the paper.
+fn shape_fringe(mesh: &mut Mesh, leaf: &Leaf) {
+    let (mut positions, mut normals, mut uvs, mut indices) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for rim in leaf.rims() {
+        let u0 = (rim.seed as f32 * 0.618).fract();
+        let u1 = u0 + rim.a.distance(rim.b) / FRINGE_SPAN;
+        for lift in [0.0008, -0.0008] {
+            let up = rim.normal * lift;
+            let base = positions.len() as u32;
+            for (p, into, u) in [(rim.a, rim.into_a, u0), (rim.b, rim.into_b, u1)] {
+                positions.push((p + into * FRINGE_IN + up).to_array());
+                uvs.push([u, 0.0]);
+                positions.push((p - into * FRINGE_OUT + up).to_array());
+                uvs.push([u, 1.0]);
+                normals.push(rim.normal.to_array());
+                normals.push(rim.normal.to_array());
+            }
+            indices.extend([base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+        }
+    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+}
+
 /// Lays the leaf's particles into its mesh. A tear adds particles, so everything is rebuilt.
 fn shape_leaf(mesh: &mut Mesh, leaf: &Leaf, back: bool) {
     let positions: Vec<[f32; 3]> = leaf.points.iter().map(|p| p.to_array()).collect();
@@ -388,6 +481,20 @@ fn setup(
         }
     }
 
+    // the fringes of the leaf's tears: pale fibres along every torn edge
+    let mut fringe = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    shape_fringe(&mut fringe, &leaf);
+    let fringe = meshes.add(fringe);
+    let fibres = materials.add(StandardMaterial {
+        base_color_texture: Some(images.add(fringe_picture())),
+        alpha_mode: AlphaMode::Blend,
+        double_sided: true,
+        cull_mode: None,
+        perceptual_roughness: 0.95,
+        ..default()
+    });
+    commands.spawn((LeafMesh, Mesh3d(fringe.clone()), MeshMaterial3d(fibres), Transform::default(), Visibility::Hidden, bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver));
+
     // the front cover hinges on the spine; closed it lies over the right page
     let cover_front = materials.add(StandardMaterial {
         base_color_texture: art.image(&assets, "book/cover"),
@@ -480,6 +587,7 @@ fn setup(
         leaf,
         kept: false,
         leaf_meshes: (front, back),
+        fringe,
         open: 0.0,
         heard: false,
     });
@@ -818,6 +926,9 @@ fn move_leaf(
         if let Some(mut mesh) = meshes.get_mut(handle) {
             shape_leaf(&mut mesh, &book.leaf, back);
         }
+    }
+    if let Some(mut mesh) = meshes.get_mut(&book.fringe) {
+        shape_fringe(&mut mesh, &book.leaf);
     }
     if !matches!(turn.hand, Hand::Gone) || !book.leaf.still() {
         return;

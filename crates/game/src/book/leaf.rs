@@ -52,6 +52,16 @@ impl Floor {
     }
 }
 
+/// One side of a torn edge, for drawing its fringe of fibres: see [`Leaf::rims`].
+pub struct Rim {
+    pub a: Vec3,
+    pub b: Vec3,
+    pub into_a: Vec3,
+    pub into_b: Vec3,
+    pub normal: Vec3,
+    pub seed: u32,
+}
+
 struct Link {
     a: usize,
     b: usize,
@@ -425,6 +435,40 @@ impl Leaf {
     pub fn lost(&self) -> f32 {
         let held = self.held();
         1.0 - held.iter().filter(|h| **h).count() as f32 / held.len() as f32
+    }
+
+    /// The torn edges of paper, one per torn edge and side: the edge's two ends `a`, `b` as the
+    /// cell on that side has them, each end's step into that cell (`into_a`, `into_b`, unit
+    /// vectors), the cell's normal, and the edge's index (to vary the fringe drawn along it).
+    pub fn rims(&self) -> Vec<Rim> {
+        let mut out = Vec::new();
+        for e in (0..EDGES).filter(|e| self.cut[*e]) {
+            // the side cells, and which of each one's corners are on the edge and which inside
+            let sides: [Option<(usize, [usize; 4])>; 2] = if e < CX * NZ {
+                let (i, j) = (e % CX, e / CX);
+                // the cell above has the edge at its foot, the one below at its head
+                [(j > 0).then(|| (cell(i, j - 1), [2, 3, 0, 1])), (j < CZ).then(|| (cell(i, j), [0, 1, 2, 3]))]
+            } else {
+                let k = e - CX * NZ;
+                let (i, j) = (k / CZ, k % CZ);
+                // the cell to the spine side has it at its far edge, the other at its spine edge
+                [(i > 0).then(|| (cell(i - 1, j), [1, 3, 0, 2])), (i < CX).then(|| (cell(i, j), [0, 2, 1, 3]))]
+            };
+            for (c, [ea, eb, ia, ib]) in sides.into_iter().flatten() {
+                let corners = self.cells[c].map(|p| self.points[p]);
+                let [hs, he, fs, fe] = corners;
+                let (a, b) = (corners[ea], corners[eb]);
+                out.push(Rim {
+                    a,
+                    b,
+                    into_a: (corners[ia] - a).normalize_or_zero(),
+                    into_b: (corners[ib] - b).normalize_or_zero(),
+                    normal: (fe - hs).cross(he - fs).normalize_or(Vec3::Y),
+                    seed: e as u32,
+                });
+            }
+        }
+        out
     }
 
     /// Tears an edge torn on another machine. The same edges torn in the same order give the

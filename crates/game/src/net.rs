@@ -254,6 +254,17 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
+    // dev shortcut: TROPA_POTIONS=a,b fills every belt with those draughts
+    if let Ok(list) = std::env::var("TROPA_POTIONS") {
+        let potions: Vec<String> = list.split(',').map(|s| s.trim().to_string()).filter(|s| db.potions.contains_key(s)).collect();
+        for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+            if let Some(run) = n.state.as_mut() {
+                for p in &mut run.players {
+                    p.potions = potions.clone();
+                }
+            }
+        }
+    }
     // dev shortcut: TROPA_FIGHT=leshy,tree_guard opens on that fight
     if let Ok(list) = std::env::var("TROPA_FIGHT") {
         let enemies: Vec<String> = list.split(',').map(|s| s.trim().to_string()).filter(|s| db.enemies.contains_key(s)).collect();

@@ -8,6 +8,7 @@
 //!   TROPA_SHRINE=<0..2>         pretend the shrine stands at this level (in memory only; never saved by a screenshot run)
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
 //!   TROPA_SEED=<n>              fixed seed for that run
+//!   TROPA_POTIONS=<id>,<id>     every player's belt holds these draughts
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release)
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit

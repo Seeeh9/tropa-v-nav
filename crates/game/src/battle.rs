@@ -531,7 +531,8 @@ fn enter(
 
             p.spawn((
                 PotionBelt,
-                Node { position_type: PositionType::Absolute, left: px(40), top: px(880), flex_direction: FlexDirection::Column, row_gap: px(6), ..default() },
+                // up under the relics, out of the hand's and the piles' way
+                Node { position_type: PositionType::Absolute, left: px(18), top: px(150), column_gap: px(10), ..default() },
                 Pickable::IGNORE,
             ));
             p.spawn((HandLayer, layer(), Pickable::IGNORE));
@@ -1235,6 +1236,8 @@ fn sync_potions(
     chips: Query<(Entity, &PotionChip)>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
 ) {
     let potions = &session.my_hero().potions;
     let same = chips.iter().count() == potions.len() && chips.iter().all(|(_, c)| potions.get(c.slot as usize) == Some(&c.id));
@@ -1253,14 +1256,28 @@ fn sync_potions(
             Hovered::default(),
             Btn(theme::SWAMP),
             Pickable { should_block_lower: false, is_hoverable: true },
-            Node { width: px(200), padding: UiRect::axes(px(10), px(6)), border: UiRect::all(px(2)), justify_content: JustifyContent::Center, ..default() },
+            // a flask: its picture when painted (potions/<id>), else a disc; what it does on hover
+            crate::run_ui::CardHints::new(vec![(l10n.t(&format!("potion-{id}")), l10n.t(&format!("potion-{id}-desc")))]),
+            Node { width: px(68), height: px(68), padding: UiRect::all(px(4)), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
             BackgroundColor(theme::SWAMP),
             BorderColor::all(theme::ROTLIGHT),
+            BoxShadow::new(Color::BLACK.with_alpha(0.6), px(0), px(3), px(0), px(6)),
             UiTransform::IDENTITY,
             GlobalZIndex(40),
-            children![theme::text(l10n.t(&format!("potion-{id}")), &fonts.body, 17.0, theme::BONE)],
             ChildOf(*belt),
         ));
+        e.with_children(|f| {
+            match art.image(&assets, &format!("potions/{id}")) {
+                Some(h) => f.spawn((Node { width: percent(100), height: percent(100), ..default() }, ImageNode::new(h), Pickable::IGNORE)),
+                // until it has a picture, the first letters of its name tell one from another
+                None => f.spawn((
+                    Node { width: percent(100), height: percent(100), border_radius: BorderRadius::MAX, align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
+                    BackgroundColor(theme::ROTLIGHT.with_alpha(0.6)),
+                    Pickable::IGNORE,
+                    children![theme::text(l10n.t(&format!("potion-{id}")).chars().take(2).collect::<String>(), &fonts.title, 24.0, theme::SOOT)],
+                )),
+            };
+        });
         // untargeted and ally draughts are drunk on a click; the rest must be thrown at something
         if !needs_target {
             e.observe(move |_: On<Activate>, mut outbox: ResMut<Outbox>| outbox.0.push(CombatAction::UsePotion { slot, target: None }));

@@ -527,6 +527,7 @@ fn ware(commands: &mut Commands, parent: Entity, sold: Option<(String, String, S
         return;
     };
     let base = if can_pay { theme::PEAT } else { theme::SOOT };
+    let letters: String = name.chars().take(2).collect();
     let mut e = commands.spawn((
         Button,
         Hovered::default(),
@@ -540,11 +541,13 @@ fn ware(commands: &mut Commands, parent: Entity, sold: Option<(String, String, S
     e.with_children(|b| {
         match art.image(assets, &picture) {
             Some(h) => b.spawn((Node { width: percent(100), height: percent(100), ..default() }, ImageNode::new(h), Pickable::IGNORE)),
+            // until it has a picture, the first letters of its name tell one from another
             None => b.spawn((
-                Node { width: percent(100), height: percent(100), border: UiRect::all(px(4)), border_radius: BorderRadius::MAX, ..default() },
+                Node { width: percent(100), height: percent(100), border: UiRect::all(px(4)), border_radius: BorderRadius::MAX, align_items: AlignItems::Center, justify_content: JustifyContent::Center, ..default() },
                 BackgroundColor(tint.with_alpha(0.55)),
                 BorderColor::all(tint),
                 Pickable::IGNORE,
+                children![theme::text(letters, &fonts.title, 36.0, theme::SOOT)],
             )),
         };
     });

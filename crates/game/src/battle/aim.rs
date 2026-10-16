@@ -17,6 +17,8 @@ const DOTS: usize = 18;
 pub(super) const AIM_SPOT: Vec2 = Vec2::new((STAGE_W - CARD_W) / 2.0, HAND_TOP - HAND_LIFT - 90.0);
 /// How far a card must be lifted out of the hand before it is aimed, or played if it needs no aim.
 pub(super) const LIFT_TO_AIM: f32 = 130.0;
+/// How far a potion that needs no target must be pulled from the belt to be drunk on release.
+pub(super) const POTION_PULL: f32 = 120.0;
 
 const FOE: Color = Color::srgb(0.86, 0.18, 0.12);
 const FRIEND: Color = Color::srgb(0.36, 0.82, 0.38);
@@ -110,7 +112,7 @@ pub(super) fn spawn_arrow(p: &mut ChildSpawnerCommands, images: &mut Assets<Imag
 }
 
 /// Does a card or potion with this aim need a unit chosen for it?
-fn needs_unit(target: CardTarget, alone: bool) -> bool {
+pub(super) fn needs_unit(target: CardTarget, alone: bool) -> bool {
     !(target == CardTarget::None || (target == CardTarget::Ally && alone))
 }
 
@@ -185,14 +187,19 @@ fn track(
     }
     for (chip, _, at, node) in &chips {
         let Some(def) = db.0.potions.get(&chip.id) else { continue };
-        if !needs_unit(def.target, alone) {
-            continue;
-        }
         // the chip's centre, from window pixels to the stage
         let centre = at.translation / window.scale_factor();
-        let from = crate::stage_point(&window, scale.0, centre) - Vec2::new(0.0, node.size().y / window.scale_factor() / scale.0 / 2.0);
-        let target = under.filter(|u| takes(&session, def.target, false, *u, false));
-        let action = target.map(|t| CombatAction::UsePotion { slot: chip.slot, target: Some(t) });
+        // from the flask's lower rim: the belt hangs high, so the arrow starts below it
+        let from = crate::stage_point(&window, scale.0, centre) + Vec2::new(0.0, node.size().y / window.scale_factor() / scale.0 / 2.0);
+        let (target, action) = if needs_unit(def.target, alone) {
+            let target = under.filter(|u| takes(&session, def.target, false, *u, false));
+            (target, target.map(|t| CombatAction::UsePotion { slot: chip.slot, target: Some(t) }))
+        } else {
+            // a draught for nobody in particular: pulled far enough, the arrow turns green and
+            // letting go drinks it
+            let pulled = cursor.is_some_and(|c| c.distance(from) > POTION_PULL);
+            (pulled.then_some(UnitRef::Hero(session.me)), pulled.then_some(CombatAction::UsePotion { slot: chip.slot, target: None }))
+        };
         next = Aim { what: Some(Aimed::Potion(chip.slot)), from, to: cursor.unwrap_or_default(), target, action };
     }
     *aim = next;
@@ -211,8 +218,12 @@ fn draw_arrow(
         None => NOBODY,
     };
     let (a, b) = (aim.from, aim.to);
-    // a curve that bows upward, more the further sideways it has to reach
-    let ctrl = Vec2::new(a.x + (b.x - a.x) * 0.15, a.y.min(b.y) - 120.0 - (b.x - a.x).abs() * 0.25);
+    // a curve that bows upward, more the further sideways it has to reach; from the belt high on
+    // the left it only sags a little, so it never runs off the top of the screen
+    let ctrl = match aim.what {
+        Some(Aimed::Potion(_)) => Vec2::new(a.x + (b.x - a.x) * 0.5, (a.y.min(b.y) - 40.0).max(a.y.max(b.y) - 0.6 * (b - a).length()).max(20.0)),
+        _ => Vec2::new(a.x + (b.x - a.x) * 0.15, a.y.min(b.y) - 120.0 - (b.x - a.x).abs() * 0.25),
+    };
     let at = |t: f32| a * (1.0 - t) * (1.0 - t) + ctrl * 2.0 * t * (1.0 - t) + b * t * t;
     let vis = if shown { Visibility::Inherited } else { Visibility::Hidden };
     for (dot, mut node, mut v, mut bg) in &mut dots {

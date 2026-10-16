@@ -20,7 +20,7 @@ pub const CARD_H: f32 = 310.0;
 const HAND_TOP: f32 = 955.0;
 /// How far the card under the cursor rises out of the hand; its neighbours rise by a share of this.
 const HAND_LIFT: f32 = 205.0;
-const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
+pub(crate) const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
 const ENEMY_SIZE: Vec2 = Vec2::new(230.0, 345.0);
 /// Room above a unit's sprite for its intent.
 const HEAD_ROOM: f32 = 62.0;
@@ -251,7 +251,7 @@ struct HandReach(Option<f32>);
 // ---- layout ----
 
 /// How far a backdrop is lifted, in stage pixels, so that its ground meets the units' feet.
-fn ground_lift(backdrop: &str) -> f32 {
+pub(crate) fn ground_lift(backdrop: &str) -> f32 {
     match backdrop {
         "bg/act2_battle" => 155.0,
         "bg/act3_battle" => 140.0,
@@ -259,7 +259,7 @@ fn ground_lift(backdrop: &str) -> f32 {
     }
 }
 
-fn hero_foot(slot: u8) -> Vec2 {
+pub(crate) fn hero_foot(slot: u8) -> Vec2 {
     // staggered front and back rows, far enough apart that every HP bar stays readable
     match slot {
         0 => Vec2::new(670.0, 700.0),
@@ -1282,17 +1282,18 @@ fn sync_potions(
         if !needs_target {
             e.observe(move |_: On<Activate>, mut outbox: ResMut<Outbox>| outbox.0.push(CombatAction::UsePotion { slot, target: None }));
         }
-        e.observe(move |ev: On<PointerDrag>, mut commands: Commands, scale: Res<UiScale>, mut q: Query<&mut UiTransform, With<PotionChip>>| {
-            // one that must be thrown at something is aimed with the arrow from its place
+        // dragged, every potion is aimed with the arrow from its place on the belt, as cards are
+        e.observe(move |ev: On<PointerDrag>, mut commands: Commands| {
             commands.entity(ev.event_target()).insert(aim::Thrown);
-            if let (false, Ok(mut tf)) = (needs_target, q.get_mut(ev.event_target())) {
-                tf.translation = Val2::px(ev.distance.x / scale.0, ev.distance.y / scale.0);
-            }
         });
-        e.observe(|ev: On<PointerDragEnd>, mut commands: Commands, mut q: Query<&mut UiTransform, With<PotionChip>>| {
+        // one that lands on nobody in particular is drunk once the arrow has been drawn far enough
+        e.observe(move |ev: On<PointerDragEnd>, mut commands: Commands, scale: Res<UiScale>, session: Option<Res<Session>>, db: Res<Db>, mut outbox: ResMut<Outbox>, chips: Query<&PotionChip>| {
             commands.entity(ev.event_target()).remove::<aim::Thrown>();
-            if let Ok(mut tf) = q.get_mut(ev.event_target()) {
-                tf.translation = Val2::ZERO;
+            let (Some(session), Ok(chip)) = (session, chips.get(ev.event_target())) else { return };
+            let alone = session.truth.standing_heroes().count() == 1;
+            let aimed = db.0.potions.get(&chip.id).is_some_and(|d| aim::needs_unit(d.target, alone));
+            if !aimed && ev.distance.length() / scale.0 > aim::POTION_PULL {
+                outbox.0.push(CombatAction::UsePotion { slot: chip.slot, target: None });
             }
         });
     }
@@ -1474,9 +1475,12 @@ fn on_drop(
     db: Res<Db>,
     mut outbox: ResMut<Outbox>,
 ) {
-    // a potion thrown at a unit
+    // a potion thrown at a unit; one that needs nobody is drunk when its drag ends instead
     if let (Ok(unit), Ok(chip)) = (units.get(ev.event_target()), potions.get(ev.dropped)) {
-        outbox.0.push(CombatAction::UsePotion { slot: chip.slot, target: Some(unit.unit) });
+        let alone = session.as_ref().is_some_and(|s| s.truth.standing_heroes().count() == 1);
+        if db.0.potions.get(&chip.id).is_some_and(|d| aim::needs_unit(d.target, alone)) {
+            outbox.0.push(CombatAction::UsePotion { slot: chip.slot, target: Some(unit.unit) });
+        }
         return;
     }
     let (Ok(unit), Ok(w), Some(session)) = (units.get(ev.event_target()), cards.get(ev.dropped), session) else { return };

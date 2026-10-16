@@ -3,6 +3,7 @@
     python tools/intentart.py <intent kind> [...]   # in the order the pictures arrived
     python tools/intentart.py --again <dir>         # redo from kept originals <dir>/<kind>_*.jpg
     python tools/intentart.py --into status <name> [...]   # status icons, assets/status/
+    python tools/intentart.py --ink --into map <kind> [...]  # ink map symbols drawn on white
 
 
 Each picture is painted on flat black; the black is keyed out to transparency by brightness,
@@ -24,7 +25,16 @@ from flowart import ROOT, waiting  # noqa: E402
 LOW, HIGH = 14, 60
 
 
+# ink on white: the paper is keyed out instead and the ink turned white, to be tinted in game
+INK = False
+
+
 def key_out(im):
+    if INK:
+        dark = 255 - np.asarray(im.convert("L")).astype(np.float32)
+        alpha = np.clip((dark - 40) / 110, 0, 1)
+        out = np.dstack([np.full_like(dark, 255)] * 3 + [alpha * 255]).astype(np.uint8)
+        return Image.fromarray(out, "RGBA")
     rgb = np.asarray(im.convert("RGB")).astype(np.float32)
     bright = rgb.max(axis=2)
     alpha = np.clip((bright - LOW) / (HIGH - LOW), 0, 1)
@@ -48,12 +58,15 @@ def make(f, name):
     half = max(r - l, b - t) // 2 + side // 40
     cx, cy = (l + r) // 2, (t + b) // 2
     im = im.crop((cx - half, cy - half, cx + half, cy + half))
-    im.resize((128, 128), Image.LANCZOS).save(os.path.join(ROOT, "assets", FOLDER, f"{name}-gemini.png"))
+    im.resize((192, 192) if INK else (128, 128), Image.LANCZOS).save(os.path.join(ROOT, "assets", FOLDER, f"{name}-gemini.png"))
     print(FOLDER, name, (w, h))
 
 
 def main():
-    global FOLDER
+    global FOLDER, INK
+    if sys.argv[1:2] == ["--ink"]:
+        INK = True
+        del sys.argv[1]
     if sys.argv[1:2] == ["--into"]:
         FOLDER = sys.argv[2]
         del sys.argv[1:3]

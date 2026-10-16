@@ -67,7 +67,13 @@ pub struct Stock {
     pub cards: Vec<Option<(Id, i32)>>,
     pub relics: Vec<Option<(Id, i32)>>,
     pub potions: Vec<Option<(Id, i32)>>,
+    /// The player has already thrown a potion at the pedlar this visit.
+    #[serde(default)]
+    pub pelted: bool,
 }
+
+/// What the pedlar pays, flustered, for a potion broken over his head.
+pub const PELT_GOLD: i32 = 25;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Stage {
@@ -183,6 +189,10 @@ pub enum RunAction {
     Choose(u8),
     /// Throw away a potion to free the slot.
     DropPotion(u8),
+    /// Drink a healing potion between fights: only its healing works there.
+    DrinkPotion(u8),
+    /// Break a potion over the pedlar's head: he pays to be left alone (once a visit).
+    PeltPedlar(u8),
     /// The player tore a page of the tale's book, losing this share of the leaf (percent).
     /// Whatever is torn from the tale is torn from the one who held it.
     TearPage { lost: u8 },
@@ -191,6 +201,18 @@ pub enum RunAction {
     FindSecret { act: u8 },
     /// The player shut the book before the tale's chapter was done.
     SkipTale,
+}
+
+/// What a potion heals when drunk between fights: `(amount, everyone)`. Potions that do
+/// nothing but fight have none, and cannot be drunk there.
+pub fn out_of_fight_heals(effects: &[Effect]) -> Vec<(i32, bool)> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Heal(Amount::N(n), t) => Some((*n, *t == Tgt::AllFriends)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The relics hidden in the tale's book, one per act's secret.
@@ -749,6 +771,43 @@ impl Run {
                     return Err(RunError::BadChoice);
                 }
                 pl.potions.remove(*i as usize);
+            }
+            (RunAction::DrinkPotion(i), _) => {
+                if self.stage == Stage::Combat {
+                    return Err(RunError::WrongStage);
+                }
+                let id = self.players[p].potions.get(*i as usize).ok_or(RunError::BadChoice)?.clone();
+                let heals = c.potions.get(&id).map(|d| out_of_fight_heals(&d.effects)).unwrap_or_default();
+                if heals.is_empty() {
+                    return Err(RunError::BadChoice);
+                }
+                self.players[p].potions.remove(*i as usize);
+                for (n, all) in heals {
+                    for q in 0..self.players.len() {
+                        if q != p && !all {
+                            continue;
+                        }
+                        let pl = &mut self.players[q];
+                        let healed = n.min(pl.max_hp - pl.hp).max(0);
+                        if pl.hp > 0 && healed > 0 {
+                            pl.hp += healed;
+                            ev.push(RunEvent::Hp { player: q as u8, delta: healed });
+                        }
+                    }
+                }
+            }
+            (RunAction::PeltPedlar(i), Stage::Shop { stock, .. }) => {
+                if stock[p].pelted {
+                    return Err(RunError::AlreadyDone);
+                }
+                if *i as usize >= self.players[p].potions.len() {
+                    return Err(RunError::BadChoice);
+                }
+                stock[p].pelted = true;
+                let pl = &mut self.players[p];
+                pl.potions.remove(*i as usize);
+                pl.gold += PELT_GOLD;
+                ev.push(RunEvent::Gold { player, delta: PELT_GOLD });
             }
             (RunAction::FindSecret { act }, _) => {
                 if self.stage == Stage::Combat {

@@ -23,7 +23,7 @@ pub fn plugin(app: &mut App) {
         });
     }
     app.init_resource::<UpgradePick>()
-        .add_systems(Update, draw_map.run_if(in_state(AppState::Map)))
+        .add_systems(Update, (draw_map, beckon).run_if(in_state(AppState::Map)))
         .add_systems(Update, draw_reward.run_if(in_state(AppState::Reward)))
         .add_systems(Update, draw_rest.run_if(in_state(AppState::Rest)))
         .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
@@ -91,7 +91,7 @@ fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHint
 }
 
 #[derive(Component)]
-struct ScreenRoot;
+pub struct ScreenRoot;
 
 /// At the fire: the player has chosen "upgrade" and is now picking the card.
 #[derive(Resource, Default)]
@@ -134,12 +134,16 @@ fn redraw(commands: &mut Commands, status: &mut NetStatus, old: &Query<Entity, W
 
 /// The party's health and purses, top-left on every between-fights screen.
 fn party_panel(commands: &mut Commands, root: Entity, run: &Run, me: u8, fonts: &Fonts, l10n: &L10n) {
+    // alone, the bar along the top says it all
+    if run.players.len() < 2 {
+        return;
+    }
     commands
         .spawn((
             theme::panel(Node {
                 position_type: PositionType::Absolute,
                 left: px(16),
-                top: px(16),
+                top: px(crate::between::BAR_H + 14.0),
                 padding: UiRect::all(px(12)),
                 border: UiRect::all(px(2)),
                 flex_direction: FlexDirection::Column,
@@ -166,6 +170,24 @@ fn map_pos(floor: usize, col: u8) -> Vec2 {
 }
 
 const BOSS_POS: Vec2 = Vec2::new(965.0, 96.0);
+/// The ink the map is drawn in, on its parchment.
+const INK: Color = Color::srgb(0.17, 0.11, 0.07);
+
+/// A node the party may step to next: it swells and settles, asking to be picked.
+#[derive(Component)]
+struct Beckon;
+
+fn beckon(time: Res<Time>, mut q: Query<&mut UiTransform, With<Beckon>>) {
+    let s = 1.0 + 0.12 * (time.elapsed_secs() * 4.0).sin().abs();
+    for mut tf in &mut q {
+        tf.scale = Vec2::splat(s);
+    }
+}
+
+/// The ink colour a kind of place is drawn in on the map.
+fn node_ink(kind: NodeKind) -> Color {
+    node_color(kind).mix(&INK, 0.45)
+}
 
 fn draw_map(
     mut commands: Commands,
@@ -175,6 +197,8 @@ fn draw_map(
     canvas: Single<Entity, With<Canvas>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
     mut spots: ResMut<crate::map_party::MapSpots>,
 ) {
     let Some(net) = net else { return };
@@ -182,21 +206,41 @@ fn draw_map(
     let Stage::Map { votes } = &run.stage else { return };
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Map, *canvas, theme::SOOT) else { return };
 
+    // the act's forest, dimmed, and the map unrolled over it
+    let act = run.act.clamp(1, 3);
+    let forest = [format!("map/forest_act{act}"), format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(&assets, s).is_some());
+    if let Some(stem) = forest {
+        let (mut image, _) = art.node(&assets, &stem, theme::SOOT);
+        image.color = Color::srgb(0.32, 0.32, 0.34);
+        commands.spawn((image, Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() }, Pickable::IGNORE, ChildOf(root)));
+    }
+    let scroll = [format!("map/scroll_act{act}"), "map/scroll".to_string(), "book/parchment".to_string()].into_iter().find(|s| art.image(&assets, s).is_some());
+    let on_parchment = scroll.is_some();
+    if let Some(stem) = scroll {
+        commands.spawn((
+            art.node(&assets, &stem, theme::PEAT),
+            Node { position_type: PositionType::Absolute, left: px(420), top: px(crate::between::BAR_H + 4.0), width: px(1090), height: px(STAGE_H - crate::between::BAR_H - 10.0), ..default() },
+            Pickable::IGNORE,
+            ChildOf(root),
+        ));
+    }
+    let icon = |kind: NodeKind| art.image(&assets, &format!("map/{}", format!("{kind:?}").to_lowercase()));
+
     commands.spawn((
         theme::text(l10n.tf("map-title", &[("act", (run.act as i32).into())]), &fonts.title, 44.0, theme::BONE),
-        Node { position_type: PositionType::Absolute, right: px(40), top: px(24), ..default() },
+        Node { position_type: PositionType::Absolute, right: px(40), top: px(90), ..default() },
         ChildOf(root),
     ));
     commands.spawn((
         theme::text(l10n.t(if votes[me as usize].is_some() { "map-voted" } else { "map-hint" }), &fonts.body, 22.0, theme::DIM),
-        Node { position_type: PositionType::Absolute, right: px(40), top: px(84), max_width: px(380), ..default() },
+        Node { position_type: PositionType::Absolute, right: px(40), top: px(150), max_width: px(380), ..default() },
         TextLayout::justify(Justify::Right),
         ChildOf(root),
     ));
     // legend
     commands
         .spawn((
-            Node { position_type: PositionType::Absolute, right: px(40), top: px(250), flex_direction: FlexDirection::Column, row_gap: px(8), ..default() },
+            Node { position_type: PositionType::Absolute, right: px(40), top: px(290), flex_direction: FlexDirection::Column, row_gap: px(8), ..default() },
             Pickable::IGNORE,
             ChildOf(root),
         ))
@@ -206,7 +250,10 @@ fn draw_map(
                     Node { column_gap: px(10), align_items: AlignItems::Center, ..default() },
                     Pickable::IGNORE,
                     children![
-                        (Node { width: px(22), height: px(22), border_radius: BorderRadius::MAX, ..default() }, BackgroundColor(node_color(kind)), Pickable::IGNORE),
+                        match icon(kind) {
+                            Some(h) => (Node { width: px(34), height: px(34), ..default() }, ImageNode { color: node_color(kind).lighter(0.25), ..ImageNode::new(h) }, BackgroundColor(Color::NONE), Pickable::IGNORE),
+                            None => (Node { width: px(22), height: px(22), border_radius: BorderRadius::MAX, ..default() }, ImageNode::solid_color(node_color(kind)), BackgroundColor(Color::NONE), Pickable::IGNORE),
+                        },
                         theme::text(l10n.t(&format!("node-{kind:?}")), &fonts.body, 20.0, theme::BONE),
                     ],
                 ));
@@ -214,17 +261,26 @@ fn draw_map(
         });
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
 
+    // a path is a row of ink dots, as if pricked out with a pen, leaving room round the nodes
     let line = |commands: &mut Commands, a: Vec2, b: Vec2, lit: bool| {
         let d = b - a;
         let len = d.length();
-        let mid = (a + b) / 2.0;
-        commands.spawn((
-            Node { position_type: PositionType::Absolute, left: px(mid.x - len / 2.0), top: px(mid.y - 2.0), width: px(len), height: px(if lit { 4.0 } else { 3.0 }), ..default() },
-            BackgroundColor(if lit { theme::BONE.with_alpha(0.8) } else { theme::DIM.with_alpha(0.35) }),
-            UiTransform { rotation: Rot2::radians(d.y.atan2(d.x)), ..UiTransform::IDENTITY },
-            Pickable::IGNORE,
-            ChildOf(root),
-        ));
+        let steps = ((len - 44.0) / 12.0).floor().max(0.0) as i32;
+        let (size, color) = match (lit, on_parchment) {
+            (true, true) => (6.0, INK.with_alpha(0.95)),
+            (false, true) => (4.5, INK.with_alpha(0.5)),
+            (true, false) => (6.0, theme::BONE.with_alpha(0.85)),
+            (false, false) => (4.5, theme::DIM.with_alpha(0.45)),
+        };
+        for k in 0..=steps {
+            let p = a + d * ((22.0 + k as f32 * 12.0) / len);
+            commands.spawn((
+                Node { position_type: PositionType::Absolute, left: px(p.x - size / 2.0), top: px(p.y - size / 2.0), width: px(size), height: px(size), border_radius: BorderRadius::MAX, ..default() },
+                BackgroundColor(color),
+                Pickable::IGNORE,
+                ChildOf(root),
+            ));
+        }
     };
 
     let choices = run.choices();
@@ -252,6 +308,61 @@ fn draw_map(
     }
     let spawn_node = |commands: &mut Commands, at: Vec2, kind: NodeKind, choice: Option<u8>, standing: bool, passed: bool| {
         let size = if kind == NodeKind::Boss { 76.0 } else { 44.0 };
+        if let Some(h) = icon(kind) {
+            // drawn in ink: places behind fade, the one the party stands on is ringed
+            let ink = if passed { node_ink(kind).with_alpha(0.35) } else { node_ink(kind) };
+            let side = size * if kind == NodeKind::Boss { 1.7 } else { 1.3 };
+            let mut e = commands.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(at.x - side / 2.0),
+                    top: px(at.y - side / 2.0),
+                    width: px(side),
+                    height: px(side),
+                    border: UiRect::all(px(if standing || choice.is_some() { 3.0 } else { 0.0 })),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BorderColor::all(if standing { INK } else { theme::CANDLE.mix(&INK, 0.35) }),
+                BackgroundColor(if choice.is_some() { theme::CANDLE.with_alpha(0.22) } else { Color::NONE }),
+                UiTransform::IDENTITY,
+                ChildOf(root),
+            ));
+            e.with_child((
+                Node { position_type: PositionType::Absolute, left: percent(8), top: percent(8), width: percent(84), height: percent(84), ..default() },
+                ImageNode { color: ink, ..ImageNode::new(h) },
+                Pickable::IGNORE,
+            ));
+            if let Some(c) = choice {
+                e.insert((Button, Hovered::default(), Btn(theme::CANDLE.with_alpha(0.22)), Beckon));
+                let mine = party && votes[me as usize] == Some(c);
+                e.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>, net: Option<ResMut<Net>>, mut status: ResMut<NetStatus>| {
+                    if mine {
+                        if let Some(mut net) = net {
+                            net.node.nudge(c);
+                        }
+                        status.nudges.push((me, c));
+                    } else {
+                        out.0.push(RunAction::Vote(c));
+                    }
+                });
+                // each player's token, in their hero's colour, along the node's foot
+                let tokens: Vec<Color> = votes.iter().enumerate().filter(|(_, v)| **v == Some(c)).map(|(p, _)| theme::hero_color(&run.players[p].hero)).collect();
+                e.with_children(|t| {
+                    for (k, color) in tokens.into_iter().enumerate() {
+                        t.spawn((
+                            Node { position_type: PositionType::Absolute, left: px(-8.0 + k as f32 * 16.0), bottom: px(-8.0), width: px(16), height: px(16), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
+                            BackgroundColor(color.lighter(0.15)),
+                            BorderColor::all(INK),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+            } else {
+                e.insert(Pickable::IGNORE);
+            }
+            return;
+        }
         let base = if passed { node_color(kind).mix(&theme::SOOT, 0.6) } else { node_color(kind) };
         let edge = if standing { theme::BONE } else if choice.is_some() { theme::CANDLE } else { theme::SOOT };
         let mut e = commands.spawn((
@@ -475,7 +586,7 @@ fn draw_rest(
 
 /// A card at `k` of its size in a slot that size, as a button telling its keywords on hover.
 #[allow(clippy::too_many_arguments)]
-fn shown_card(commands: &mut Commands, slot: Entity, uid: usize, id: &str, up: bool, k: f32, db: &Content, l10n: &L10n, fonts: &Fonts, art: &Art, assets: &AssetServer) -> Option<Entity> {
+pub fn shown_card(commands: &mut Commands, slot: Entity, uid: usize, id: &str, up: bool, k: f32, db: &Content, l10n: &L10n, fonts: &Fonts, art: &Art, assets: &AssetServer) -> Option<Entity> {
     use crate::battle::{CARD_H, CARD_W};
     let def = db.cards.get(id)?;
     let card = Card { uid: uid as u32, def: id.to_string(), upgraded: up, free: false };
@@ -566,6 +677,7 @@ fn draw_shop(
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     pick: Res<UpgradePick>,
+    open: Res<crate::between::ShopOpen>,
     art: Res<Art>,
     assets: Res<AssetServer>,
 ) {
@@ -573,29 +685,62 @@ fn draw_shop(
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
     let Stage::Shop { stock, done } = &run.stage else { return };
-    if pick.is_changed() {
+    if pick.is_changed() || open.is_changed() {
         status.run_dirty = true;
     }
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Shop, *canvas, Color::srgb(0.07, 0.08, 0.06)) else { return };
+    // the party in the clearing before the pedlar; clicked, he lays out his counter over it
+    crate::between::pedlar_clearing(&mut commands, root, run, &fonts, &l10n, &art, &assets);
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let pl = &run.players[me as usize];
-    commands.spawn((
-        theme::text(l10n.t("shop-title"), &fonts.title, 56.0, theme::CANDLE),
-        Node { position_type: PositionType::Absolute, top: px(60), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
-        TextLayout::justify(Justify::Center),
-        ChildOf(root),
-    ));
     if done[me as usize] {
         waiting_line(&mut commands, root, &fonts, &l10n);
         return;
     }
+    if !open.0 {
+        commands
+            .spawn((menu_button(l10n.t("shop-leave"), &fonts), observe(|_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::LeaveShop)), ChildOf(root)))
+            .insert(Node { position_type: PositionType::Absolute, right: px(60), bottom: px(50), width: px(300), padding: UiRect::axes(px(30), px(16)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() });
+        return;
+    }
+    // the counter: the pedlar's cloth spread over the clearing, the wares laid on it
+    let cloth = commands
+        .spawn((
+            Button,
+            Node { position_type: PositionType::Absolute, left: px(0), top: px(crate::between::BAR_H), width: px(STAGE_W), height: px(STAGE_H - crate::between::BAR_H), ..default() },
+            BackgroundColor(Color::BLACK.with_alpha(0.6)),
+            observe(|_: On<Activate>, mut open: ResMut<crate::between::ShopOpen>| open.0 = false),
+            ChildOf(root),
+        ))
+        .id();
+    commands.spawn((
+        Button,
+        Node { position_type: PositionType::Absolute, left: px(110), top: px(32), width: px(1700), height: px(900), border: UiRect::all(px(4)), border_radius: BorderRadius::all(px(18)), ..default() },
+        match art.image(&assets, "npc/counter") {
+            Some(h) => ImageNode::new(h).with_mode(bevy::ui::widget::NodeImageMode::Stretch),
+            None => ImageNode::solid_color(Color::srgb(0.35, 0.10, 0.07)),
+        },
+        BorderColor::all(Color::srgb(0.30, 0.20, 0.12)),
+        BoxShadow::new(Color::BLACK.with_alpha(0.7), px(0), px(10), px(0), px(30)),
+        ChildOf(cloth),
+    ));
+    commands.spawn((
+        theme::text(l10n.t("shop-title"), &fonts.title, 50.0, theme::CANDLE),
+        TextShadow { offset: Vec2::splat(3.0), color: Color::BLACK },
+        Node { position_type: PositionType::Absolute, top: px(104), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
+        TextLayout::justify(Justify::Center),
+        ChildOf(root),
+    ));
     let counter = commands
         .spawn((
-            Node { position_type: PositionType::Absolute, top: px(150), width: px(STAGE_W), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(26), ..default() },
+            Node { position_type: PositionType::Absolute, top: px(176), width: px(STAGE_W), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(22), ..default() },
             Pickable::IGNORE,
             ChildOf(root),
         ))
         .id();
+    commands
+        .spawn((menu_button(l10n.t("shop-close"), &fonts), observe(|_: On<Activate>, mut open: ResMut<crate::between::ShopOpen>| open.0 = false), ChildOf(root)))
+        .insert(Node { position_type: PositionType::Absolute, left: px(150), bottom: px(90), width: px(300), padding: UiRect::axes(px(30), px(14)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() });
     let price = 75 + 25 * pl.removals as i32;
     if pick.0 {
         // choosing which card the pedlar takes away
@@ -662,10 +807,6 @@ fn draw_shop(
         ChildOf(service),
     ));
     price_tag(&mut commands, service, price, pl.gold >= price, &fonts);
-    // set off in the corner, out of the wares' way
-    commands
-        .spawn((menu_button(l10n.t("shop-leave"), &fonts), observe(|_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::LeaveShop)), ChildOf(root)))
-        .insert(Node { position_type: PositionType::Absolute, right: px(60), bottom: px(50), width: px(300), padding: UiRect::axes(px(30), px(16)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() });
 }
 
 // ---- omens ----

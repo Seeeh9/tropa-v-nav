@@ -362,7 +362,7 @@ fn the_pedlar_sells_removes_and_lets_you_leave() {
     let mut run = party(&c, 2, 3, 0);
     // put the party at a shop by hand
     let stock: Vec<Stock> = vec![
-        Stock { cards: vec![Some(("bogatyr_shield_wall".into(), 50))], relics: vec![], potions: vec![Some(("mead".into(), 45)), Some(("tar".into(), 45))] },
+        Stock { cards: vec![Some(("bogatyr_shield_wall".into(), 50))], relics: vec![], potions: vec![Some(("mead".into(), 45)), Some(("tar".into(), 45))], pelted: false },
         Stock::default(),
     ];
     run.stage = Stage::Shop { stock, done: vec![false, false] };
@@ -847,4 +847,31 @@ fn the_unheard_tale_pays_for_a_book_shut_early() {
     run.apply(&c, 0, &RunAction::SkipTale).unwrap();
     assert_eq!(run.players[0].gold, gold + UNHEARD_GOLD);
     assert!(!run.players[0].deck.iter().any(|(id, _)| id == BOOK_SPOIL), "the curse is gone");
+}
+
+#[test]
+fn healing_potions_are_drunk_between_fights_and_others_are_not() {
+    let c = content();
+    let mut run = party(&c, 2, 3, 0);
+    run.stage = Stage::Map { votes: vec![None, None] };
+    run.players[0].potions = vec!["mead".into(), "party_broth".into()];
+    run.players[0].hp = run.players[0].max_hp - 20;
+    run.players[1].hp = run.players[1].max_hp - 2;
+    assert_eq!(run.apply(&c, 0, &RunAction::DrinkPotion(0)), Err(RunError::BadChoice));
+    run.apply(&c, 0, &RunAction::DrinkPotion(1)).unwrap();
+    assert_eq!(run.players[0].hp, run.players[0].max_hp - 14);
+    assert_eq!(run.players[1].hp, run.players[1].max_hp);
+    assert_eq!(run.players[0].potions, vec!["mead".to_string()]);
+}
+
+#[test]
+fn a_potion_thrown_at_the_pedlar_pays_once_a_visit() {
+    let c = content();
+    let mut run = party(&c, 1, 3, 0);
+    run.stage = Stage::Shop { stock: vec![Stock::default()], done: vec![false] };
+    run.players[0].potions = vec!["mead".into(), "tar".into()];
+    let gold = run.players[0].gold;
+    run.apply(&c, 0, &RunAction::PeltPedlar(1)).unwrap();
+    assert_eq!((run.players[0].gold, run.players[0].potions.clone()), (gold + PELT_GOLD, vec!["mead".to_string()]));
+    assert_eq!(run.apply(&c, 0, &RunAction::PeltPedlar(0)), Err(RunError::AlreadyDone));
 }

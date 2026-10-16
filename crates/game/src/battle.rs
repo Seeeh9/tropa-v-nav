@@ -204,6 +204,12 @@ struct CardWidget {
     aiming: bool,
     /// Upgraded, and made free: either changing in hand reprints the card where it is.
     look: (bool, bool),
+    /// Seconds it waits at the draw pile before it comes to hand, so a draw comes one by one.
+    wait: f32,
+    /// Where it was last drawn on the stage, to leave the hand from.
+    shown: Vec2,
+    /// A power, which stays in play rather than going to a pile.
+    power: bool,
 }
 
 #[derive(Component)]
@@ -1181,23 +1187,37 @@ fn sync_hand(
     let h = session.my_hero();
     let blind = h.flags.contains_key("blind");
     let mut reprint = Vec::new();
+    let mut leaving = 0;
     for (entity, w) in &cards {
         let held = h.hand.iter().find(|c| c.uid == w.uid);
-        // a form change flips every card, so the widget is rebuilt
-        if held.is_none() || w.form != h.form || w.hidden != blind {
+        if held.is_none() && w.form == h.form {
+            // a card gone from the hand is seen going where it went, the hand one after another
+            let from = w.shown + Vec2::new(CARD_W, CARD_H) / 2.0;
+            let (to, end) = piles::whither(h, w.uid, w.power, from);
+            commands.entity(entity).remove::<CardWidget>();
+            piles::send_off(&mut commands, entity, from, to, end, leaving as f32 * 0.06);
+            leaving += 1;
+        } else if held.is_none() || w.form != h.form || w.hidden != blind {
+            // a form change flips every card, so the widget is rebuilt
             commands.entity(entity).despawn();
         } else if held.is_some_and(|c| (c.upgraded, c.free) != w.look) {
             commands.entity(entity).despawn();
             reprint.push((w.uid, w.pos));
         }
     }
+    let mut drawn = 0;
     for card in &h.hand {
         let current = |w: &CardWidget| w.uid == card.uid && w.form == h.form && w.hidden == blind && w.look == (card.upgraded, card.free);
         if !cards.iter().any(|(_, w)| current(w)) {
-            // new cards slide in from the draw pile; a reprinted one stays where it was
-            let from = reprint.iter().find(|(uid, _)| *uid == card.uid).map(|(_, p)| *p).unwrap_or(Vec2::new(60.0, 900.0));
+            // new cards come in from the draw pile one by one; a reprinted one stays where it was
+            let again = reprint.iter().find(|(uid, _)| *uid == card.uid).map(|(_, p)| *p);
+            let from = again.unwrap_or(Vec2::new(30.0, 860.0));
+            let wait = if again.is_some() { 0.0 } else { drawn as f32 * 0.11 };
+            if again.is_none() {
+                drawn += 1;
+            }
             let widget = (
-                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false, aiming: false, look: (card.upgraded, card.free) },
+                CardWidget { uid: card.uid, form: h.form, hidden: blind, pos: from, drag: Vec2::ZERO, dragging: false, aiming: false, look: (card.upgraded, card.free), wait, shown: from, power: db.0.cards.get(&card.def).is_some_and(|d| d.kind == CardType::Power) },
                 // let the pointer through, so a dragged card can be dropped on the unit under it
                 Pickable { should_block_lower: false, is_hoverable: true },
             );
@@ -1323,6 +1343,14 @@ fn layout_hand(
     let k = (time.delta_secs() * 14.0).min(1.0);
     for (mut w, mut node, mut tf, mut z, mut bg) in &mut cards {
         let Some(i) = h.hand.iter().position(|c| c.uid == w.uid) else { continue };
+        if w.wait > 0.0 {
+            // still on the draw pile, small, its turn to come not yet here
+            w.wait -= time.delta_secs();
+            tf.scale = Vec2::splat(0.2);
+            node.left = px(w.pos.x);
+            node.top = px(w.pos.y);
+            continue;
+        }
 let rest = hand_slot(i, n);
         let mut target = rest;
         let lifted = top.0 == Some(w.uid);
@@ -1347,6 +1375,7 @@ let rest = hand_slot(i, n);
         }
         w.pos = w.pos.lerp(if w.aiming { target - w.drag } else { target }, k);
         let p = w.pos + w.drag;
+        w.shown = p;
         node.left = px(p.x);
         node.top = px(p.y);
         // how far it has actually risen drives size and tilt, so they move with it

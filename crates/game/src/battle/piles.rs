@@ -48,6 +48,29 @@ struct Flight {
     show_first: bool,
 }
 
+/// Sends a card leaving the hand off along an arc from `from` (its centre) to `to`, shrinking
+/// to `end` of its size, after `wait` seconds; it is gone when it lands.
+pub(super) fn send_off(commands: &mut Commands, card: Entity, from: Vec2, to: Vec2, end: f32, wait: f32) {
+    commands.entity(card).insert((
+        Flight { from, to, wait, t: 0.0, dur: 0.42, arc: if to == from { 90.0 } else { 120.0 }, size: Vec2::new(CARD_W, CARD_H), scale: (1.0, end), show_first: true },
+        GlobalZIndex(425),
+        Pickable::IGNORE,
+    ));
+}
+
+/// Where a card that has left the hand goes, as a place to fly to and a size to shrink to
+/// there. One burnt away, or a power, fades where it was; one shuffled back flies to the draw
+/// pile; any other goes to the discard, as played cards do, even before the fight says so.
+pub(super) fn whither(h: &nav_core::Hero, uid: u32, power: bool, at: Vec2) -> (Vec2, f32) {
+    if power || h.exhaust.iter().any(|c| c.uid == uid) {
+        (at, 0.0)
+    } else if h.draw.iter().any(|c| c.uid == uid) {
+        (DRAW_AT, 0.12)
+    } else {
+        (DISCARD_AT, 0.12)
+    }
+}
+
 /// One card back of a pile's stack, `at` from the stack's corner.
 fn back(at: Vec2, face: Color) -> impl Bundle {
     (

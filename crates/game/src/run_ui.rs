@@ -667,37 +667,92 @@ fn draw_shop(
 
 // ---- omens ----
 
-fn describe_fx(l10n: &L10n, o: &EventOption) -> String {
-    let mut parts: Vec<String> = Vec::new();
+/// How an outcome sits with the one who chooses it, for its colour.
+#[derive(Clone, Copy, PartialEq)]
+enum Tone {
+    Good,
+    Bad,
+    Plain,
+}
+
+/// What choosing `o` does, in parts, each with its tone: losses in red, gains in green.
+fn describe_fx(l10n: &L10n, db: &Content, o: &EventOption) -> Vec<(String, Tone)> {
+    let mut parts: Vec<(String, Tone)> = Vec::new();
     if o.price > 0 {
-        parts.push(l10n.n("fx-run-pay", o.price));
+        parts.push((l10n.n("fx-run-pay", o.price), Tone::Bad));
     }
     let mut told = false;
     for (all, fx) in o.fx.iter().map(|f| (false, f)).chain(o.all.iter().map(|f| (true, f))) {
         if all && !told {
             told = true;
-            parts.push(l10n.t("fx-run-all"));
+            parts.push((l10n.t("fx-run-all"), Tone::Plain));
         }
+        let good = |b: bool| if b { Tone::Good } else { Tone::Bad };
         parts.push(match fx {
-            RunFx::Gold(n) if *n >= 0 => l10n.n("fx-run-gold", *n),
-            RunFx::Gold(n) => l10n.n("fx-run-lose-gold", -*n),
-            RunFx::Hp(n) if *n >= 0 => l10n.n("fx-run-heal", *n),
-            RunFx::Hp(n) => l10n.n("fx-run-hurt", -*n),
-            RunFx::HpPct(n) if *n >= 0 => l10n.n("fx-run-heal-pct", *n),
-            RunFx::HpPct(n) => l10n.n("fx-run-hurt-pct", -*n),
-            RunFx::MaxHp(n) if *n >= 0 => l10n.n("fx-run-maxhp", *n),
-            RunFx::MaxHp(n) => l10n.n("fx-run-lose-maxhp", -*n),
-            RunFx::Card(id) => l10n.tf("fx-run-card", &[("c", l10n.card_name(id, false).into())]),
-            RunFx::RandomCard(r) => l10n.t(&format!("fx-run-random-{r:?}")),
-            RunFx::Relic => l10n.t("fx-run-relic"),
-            RunFx::Potion => l10n.t("fx-run-potion"),
-            RunFx::RemoveRandomCard => l10n.t("fx-run-remove"),
-            RunFx::UpgradeRandomCard => l10n.t("fx-run-upgrade"),
+            RunFx::Gold(n) if *n >= 0 => (l10n.n("fx-run-gold", *n), Tone::Good),
+            RunFx::Gold(n) => (l10n.n("fx-run-lose-gold", -*n), Tone::Bad),
+            RunFx::Hp(n) if *n >= 0 => (l10n.n("fx-run-heal", *n), Tone::Good),
+            RunFx::Hp(n) => (l10n.n("fx-run-hurt", -*n), Tone::Bad),
+            RunFx::HpPct(n) if *n >= 0 => (l10n.n("fx-run-heal-pct", *n), Tone::Good),
+            RunFx::HpPct(n) => (l10n.n("fx-run-hurt-pct", -*n), Tone::Bad),
+            RunFx::MaxHp(n) if *n >= 0 => (l10n.n("fx-run-maxhp", *n), Tone::Good),
+            RunFx::MaxHp(n) => (l10n.n("fx-run-lose-maxhp", -*n), Tone::Bad),
+            // a curse pressed on the deck is no gift
+            RunFx::Card(id) => (
+                l10n.tf("fx-run-card", &[("c", l10n.card_name(id, false).into())]),
+                good(!db.cards.get(id).is_some_and(|d| matches!(d.kind, CardType::Curse | CardType::Status))),
+            ),
+            RunFx::RandomCard(r) => (l10n.t(&format!("fx-run-random-{r:?}")), Tone::Good),
+            RunFx::Relic => (l10n.t("fx-run-relic"), Tone::Good),
+            RunFx::Potion => (l10n.t("fx-run-potion"), Tone::Good),
+            RunFx::RemoveRandomCard => (l10n.t("fx-run-remove"), Tone::Good),
+            RunFx::UpgradeRandomCard => (l10n.t("fx-run-upgrade"), Tone::Good),
         });
     }
-    parts.join(" ")
+    parts
 }
 
+/// The omen's picture, framed: its own when painted (`omens/<id>`), else the act's forest
+/// dimmed, so the page is never a black void.
+fn omen_picture(commands: &mut Commands, root: Entity, id: &str, act: u8, art: &Art, assets: &AssetServer) {
+    let (image, own) = match art.image(assets, &format!("omens/{id}")) {
+        Some(h) => (ImageNode::new(h), true),
+        None => match art.image(assets, &format!("bg/act{}_battle", act.clamp(1, 3))).or_else(|| art.image(assets, "bg/act1_battle")) {
+            Some(h) => (ImageNode::new(h).with_color(Color::srgb(0.42, 0.42, 0.48)), false),
+            None => (ImageNode::solid_color(Color::srgb(0.10, 0.10, 0.12)), false),
+        },
+    };
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(110),
+            top: px(150),
+            width: px(780),
+            height: px(780),
+            border: UiRect::all(px(4)),
+            border_radius: BorderRadius::all(px(10)),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+        BoxShadow::new(Color::BLACK.with_alpha(0.8), px(0), px(10), px(6), px(30)),
+        BackgroundColor(Color::BLACK),
+        Pickable::IGNORE,
+        ChildOf(root),
+        children![(
+            // a borrowed forest, wide, is seen through the frame from its middle
+            if own {
+                Node { width: percent(100), height: percent(100), ..default() }
+            } else {
+                Node { position_type: PositionType::Absolute, width: px(1380), height: percent(100), left: px(-302), ..default() }
+            },
+            image,
+            Pickable::IGNORE,
+        )],
+    ));
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_omen(
     mut commands: Commands,
     mut status: ResMut<NetStatus>,
@@ -707,35 +762,38 @@ fn draw_omen(
     canvas: Single<Entity, With<Canvas>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
 ) {
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
     let Stage::Omen { id, picks } = &run.stage else { return };
     let Some(def) = db.0.events.get(id) else { return };
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Omen, *canvas, Color::srgb(0.06, 0.06, 0.08)) else { return };
+    omen_picture(&mut commands, root, id, run.act, &art, &assets);
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let pl = &run.players[me as usize];
     let column = commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                width: px(STAGE_W),
-                height: px(STAGE_H),
+                left: px(960),
+                top: px(150),
+                width: px(860),
+                height: px(780),
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                row_gap: px(18),
+                row_gap: px(16),
                 ..default()
             },
             Pickable::IGNORE,
             ChildOf(root),
         ))
         .id();
-    commands.spawn((theme::text(l10n.t(&format!("omen-{id}")), &fonts.title, 56.0, theme::BONE), ChildOf(column)));
+    commands.spawn((theme::text(l10n.t(&format!("omen-{id}")), &fonts.title, 56.0, theme::CANDLE), ChildOf(column)));
     commands.spawn((
         theme::text(l10n.t(&format!("omen-{id}-text")), &fonts.body, 26.0, theme::BONE),
-        Node { max_width: px(1100), margin: UiRect::bottom(px(14)), ..default() },
-        TextLayout::justify(Justify::Center),
+        Node { max_width: px(860), margin: UiRect::bottom(px(10)), ..default() },
         ChildOf(column),
     ));
     let vote = def.kind == EventKind::Vote;
@@ -746,7 +804,7 @@ fn draw_omen(
         _ => None,
     };
     if let Some(hint) = hint {
-        commands.spawn((theme::text(l10n.t(hint), &fonts.body, 20.0, theme::DIM), ChildOf(column)));
+        commands.spawn((theme::text(l10n.t(hint), &fonts.body, 20.0, theme::DIM), Node { max_width: px(860), ..default() }, ChildOf(column)));
     }
     let closed = if def.kind == EventKind::Schism { nav_core::run::schism_closed(picks, me as usize) } else { None };
     let mine = picks[me as usize];
@@ -756,27 +814,51 @@ fn draw_omen(
     }
     for (i, o) in def.options.iter().enumerate() {
         let can = pl.gold >= o.price && closed != Some(i as u8);
-        let voters = picks.iter().filter(|v| **v == Some(i as u8)).count();
-        let mut label = l10n.t(&format!("omen-{id}-{}", o.id));
-        let outcome = describe_fx(&l10n, o);
-        if !outcome.is_empty() {
-            label.push_str(&format!("  —  {outcome}"));
-        }
-        if vote && voters > 0 {
-            label.push_str(&format!("   [{voters}]"));
-        }
-        let base = if mine == Some(i as u8) { theme::SWAMP } else if can { theme::PEAT } else { theme::SOOT };
-        commands.spawn((
+        let chosen = mine == Some(i as u8);
+        let base = if chosen { theme::SWAMP } else if can { theme::PEAT } else { theme::SOOT };
+        let ink = |c: Color| if can { c } else { c.with_alpha(0.45) };
+        let outcome = describe_fx(&l10n, &db.0, o);
+        let mut b = commands.spawn((
             Button,
             Hovered::default(),
             Btn(base),
-            Node { width: px(1000), padding: UiRect::axes(px(18), px(12)), border: UiRect::all(px(2)), ..default() },
+            Node { width: px(860), padding: UiRect::axes(px(20), px(12)), border: UiRect { left: px(8), right: px(2), top: px(2), bottom: px(2) }, align_items: AlignItems::Center, column_gap: px(14), ..default() },
             BackgroundColor(base),
-            BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
-            children![theme::text(label, &fonts.body, 22.0, if can { theme::BONE } else { theme::DIM })],
-            observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8))),
+            BorderColor { left: if chosen { theme::ROTLIGHT } else { theme::CANDLE }, ..BorderColor::all(Color::srgb(0.42, 0.33, 0.22)) },
             ChildOf(column),
         ));
+        b.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8)));
+        b.with_children(|b| {
+            b.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(4), flex_grow: 1.0, ..default() }, Pickable::IGNORE)).with_children(|t| {
+                t.spawn(theme::text(l10n.t(&format!("omen-{id}-{}", o.id)), &fonts.body, 24.0, ink(theme::BONE)));
+                if !outcome.is_empty() {
+                    t.spawn((theme::text("", &fonts.body, 20.0, theme::DIM), Node { max_width: px(760), ..default() })).with_children(|line| {
+                        for (part, tone) in &outcome {
+                            let color = match tone {
+                                Tone::Good => theme::ROTLIGHT,
+                                Tone::Bad => Color::srgb(0.85, 0.32, 0.25),
+                                Tone::Plain => theme::DIM,
+                            };
+                            line.spawn((TextSpan::new(format!("{part} ")), TextFont { font: fonts.body.clone().into(), font_size: FontSize::Px(20.0), ..default() }, TextColor(ink(color))));
+                        }
+                    });
+                }
+            });
+            // who has voted for it, a dot in each voter's colour
+            if vote {
+                for (seat, v) in picks.iter().enumerate() {
+                    if *v == Some(i as u8) {
+                        let color = run.players.get(seat).map(|p| theme::hero_color(&p.hero)).unwrap_or(theme::BONE);
+                        b.spawn((
+                            Node { width: px(18), height: px(18), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, flex_shrink: 0.0, ..default() },
+                            BackgroundColor(color),
+                            BorderColor::all(theme::BONE),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -789,6 +871,8 @@ fn draw_trophy(
     canvas: Single<Entity, With<Canvas>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
 ) {
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
@@ -815,23 +899,36 @@ fn draw_trophy(
     commands.spawn((theme::text(l10n.t("trophy-hint"), &fonts.body, 22.0, theme::DIM), Node { margin: UiRect::bottom(px(14)), ..default() }, ChildOf(column)));
     let mine = picks[me as usize];
     for (i, id) in offers.iter().enumerate() {
-        let voters = picks.iter().filter(|v| **v == Some(i as u8)).count();
-        let mut label = format!("{}  —  {}", l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")));
-        if voters > 0 {
-            label.push_str(&format!("   [{voters}]"));
-        }
         let base = if mine == Some(i as u8) { theme::SWAMP } else { theme::PEAT };
-        commands.spawn((
+        let mut b = commands.spawn((
             Button,
             Hovered::default(),
             Btn(base),
-            Node { width: px(1200), padding: UiRect::axes(px(18), px(12)), border: UiRect::all(px(2)), ..default() },
+            Node { width: px(1100), padding: UiRect::axes(px(18), px(12)), border: UiRect::all(px(2)), align_items: AlignItems::Center, column_gap: px(18), ..default() },
             BackgroundColor(base),
-            BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
-            children![theme::text(label, &fonts.body, 22.0, theme::BONE)],
-            observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8))),
+            BorderColor::all(if mine == Some(i as u8) { theme::ROTLIGHT } else { Color::srgb(0.42, 0.33, 0.22) }),
             ChildOf(column),
         ));
+        b.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8)));
+        b.with_children(|b| {
+            b.spawn((Node { width: px(96), height: px(96), flex_shrink: 0.0, ..default() }, art.node(&assets, &format!("relics/{id}"), theme::SOOT), Pickable::IGNORE));
+            b.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(4), flex_grow: 1.0, ..default() }, Pickable::IGNORE)).with_children(|t| {
+                t.spawn(theme::text(l10n.t(&format!("relic-{id}")), &fonts.title, 28.0, theme::CANDLE));
+                t.spawn((theme::text(l10n.t(&format!("relic-{id}-desc")), &fonts.body, 22.0, theme::BONE), Node { max_width: px(820), ..default() }));
+            });
+            // who has voted for it, a dot in each voter's colour
+            for (seat, v) in picks.iter().enumerate() {
+                if *v == Some(i as u8) {
+                    let color = run.players.get(seat).map(|p| theme::hero_color(&p.hero)).unwrap_or(theme::BONE);
+                    b.spawn((
+                        Node { width: px(18), height: px(18), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, flex_shrink: 0.0, ..default() },
+                        BackgroundColor(color),
+                        BorderColor::all(theme::BONE),
+                        Pickable::IGNORE,
+                    ));
+                }
+            }
+        });
     }
 }
 

@@ -158,6 +158,19 @@ struct Ghost {
 
 #[derive(Component)]
 struct HpFill(UnitRef);
+/// The pale strip of health just lost, left standing a moment behind the fill and then
+/// draining after it, so a blow is read by how much it took.
+#[derive(Component)]
+struct HpTrail {
+    unit: UnitRef,
+    /// Its width now, and the fill's last time, as fractions of the bar.
+    at: f32,
+    last: f32,
+    hold: f32,
+}
+/// A health bar's frame, edged in frost while its unit has block.
+#[derive(Component)]
+struct HpBar(UnitRef);
 #[derive(Component)]
 struct BlockBadge(UnitRef);
 
@@ -479,8 +492,8 @@ fn enter(
             ));
 
             // the piles: pressed, each spreads its cards out (see `piles`)
-            p.spawn(piles::pile_plate(40.0, piles::PileKind::Draw, Label::Draw, &fonts));
-            p.spawn(piles::pile_plate(1680.0, piles::PileKind::Discard, Label::Discard, &fonts));
+            p.spawn(piles::pile_plate(140.0, piles::PileKind::Draw, Label::Draw, &l10n, &fonts));
+            p.spawn(piles::pile_plate(1780.0, piles::PileKind::Discard, Label::Discard, &l10n, &fonts));
 
             // the Ready seal
             p.spawn((
@@ -490,7 +503,7 @@ fn enter(
                 Node {
                     position_type: PositionType::Absolute,
                     left: px(1640),
-                    top: px(860),
+                    top: px(812),
                     width: px(240),
                     height: px(96),
                     border: UiRect::all(px(3)),
@@ -680,18 +693,27 @@ fn sync_units(
                         height: px(22),
                         margin: UiRect::top(px(8)),
                         border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(7)),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    BackgroundColor(theme::SOOT),
+                    HpBar(unit),
+                    BackgroundColor(Color::srgb(0.05, 0.04, 0.04)),
                     BorderColor::all(Color::srgb(0.32, 0.26, 0.20)),
+                    BoxShadow::new(Color::BLACK.with_alpha(0.7), px(0), px(2), px(0), px(6)),
                     GlobalZIndex(20),
                     Pickable::IGNORE,
                     children![
                         (
+                            HpTrail { unit, at: 1.0, last: 1.0, hold: 0.0 },
+                            Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(5)), ..default() },
+                            BackgroundColor(Color::srgb(0.93, 0.78, 0.52)),
+                            Pickable::IGNORE,
+                        ),
+                        (
                             HpFill(unit),
-                            Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), ..default() },
+                            Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), border_radius: BorderRadius::all(px(5)), ..default() },
                             BackgroundColor(theme::FRESH_BLOOD),
                             Pickable::IGNORE,
                         ),
@@ -865,7 +887,10 @@ fn dying(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Dyi
 
 fn update_bars(
     session: Res<Session>,
-    mut fills: Query<(&HpFill, &mut Node)>,
+    time: Res<Time>,
+    mut fills: Query<(&HpFill, &mut Node), Without<HpTrail>>,
+    mut trails: Query<(&mut HpTrail, &mut Node), Without<HpFill>>,
+    mut frames: Query<(&HpBar, &mut BorderColor)>,
     mut badges: Query<(&BlockBadge, &mut Visibility)>,
 ) {
     let stats = |u: UnitRef| match u {
@@ -878,6 +903,33 @@ fn update_bars(
             if node.width != w {
                 node.width = w;
             }
+        }
+    }
+    let dt = time.delta_secs();
+    for (mut trail, mut node) in &mut trails {
+        let Some((hp, max, _)) = stats(trail.unit) else { continue };
+        let now = hp.max(0) as f32 / max.max(1) as f32;
+        if now < trail.last - 1e-4 {
+            // a fresh blow: the strip stands a moment before it drains
+            trail.hold = 0.45;
+        }
+        trail.last = now;
+        if now >= trail.at {
+            trail.at = now;
+        } else if trail.hold > 0.0 {
+            trail.hold -= dt;
+        } else {
+            trail.at = (trail.at - dt * (0.15 + (trail.at - now) * 2.5)).max(now);
+        }
+        let w = percent(100.0 * trail.at);
+        if node.width != w {
+            node.width = w;
+        }
+    }
+    for (bar, mut edge) in &mut frames {
+        let want = if stats(bar.0).is_some_and(|s| s.2 > 0) { BorderColor::all(theme::FROST) } else { BorderColor::all(Color::srgb(0.32, 0.26, 0.20)) };
+        if *edge != want {
+            *edge = want;
         }
     }
     for (badge, mut vis) in &mut badges {
@@ -968,15 +1020,9 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
                 s
             }),
             Label::Energy => Some(format!("{}", session.my_hero().energy)),
-            Label::Draw => Some(format!("{} {}", l10n.t("battle-draw"), session.my_hero().draw.len())),
-            Label::Discard => {
-                let h = session.my_hero();
-                let mut s = format!("{} {}", l10n.t("battle-discard"), h.discard.len());
-                if !h.exhaust.is_empty() {
-                    s.push_str(&format!("  ·  {} {}", l10n.t("battle-exhaust"), h.exhaust.len()));
-                }
-                Some(s)
-            }
+            // the piles' counts, on the discs of their stacks
+            Label::Draw => Some(session.my_hero().draw.len().to_string()),
+            Label::Discard => Some(session.my_hero().discard.len().to_string()),
             Label::Round => Some(l10n.n("battle-round", shown.round as i32)),
             Label::Ready => Some(if session.my_hero().ready {
                 if truth.is_coop() {

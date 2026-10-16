@@ -48,22 +48,41 @@ struct Flight {
     show_first: bool,
 }
 
-/// The plate a pile is pressed on, built by the battle screen.
-pub(super) fn pile_plate(left: f32, kind: PileKind, label: Label, fonts: &Fonts) -> impl Bundle {
+/// One card back of a pile's stack, `at` from the stack's corner.
+fn back(at: Vec2, face: Color) -> impl Bundle {
     (
-        theme::panel(Node {
+        Node {
             position_type: PositionType::Absolute,
-            left: px(left),
-            top: px(980),
-            width: px(200),
-            padding: UiRect::axes(px(12), px(8)),
-            border: UiRect::all(px(2)),
+            left: px(at.x),
+            top: px(at.y),
+            width: px(84),
+            height: px(118),
+            border: UiRect::all(px(3)),
+            border_radius: BorderRadius::all(px(8)),
+            align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             ..default()
-        }),
+        },
+        BackgroundColor(face),
+        BorderColor::all(theme::CANDLE.darker(0.12)),
+        BoxShadow::new(Color::BLACK.with_alpha(0.6), px(0), px(3), px(0), px(6)),
+        Pickable::IGNORE,
+    )
+}
+
+/// The pile as the Spire shows it: a stack of card backs with the count on a disc at its
+/// corner and its name beneath, centred on `x`; pressed, it spreads its cards out.
+pub(super) fn pile_plate(x: f32, kind: PileKind, label: Label, l10n: &L10n, fonts: &Fonts) -> impl Bundle {
+    let (face, name) = match kind {
+        PileKind::Draw => (Color::srgb(0.24, 0.12, 0.09), "battle-draw"),
+        PileKind::Discard => (Color::srgb(0.16, 0.15, 0.14), "battle-discard"),
+    };
+    (
+        Node { position_type: PositionType::Absolute, left: px(x - 50.0), top: px(926), width: px(100), height: px(150), ..default() },
+        BackgroundColor(Color::NONE),
         Button,
         Hovered::default(),
-        Btn(theme::PEAT),
+        Btn(Color::NONE),
         kind,
         observe(move |_: On<Activate>, mut commands: Commands, open: Query<(Entity, &PileView)>, show: ShowPile| {
             let was = open.iter().find(|(_, v)| v.0 == kind).is_some();
@@ -74,7 +93,43 @@ pub(super) fn pile_plate(left: f32, kind: PileKind, label: Label, fonts: &Fonts)
                 show.spread(&mut commands, kind);
             }
         }),
-        children![(label, theme::text("", &fonts.body, 20.0, theme::BONE))],
+        children![
+            back(Vec2::new(14.0, 6.0), face.darker(0.04)),
+            back(Vec2::new(10.0, 3.0), face.darker(0.02)),
+            (
+                back(Vec2::new(6.0, 0.0), face),
+                // a lozenge on the back, the deck's mark
+                children![(
+                    Node { width: px(30), height: px(30), border: UiRect::all(px(3)), ..default() },
+                    BorderColor::all(theme::CANDLE),
+                    UiTransform { rotation: Rot2::degrees(45.0), ..default() },
+                    Pickable::IGNORE,
+                )],
+            ),
+            (
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(-8),
+                    top: px(84),
+                    width: px(44),
+                    height: px(44),
+                    border: UiRect::all(px(3)),
+                    border_radius: BorderRadius::MAX,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(theme::SOOT),
+                BorderColor::all(theme::CANDLE),
+                Pickable::IGNORE,
+                children![(label, theme::text("", &fonts.num, 24.0, theme::BONE))],
+            ),
+            (
+                theme::text(l10n.t(name), &fonts.body, 17.0, theme::DIM),
+                Node { position_type: PositionType::Absolute, top: px(126), width: px(112), left: px(0), ..default() },
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+            ),
+        ],
     )
 }
 

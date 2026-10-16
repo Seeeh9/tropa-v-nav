@@ -1075,13 +1075,13 @@ pub fn spawn_card<B: Bundle>(
                 return;
             }
             let name = l10n.card_name(&card.def, card.upgraded);
-            // long names shrink to stay on one line: the title face runs up to 0.72 em a letter
-            // (its capitals are broad), and the strip leaves 170 px beside the cost
-            let size = (170.0 / (name.chars().count().max(1) as f32 * 0.72)).clamp(8.0, 19.0);
+            // long names shrink to stay on one line: the title face runs up to 0.8 em a letter
+            // (its capitals are broad), in a strip clear of the cost badge on the left
+            let size = (160.0 / (name.chars().count().max(1) as f32 * 0.8)).clamp(8.0, 19.0);
             c.spawn((
                 theme::text(name.clone(), &fonts.title, size, if card.upgraded { theme::ROTLIGHT } else { theme::BONE }),
-                TextLayout::default().with_no_wrap(),
-                Node { height: px(28), align_items: AlignItems::Center, ..default() },
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                Node { width: px(170), height: px(28), margin: UiRect::left(px(28)), align_items: AlignItems::Center, ..default() },
             ));
             c.spawn((
                 Node { width: px(196), height: px(147), border: UiRect::all(px(2)), ..default() },

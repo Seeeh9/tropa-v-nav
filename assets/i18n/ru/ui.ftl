@@ -171,6 +171,7 @@ shop-cards = Карты
 shop-wares = Реликвии и снадобья
 shop-remove = Убрать карту из колоды ({ $n })
 shop-remove-pick = Какую карту забрать?
+shop-remove-service = Убрать карту
 shop-leave = Уйти
 error-SoldOut = Уже продано
 error-NoRoom = Нет места для снадобья

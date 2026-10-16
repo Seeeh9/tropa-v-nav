@@ -171,6 +171,7 @@ shop-cards = Cards
 shop-wares = Relics and potions
 shop-remove = Remove a card from your deck ({ $n })
 shop-remove-pick = Which card should he take?
+shop-remove-service = Remove a card
 shop-leave = Leave
 error-SoldOut = Already sold
 error-NoRoom = No room for a potion

@@ -46,22 +46,24 @@ impl CardHints {
     }
 }
 
-fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHints, &Hovered)>, fonts: Res<Fonts>) {
-    for (card, mut hints, hovered) in &mut cards {
+fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHints, &Hovered, Option<&UiTransform>)>, fonts: Res<Fonts>) {
+    for (card, mut hints, hovered, shrunk) in &mut cards {
         match (hovered.get(), hints.open) {
             (true, None) if !hints.lines.is_empty() => {
+                // a card shown small still explains itself at full size
+                let k = 1.0 / shrunk.map(|t| t.scale.x).filter(|s| *s > 0.0).unwrap_or(1.0);
                 let panel = commands
                     .spawn((
                         theme::panel(Node {
                             position_type: PositionType::Absolute,
                             left: percent(100),
                             top: px(0),
-                            margin: UiRect::left(px(14)),
-                            width: px(320),
-                            padding: UiRect::all(px(12)),
-                            border: UiRect::all(px(2)),
+                            margin: UiRect::left(px(14.0 * k)),
+                            width: px(320.0 * k),
+                            padding: UiRect::all(px(12.0 * k)),
+                            border: UiRect::all(px(2.0 * k)),
                             flex_direction: FlexDirection::Column,
-                            row_gap: px(10),
+                            row_gap: px(10.0 * k),
                             ..default()
                         }),
                         GlobalZIndex(400),
@@ -70,9 +72,9 @@ fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHint
                     ))
                     .with_children(|p| {
                         for (name, help) in &hints.lines {
-                            p.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2), ..default() }, Pickable::IGNORE)).with_children(|e| {
-                                e.spawn(theme::text(name.clone(), &fonts.title, 22.0, theme::CANDLE));
-                                e.spawn(theme::text(help.clone(), &fonts.body, 20.0, theme::BONE));
+                            p.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2.0 * k), ..default() }, Pickable::IGNORE)).with_children(|e| {
+                                e.spawn(theme::text(name.clone(), &fonts.title, 22.0 * k, theme::CANDLE));
+                                e.spawn(theme::text(help.clone(), &fonts.body, 20.0 * k, theme::BONE));
                             });
                         }
                     })
@@ -460,24 +462,8 @@ fn draw_rest(
         return;
     }
     commands.spawn((theme::text(l10n.t("rest-upgrade-hint"), &fonts.body, 24.0, theme::DIM), ChildOf(column)));
-    let grid = commands
-        .spawn((Node { width: px(1700), flex_wrap: FlexWrap::Wrap, justify_content: JustifyContent::Center, column_gap: px(12), row_gap: px(12), ..default() }, Pickable::IGNORE, ChildOf(column)))
-        .id();
-    let open: Vec<(usize, &String)> = pl.deck.iter().enumerate().filter(|(_, (id, up))| !*up && db.0.cards.get(id).is_some_and(|d| d.up.is_some())).map(|(i, (id, _))| (i, id)).collect();
-    // each card as it will be once upgraded, as small as it takes for all to fit
-    let k = if open.len() <= 14 { 0.7 } else if open.len() <= 24 { 0.56 } else { 0.46 };
-    for (i, id) in open {
-        let Some(def) = db.0.cards.get(id) else { continue };
-        let slot = commands.spawn((Node { width: px(crate::battle::CARD_W * k), height: px(crate::battle::CARD_H * k), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
-        let card = Card { uid: i as u32, def: id.clone(), upgraded: true, free: false };
-        let at = Vec2::new(-crate::battle::CARD_W * (1.0 - k) / 2.0, -crate::battle::CARD_H * (1.0 - k) / 2.0);
-        let hints = l10n.card_glossary(&def.view(true, Form::Human));
-        let frame = crate::battle::card_frame(def);
-        if let Some(e) = spawn_card(&mut commands, slot, &card, Form::Human, Some(at), false, (Button, Btn(frame), CardHints::new(hints)), &db.0, &l10n, &fonts, &art, &assets) {
-            commands.entity(e).insert(UiTransform { scale: Vec2::splat(k), ..default() });
-            commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Upgrade(i as u16)));
-        }
-    }
+    let open: Vec<(usize, &String, bool)> = pl.deck.iter().enumerate().filter(|(_, (id, up))| !*up && db.0.cards.get(id).is_some_and(|d| d.up.is_some())).map(|(i, (id, _))| (i, id, true)).collect();
+    deck_grid(&mut commands, column, &open, RunAction::Upgrade, &db.0, &l10n, &fonts, &art, &assets);
     commands.spawn((
         menu_button(l10n.t("coop-back"), &fonts),
         observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = false),
@@ -487,25 +473,86 @@ fn draw_rest(
 
 // ---- the pedlar ----
 
-/// A priced line on the pedlar's shelf.
-fn shelf_button(commands: &mut Commands, parent: Entity, label: String, price: i32, can_pay: bool, edge: Color, fonts: &Fonts, action: RunAction) {
+/// A card at `k` of its size in a slot that size, as a button telling its keywords on hover.
+#[allow(clippy::too_many_arguments)]
+fn shown_card(commands: &mut Commands, slot: Entity, uid: usize, id: &str, up: bool, k: f32, db: &Content, l10n: &L10n, fonts: &Fonts, art: &Art, assets: &AssetServer) -> Option<Entity> {
+    use crate::battle::{CARD_H, CARD_W};
+    let def = db.cards.get(id)?;
+    let card = Card { uid: uid as u32, def: id.to_string(), upgraded: up, free: false };
+    let at = Vec2::new(-CARD_W * (1.0 - k) / 2.0, -CARD_H * (1.0 - k) / 2.0);
+    let hints = l10n.card_glossary(&def.view(up, Form::Human));
+    let e = spawn_card(commands, slot, &card, Form::Human, Some(at), false, (Button, Btn(crate::battle::card_frame(def)), CardHints::new(hints)), db, l10n, fonts, art, assets)?;
+    commands.entity(e).insert(UiTransform { scale: Vec2::splat(k), ..default() });
+    Some(e)
+}
+
+/// Cards of the deck laid out to pick one, as small as it takes for all to fit: `(index in the
+/// deck, card, shown upgraded)`.
+#[allow(clippy::too_many_arguments)]
+fn deck_grid(commands: &mut Commands, parent: Entity, picks: &[(usize, &String, bool)], act: fn(u16) -> RunAction, db: &Content, l10n: &L10n, fonts: &Fonts, art: &Art, assets: &AssetServer) {
+    use crate::battle::{CARD_H, CARD_W};
+    let grid = commands
+        .spawn((Node { width: px(1700), flex_wrap: FlexWrap::Wrap, justify_content: JustifyContent::Center, column_gap: px(12), row_gap: px(12), ..default() }, Pickable::IGNORE, ChildOf(parent)))
+        .id();
+    let k = if picks.len() <= 14 { 0.7 } else if picks.len() <= 24 { 0.56 } else { 0.46 };
+    for &(i, id, up) in picks {
+        let slot = commands.spawn((Node { width: px(CARD_W * k), height: px(CARD_H * k), ..default() }, Pickable::IGNORE, ChildOf(grid))).id();
+        if let Some(e) = shown_card(commands, slot, i, id, up, k, db, l10n, fonts, art, assets) {
+            commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(act(i as u16)));
+        }
+    }
+}
+
+/// A price as the pedlar shows it: a coin and the sum, in red when it cannot be paid.
+fn price_tag(commands: &mut Commands, parent: Entity, price: i32, can_pay: bool, fonts: &Fonts) {
+    commands.spawn((Node { align_items: AlignItems::Center, justify_content: JustifyContent::Center, column_gap: px(8), margin: UiRect::top(px(8)), ..default() }, Pickable::IGNORE, ChildOf(parent))).with_children(|t| {
+        t.spawn((
+            Node { width: px(20), height: px(20), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
+            BackgroundColor(theme::CANDLE),
+            BorderColor::all(Color::srgb(0.45, 0.30, 0.10)),
+            Pickable::IGNORE,
+        ));
+        t.spawn((theme::text(price.to_string(), &fonts.num, 26.0, if can_pay { theme::CANDLE } else { theme::FRESH_BLOOD }), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK }));
+    });
+}
+
+/// A ware that is not a card, laid on the counter: its picture (a disc in `tint` while it has
+/// none), its name and use told on hover, its price beneath. `None` is a place sold empty.
+#[allow(clippy::too_many_arguments)]
+fn ware(commands: &mut Commands, parent: Entity, sold: Option<(String, String, String, i32, RunAction)>, tint: Color, can_pay: bool, fonts: &Fonts, art: &Art, assets: &AssetServer) {
+    const SIZE: f32 = 116.0;
+    let col = commands.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, width: px(SIZE + 24.0), ..default() }, Pickable::IGNORE, ChildOf(parent))).id();
+    let Some((picture, name, desc, price, action)) = sold else {
+        commands.spawn((Node { width: px(SIZE + 12.0), height: px(SIZE + 12.0), ..default() }, Pickable::IGNORE, ChildOf(col)));
+        return;
+    };
     let base = if can_pay { theme::PEAT } else { theme::SOOT };
     let mut e = commands.spawn((
         Button,
         Hovered::default(),
         Btn(base),
-        Node { width: px(560), padding: UiRect::axes(px(12), px(8)), border: UiRect::all(px(2)), justify_content: JustifyContent::SpaceBetween, column_gap: px(12), ..default() },
+        CardHints::new(vec![(name, desc)]),
+        Node { width: px(SIZE + 12.0), height: px(SIZE + 12.0), padding: UiRect::all(px(4)), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(14)), ..default() },
         BackgroundColor(base),
-        BorderColor::all(edge),
-        children![
-            (theme::text(label, &fonts.body, 18.0, if can_pay { theme::BONE } else { theme::DIM }), Node { max_width: px(440), ..default() }),
-            theme::text(price.to_string(), &fonts.num, 22.0, if can_pay { theme::CANDLE } else { theme::RUST_BLOOD }),
-        ],
-        ChildOf(parent),
+        BorderColor::all(tint),
+        ChildOf(col),
     ));
+    e.with_children(|b| {
+        match art.image(assets, &picture) {
+            Some(h) => b.spawn((Node { width: percent(100), height: percent(100), ..default() }, ImageNode::new(h), Pickable::IGNORE)),
+            None => b.spawn((
+                Node { width: percent(100), height: percent(100), border: UiRect::all(px(4)), border_radius: BorderRadius::MAX, ..default() },
+                BackgroundColor(tint.with_alpha(0.55)),
+                BorderColor::all(tint),
+                Pickable::IGNORE,
+            )),
+        };
+    });
     e.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(action.clone()));
+    price_tag(commands, col, price, can_pay, fonts);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_shop(
     mut commands: Commands,
     mut status: ResMut<NetStatus>,
@@ -516,7 +563,10 @@ fn draw_shop(
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     pick: Res<UpgradePick>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
 ) {
+    use crate::battle::{CARD_H, CARD_W};
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
     let Stage::Shop { stock, done } = &run.stage else { return };
@@ -528,7 +578,7 @@ fn draw_shop(
     let pl = &run.players[me as usize];
     commands.spawn((
         theme::text(l10n.t("shop-title"), &fonts.title, 56.0, theme::CANDLE),
-        Node { position_type: PositionType::Absolute, top: px(90), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
+        Node { position_type: PositionType::Absolute, top: px(60), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
         TextLayout::justify(Justify::Center),
         ChildOf(root),
     ));
@@ -536,61 +586,83 @@ fn draw_shop(
         waiting_line(&mut commands, root, &fonts, &l10n);
         return;
     }
-    let columns = commands
+    let counter = commands
         .spawn((
-            Node { position_type: PositionType::Absolute, top: px(190), width: px(STAGE_W), justify_content: JustifyContent::Center, column_gap: px(30), ..default() },
+            Node { position_type: PositionType::Absolute, top: px(150), width: px(STAGE_W), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: px(26), ..default() },
             Pickable::IGNORE,
             ChildOf(root),
         ))
         .id();
-    let column = |commands: &mut Commands, title: &str| -> Entity {
-        commands
-            .spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(8), ..default() }, Pickable::IGNORE, ChildOf(columns), children![theme::text(l10n.t(title), &fonts.title, 26.0, theme::BONE)]))
-            .id()
-    };
-    let s = &stock[me as usize];
+    let price = 75 + 25 * pl.removals as i32;
     if pick.0 {
         // choosing which card the pedlar takes away
-        let price = 75 + 25 * pl.removals as i32;
-        let col = column(&mut commands, "shop-remove-pick");
-        let grid = commands.spawn((Node { width: px(1200), flex_wrap: FlexWrap::Wrap, column_gap: px(8), row_gap: px(8), ..default() }, Pickable::IGNORE, ChildOf(col))).id();
-        for (i, (id, up)) in pl.deck.iter().enumerate() {
-            shelf_button(&mut commands, grid, l10n.card_name(id, *up), price, pl.gold >= price, theme::DIM, &fonts, RunAction::RemoveCard(i as u16));
-        }
-        commands.spawn((menu_button(l10n.t("coop-back"), &fonts), observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = false), ChildOf(col)));
+        commands.spawn((theme::text(l10n.t("shop-remove-pick"), &fonts.title, 30.0, theme::BONE), ChildOf(counter)));
+        price_tag(&mut commands, counter, price, pl.gold >= price, &fonts);
+        let deck: Vec<(usize, &String, bool)> = pl.deck.iter().enumerate().map(|(i, (id, up))| (i, id, *up)).collect();
+        deck_grid(&mut commands, counter, &deck, RunAction::RemoveCard, &db.0, &l10n, &fonts, &art, &assets);
+        commands.spawn((menu_button(l10n.t("coop-back"), &fonts), observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = false), ChildOf(counter)));
         return;
     }
-    let col = column(&mut commands, "shop-cards");
+    let s = &stock[me as usize];
+    // the cards lie on the counter as cards, each priced beneath; a sold one leaves its place
+    let k = 0.8;
+    let shelf = commands.spawn((Node { column_gap: px(26), ..default() }, Pickable::IGNORE, ChildOf(counter))).id();
     for (i, slot) in s.cards.iter().enumerate() {
-        let Some((id, price)) = slot else { continue };
-        let Some(def) = db.0.cards.get(id) else { continue };
-        let label = format!("{}  ·  {}", l10n.card_name(id, false), l10n.card_text(id, def, &def.view(false, Form::Human)));
-        let edge = if def.hero.is_empty() { theme::DIM } else { theme::hero_color(&def.hero) };
-        shelf_button(&mut commands, col, label, *price, pl.gold >= *price, edge, &fonts, RunAction::BuyCard(i as u8));
+        let col = commands.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }, Pickable::IGNORE, ChildOf(shelf))).id();
+        let place = commands.spawn((Node { width: px(CARD_W * k), height: px(CARD_H * k), ..default() }, Pickable::IGNORE, ChildOf(col))).id();
+        let Some((id, cost)) = slot else { continue };
+        if let Some(e) = shown_card(&mut commands, place, i, id, false, k, &db.0, &l10n, &fonts, &art, &assets) {
+            commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::BuyCard(i as u8)));
+        }
+        price_tag(&mut commands, col, *cost, pl.gold >= *cost, &fonts);
     }
-    let col = column(&mut commands, "shop-wares");
+    // relics and potions, and the pedlar's service of taking a card away
+    let wares = commands.spawn((Node { column_gap: px(22), align_items: AlignItems::FlexStart, margin: UiRect::top(px(10)), ..default() }, Pickable::IGNORE, ChildOf(counter))).id();
     for (i, slot) in s.relics.iter().enumerate() {
-        let Some((id, price)) = slot else { continue };
-        let label = format!("{}  ·  {}", l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")));
-        shelf_button(&mut commands, col, label, *price, pl.gold >= *price, theme::CANDLE, &fonts, RunAction::BuyRelic(i as u8));
+        let sold = slot.as_ref().map(|(id, cost)| (format!("relics/{id}"), l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")), *cost, RunAction::BuyRelic(i as u8)));
+        let can = slot.as_ref().is_some_and(|(_, c)| pl.gold >= *c);
+        ware(&mut commands, wares, sold, theme::CANDLE, can, &fonts, &art, &assets);
     }
+    commands.spawn((Node { width: px(30), ..default() }, Pickable::IGNORE, ChildOf(wares)));
     let room = pl.potions.len() < POTION_SLOTS;
     for (i, slot) in s.potions.iter().enumerate() {
-        let Some((id, price)) = slot else { continue };
-        let label = format!("{}  ·  {}", l10n.t(&format!("potion-{id}")), l10n.t(&format!("potion-{id}-desc")));
-        shelf_button(&mut commands, col, label, *price, room && pl.gold >= *price, theme::ROTLIGHT, &fonts, RunAction::BuyPotion(i as u8));
+        let sold = slot.as_ref().map(|(id, cost)| (format!("potions/{id}"), l10n.t(&format!("potion-{id}")), l10n.t(&format!("potion-{id}-desc")), *cost, RunAction::BuyPotion(i as u8)));
+        let can = room && slot.as_ref().is_some_and(|(_, c)| pl.gold >= *c);
+        ware(&mut commands, wares, sold, theme::ROTLIGHT, can, &fonts, &art, &assets);
     }
-    let price = 75 + 25 * pl.removals as i32;
+    commands.spawn((Node { width: px(30), ..default() }, Pickable::IGNORE, ChildOf(wares)));
+    let service = commands.spawn((Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, ..default() }, Pickable::IGNORE, ChildOf(wares))).id();
+    let base = if pl.gold >= price { theme::PEAT } else { theme::SOOT };
     commands.spawn((
-        menu_button(l10n.n("shop-remove", price), &fonts),
+        Button,
+        Hovered::default(),
+        Btn(base),
+        Node {
+            width: px(CARD_W * 0.62),
+            height: px(CARD_H * 0.62),
+            padding: UiRect::all(px(10)),
+            border: UiRect::all(px(3)),
+            border_radius: BorderRadius::all(px(12)),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: px(10),
+            ..default()
+        },
+        BackgroundColor(base),
+        BorderColor::all(theme::RUST_BLOOD),
+        children![
+            theme::text("\u{2716}".to_string(), &fonts.num, 44.0, theme::FRESH_BLOOD),
+            (theme::text(l10n.t("shop-remove-service"), &fonts.title, 22.0, theme::BONE), TextLayout::justify(Justify::Center)),
+        ],
         observe(|_: On<Activate>, mut pick: ResMut<UpgradePick>| pick.0 = true),
-        ChildOf(col),
+        ChildOf(service),
     ));
-    commands.spawn((
-        menu_button(l10n.t("shop-leave"), &fonts),
-        observe(|_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::LeaveShop)),
-        ChildOf(col),
-    ));
+    price_tag(&mut commands, service, price, pl.gold >= price, &fonts);
+    // set off in the corner, out of the wares' way
+    commands
+        .spawn((menu_button(l10n.t("shop-leave"), &fonts), observe(|_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::LeaveShop)), ChildOf(root)))
+        .insert(Node { position_type: PositionType::Absolute, right: px(60), bottom: px(50), width: px(300), padding: UiRect::axes(px(30), px(16)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() });
 }
 
 // ---- omens ----

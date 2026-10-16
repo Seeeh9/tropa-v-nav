@@ -452,6 +452,7 @@ fn draw_reward(
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
     let Stage::Reward { rewards } = &run.stage else { return };
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Reward, *canvas, theme::SOOT) else { return };
+    crate::between::act_backdrop(&mut commands, root, run, &art, &assets, Color::srgb(0.3, 0.3, 0.32));
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let r = &rewards[me as usize];
 
@@ -534,6 +535,8 @@ fn draw_rest(
         status.run_dirty = true;
     }
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Rest, *canvas, Color::srgb(0.09, 0.06, 0.04)) else { return };
+    // the forest by firelight
+    crate::between::act_backdrop(&mut commands, root, run, &art, &assets, Color::srgb(0.42, 0.27, 0.16));
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let pl = &run.players[me as usize];
 

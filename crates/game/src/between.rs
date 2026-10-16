@@ -433,3 +433,13 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
         children![(theme::text(l10n.t("shop-pedlar-hint"), &fonts.title, 24.0, theme::CANDLE), TextLayout::justify(Justify::Center))],
     ));
 }
+
+/// The act's forest behind a screen between fights, darkened (and warmed, at the fire) by `tint`
+/// so what is laid over it stays readable.
+pub fn act_backdrop(commands: &mut Commands, root: Entity, run: &Run, art: &Art, assets: &AssetServer, tint: Color) {
+    let act = run.act.clamp(1, 3);
+    let Some(stem) = [format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(assets, s).is_some()) else { return };
+    let (mut image, _) = art.node(assets, &stem, theme::SOOT);
+    image.color = tint;
+    commands.spawn((image, Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() }, Pickable::IGNORE, ChildOf(root)));
+}

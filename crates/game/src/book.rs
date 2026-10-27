@@ -193,6 +193,8 @@ struct Turning {
 
 /// How long a let-go leaf may keep stirring before it is taken as come to rest, in seconds.
 const SETTLE: f32 = 4.0;
+/// How soon a whole leaf lying flat on one side after being let go is taken as at rest, seconds.
+const LANDED: f32 = 0.4;
 /// How near the hand must come to loose paper to pick it up, and how high it carries it.
 const LOOSE_REACH: f32 = 0.06;
 const LIFT: f32 = 0.07;
@@ -267,9 +269,11 @@ impl Book {
         self.fresh_leaf_for(true);
     }
 
-    /// As `fresh_leaf`; a leaf to be turned back is never the torn one on the right.
-    fn fresh_leaf_for(&mut self, forward: bool) {
-        let reuse = forward && self.kept && self.leaf.side() > 0.5;
+    /// As `fresh_leaf`, for a leaf turned that way: a torn leaf lying on the side it is taken
+    /// from is taken up as it is. Returns whether it was.
+    fn fresh_leaf_for(&mut self, forward: bool) -> bool {
+        let side = self.leaf.side();
+        let reuse = self.kept && if forward { side > 0.5 } else { side < -0.5 };
         if !reuse {
             let old = std::mem::replace(&mut self.leaf, Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR));
             self.charged = 0.0;
@@ -282,6 +286,7 @@ impl Book {
             }
         }
         self.kept = false;
+        reuse
     }
 
     /// Another reader's hand, as their machine tells it: `color` is their hero's.
@@ -335,8 +340,10 @@ impl Book {
     /// the one before's right side under it.
     fn take_up_back(&mut self, hand: Hand) -> bool {
         let (Some(shown), Some(to)) = (self.shown.clone(), self.prev.clone()) else { return false };
-        self.fresh_leaf_for(false);
-        self.leaf.lay_left();
+        // a torn leaf turned over onto the left is turned back as it is, holes and all
+        if !self.fresh_leaf_for(false) {
+            self.leaf.lay_left();
+        }
         self.leaf.tearing = true;
         self.wear(Face::LeafBack, &shown, Half::Left);
         self.wear(Face::LeafFront, &to, Half::Right);
@@ -1164,7 +1171,11 @@ fn move_leaf(
         return;
     }
     turn.loose += dt;
-    if !book.leaf.still() && turn.loose < SETTLE {
+    // a whole leaf come down flat on either side is taken as at rest almost at once, so the
+    // reader may take it up again (or turn it back) without waiting for the paper to stop
+    // stirring; torn paper is left to fall where it will
+    let landed = !book.leaf.torn() && turn.loose > LANDED && book.leaf.side().abs() > 0.97;
+    if !book.leaf.still() && turn.loose < SETTLE && !landed {
         return;
     }
     // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned;

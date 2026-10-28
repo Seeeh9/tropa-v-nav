@@ -687,7 +687,14 @@ fn sync_units(
                 // drawn through the rig, so the figure bends as if it had a body
                 let picture = art.image(&assets, &stem);
                 let base = if picture.is_some() { Color::WHITE } else { color };
-                let skin = rig::skin(&mut rigs, picture, base, draw, is_hero);
+                // a figure cut into parts is drawn as its body and the parts over it
+                let (skin, parts) = match rig::parts_of(&art, &assets, &stem) {
+                    Some((body, parts)) => (
+                        rig::skin(&mut rigs, Some(body), base, draw, is_hero, None),
+                        parts.into_iter().map(|(part, joint, picture)| rig::skin(&mut rigs, Some(picture), base, draw, is_hero, Some((part, joint)))).collect(),
+                    ),
+                    None => (rig::skin(&mut rigs, picture, base, draw, is_hero, None), Vec::new()),
+                };
                 u.spawn((
                     UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y, alive: 1.0 },
                     {
@@ -702,7 +709,12 @@ fn sync_units(
                     UiTransform::IDENTITY,
                     Pickable::IGNORE,
                     children![skin],
-                ));
+                ))
+                .with_children(|s| {
+                    for part in parts {
+                        s.spawn(part);
+                    }
+                });
                 u.spawn((
                     Node {
                         width: px(180),
@@ -792,9 +804,10 @@ fn swap_form_art(
     art: Res<Art>,
     assets: Res<AssetServer>,
     mut sprites: Query<(&mut UnitSprite, &Children)>,
-    skins: Query<&MaterialNode<rig::RigMaterial>>,
+    skins: Query<(&MaterialNode<rig::RigMaterial>, &rig::RigSkin, &mut Visibility)>,
     mut rigs: ResMut<Assets<rig::RigMaterial>>,
 ) {
+    let mut skins = skins;
     for (mut s, children) in &mut sprites {
         let UnitRef::Hero(i) = s.unit else { continue };
         let Some(h) = session.shown.hero(i) else { continue };
@@ -804,8 +817,23 @@ fn swap_form_art(
         }
         // no beast art for this hero: keep what is shown rather than blank the sprite
         if let Some(handle) = art.image(&assets, &want) {
-            for skin in skins.iter_many(children).flatten() {
-                rig::repaint(&mut rigs, skin, handle.clone());
+            // a form cut into parts shows its body and parts; one that is not, its whole
+            // picture, the parts' skins hidden
+            let parts = rig::parts_of(&art, &assets, &want);
+            let mut iter = skins.iter_many_mut(children);
+            while let Some(Ok((skin, part, mut vis))) = iter.fetch_next() {
+                match (&parts, part.part) {
+                    (Some((body, _)), None) => rig::repaint(&mut rigs, skin, body.clone()),
+                    (Some((_, parts)), Some(p)) => match parts.iter().find(|(q, ..)| *q == p) {
+                        Some((.., picture)) => {
+                            rig::repaint(&mut rigs, skin, picture.clone());
+                            *vis = Visibility::Inherited;
+                        }
+                        None => *vis = Visibility::Hidden,
+                    },
+                    (None, None) => rig::repaint(&mut rigs, skin, handle.clone()),
+                    (None, Some(_)) => *vis = Visibility::Hidden,
+                }
             }
         }
         s.stem = want;
@@ -818,7 +846,7 @@ fn animate_sprites(
     speed: Res<AnimSpeed>,
     comfort: Res<Comfort>,
     mut sprites: Query<(&mut UnitSprite, &mut UiTransform, &Children)>,
-    skins: Query<&MaterialNode<rig::RigMaterial>>,
+    skins: Query<(&MaterialNode<rig::RigMaterial>, &rig::RigSkin)>,
     mut rigs: ResMut<Assets<rig::RigMaterial>>,
 ) {
     let dt = time.delta_secs() * speed.0;
@@ -832,10 +860,19 @@ fn animate_sprites(
         let toward = if hero { 1.0 } else { -1.0 };
         let mut tint = s.base;
         let mut pose = rig::Pose::idle(s.base, hero);
+        // the weapon arm hangs and stirs a little
+        // the parts stir at rest, each in its own time: the weapon hangs heavy, the head looks
+        // about, the shield arm tires and is lifted again
+        pose.swing = 0.035 * (s.t * 1.3).sin();
+        pose.nod = 0.025 * (s.t * 0.7 + 1.0).sin() + 0.012 * (s.t * 1.9).sin();
+        pose.guard = 0.02 * (s.t * 0.9 + 2.0).sin();
 
+        let cut = rig::is_cut(&s.stem);
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
             let dur = match anim {
+                // a weapon swung from on high takes its time
+                Anim::Lunge if cut => 0.5,
                 Anim::Lunge | Anim::Hit => 0.30,
                 Anim::Cast => 0.45,
                 Anim::Guarded | Anim::Cursed => 0.40,
@@ -852,6 +889,10 @@ fn animate_sprites(
                     scale *= 1.0 + 0.05 * swell;
                     // drawn back, then thrown forward
                     pose.lean = if p < 0.4 { -0.05 * (p / 0.4) } else { 0.09 * ((p - 0.4) / 0.6 * std::f32::consts::PI).sin() };
+                    pose.swing = -0.35 * swell;
+                    // the head thrown back to call it down, the shield drawn aside
+                    pose.nod = -0.18 * swell;
+                    pose.guard = 0.12 * swell;
                     pose.wave = 0.012 * swell;
                     pose.flash = 0.08 * swell;
                     pose.flash_color = Color::srgb(0.8, 0.85, 1.0);
@@ -860,6 +901,9 @@ fn animate_sprites(
                     scale *= Vec2::new(1.0 + 0.04 * swell, 1.0 - 0.02 * swell);
                     pose.squash = 1.0 - 0.04 * swell;
                     pose.lean = -0.025 * swell;
+                    // the shield brought up before the body, the head ducked behind it
+                    pose.guard = -0.35 * swell;
+                    pose.nod = 0.12 * swell;
                     tint = s.base.mix(&Color::srgb(0.45, 0.65, 1.0), 0.3 * swell);
                 }
                 Anim::Healed => {
@@ -889,12 +933,28 @@ fn animate_sprites(
                     // a crouch to wind up, then the whole body thrown into the blow
                     pose.squash = if p < 0.25 { 1.0 - 0.06 * (p / 0.25) } else { 0.94 + 0.1 * ((p - 0.25) / 0.75 * std::f32::consts::PI).sin() };
                     pose.lean = if p < 0.25 { -0.03 * (p / 0.25) } else { 0.16 * ((p - 0.25) / 0.75 * std::f32::consts::PI).sin() };
+                    // the weapon raised high while crouching, then brought down through the blow
+                    pose.swing = if p < 0.35 {
+                        -1.9 * (p / 0.35).powf(0.6)
+                    } else if p < 0.55 {
+                        -1.9 + 2.4 * ((p - 0.35) / 0.2).powi(2)
+                    } else {
+                        0.5 * (1.0 - (p - 0.55) / 0.45)
+                    };
+                    // the head goes down into the blow, the shield tucked in
+                    pose.nod = if p < 0.35 { -0.08 * p / 0.35 } else { 0.16 * ((p - 0.35) / 0.65 * std::f32::consts::PI).sin() };
+                    pose.guard = 0.1 * swell;
                 }
                 Anim::Hit => {
                     offset.x -= toward * 22.0 * (1.0 - p) * (p * 40.0).cos().abs();
                     scale.x *= 1.0 - 0.04 * (1.0 - p);
                     // bent back by the blow, the head going furthest, and springing upright
                     pose.lean = -0.13 * (1.0 - p) * (1.0 + 0.4 * (p * 18.0).cos());
+                    // the arm flung out by the blow
+                    pose.swing = -0.3 * (1.0 - p) * (p * 14.0).cos();
+                    // the head snapped back and the shield knocked aside
+                    pose.nod = -0.32 * (1.0 - p) * (1.0 + 0.3 * (p * 16.0).cos());
+                    pose.guard = 0.22 * (1.0 - p) * (p * 11.0).cos();
                     pose.squash = 1.0 - 0.05 * (1.0 - p);
                     // a white-hot instant, then the blow's colour fading off
                     // (the flash mixes in linear light, where a little goes a long way; the
@@ -921,6 +981,9 @@ fn animate_sprites(
                 offset.y += 16.0;
                 scale *= Vec2::new(1.0, 0.86);
                 pose.lean = -0.06;
+                pose.swing = 0.3;
+                pose.nod = 0.3;
+                pose.guard = 0.25;
                 pose.sway = 0.002;
                 pose.breath = 0.006;
             }
@@ -930,6 +993,9 @@ fn animate_sprites(
             let k = 1.0 - s.alive;
             pose.lean = -0.22 * k * k;
             pose.squash = 1.0 - 0.3 * k;
+            pose.swing = 0.7 * k;
+            pose.nod = -0.45 * k;
+            pose.guard = 0.5 * k;
             pose.sway = 0.0;
             pose.wave = 0.01 * (1.0 - k);
             offset.x -= toward * 30.0 * k;
@@ -942,8 +1008,8 @@ fn animate_sprites(
         tf.translation = Val2::px(offset.x, offset.y);
         tf.scale = scale;
         pose.tint = tint;
-        for skin in skins.iter_many(children).flatten() {
-            rig::pose(&mut rigs, skin, s.t, pose);
+        for (skin, part) in skins.iter_many(children).flatten() {
+            rig::pose(&mut rigs, skin, part, s.t, pose);
         }
     }
 }

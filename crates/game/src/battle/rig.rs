@@ -4,6 +4,11 @@
 //! foe, a blow it takes bends it back and flashes it; a spell gathers it up and throws it forward.
 //! The sprite node keeps its own transform for the larger moves (a step forward, a recoil); the
 //! rig adds the bending that a flat picture cannot do by moving as a whole.
+//!
+//! A figure may also be cut into parts (see `FIGURES`): its picture is then drawn as several
+//! skins, `<stem>_body` (the figure with its parts painted out and what was behind them painted
+//! in) and one `<stem>_<part>` per part (the part alone, where it was), each turning about its
+//! own joint: the weapon arm swings, the head nods and snaps back, the shield is raised.
 
 use super::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
@@ -37,6 +42,50 @@ pub(super) struct RigUniform {
     pub flash: Vec4,
     /// Padding left, right, top; facing.
     pub pad: Vec4,
+    /// A limb's joint on the picture (x, y in 0..1), its turn (radians, clockwise on screen) and
+    /// the picture's width over height; no turn on a body.
+    pub limb: Vec4,
+}
+
+/// A part a figure may be cut into, each moved its own way.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Part {
+    /// The arm that strikes, with its weapon.
+    Arm,
+    Head,
+    /// The shield, or the other arm.
+    Shield,
+}
+
+impl Part {
+    fn file(self) -> &'static str {
+        match self {
+            Part::Arm => "arm",
+            Part::Head => "head",
+            Part::Shield => "shield",
+        }
+    }
+}
+
+/// Figures cut into parts: the art stem, and each part with its joint on the picture, in the
+/// order they are laid over the body.
+const FIGURES: &[(&str, &[(Part, Vec2)])] = &[(
+    "heroes/bogatyr",
+    &[(Part::Head, Vec2::new(0.52, 0.15)), (Part::Shield, Vec2::new(0.68, 0.30)), (Part::Arm, Vec2::new(0.275, 0.42))],
+)];
+
+/// Whether `stem` is a figure cut into parts (its blows take longer: a weapon is swung).
+pub(super) fn is_cut(stem: &str) -> bool {
+    FIGURES.iter().any(|(s, _)| *s == stem)
+}
+
+/// The pictures of `stem` cut into parts: its body and each part with its joint, when all of
+/// them are there.
+pub(super) fn parts_of(art: &Art, assets: &AssetServer, stem: &str) -> Option<(Handle<Image>, Vec<(Part, Vec2, Handle<Image>)>)> {
+    let (_, parts) = FIGURES.iter().find(|(s, _)| *s == stem)?;
+    let body = art.image(assets, &format!("{stem}_body"))?;
+    let parts = parts.iter().map(|(part, joint)| Some((*part, *joint, art.image(assets, &format!("{stem}_{}", part.file()))?))).collect::<Option<Vec<_>>>()?;
+    Some((body, parts))
 }
 
 impl UiMaterial for RigMaterial {
@@ -46,8 +95,11 @@ impl UiMaterial for RigMaterial {
 }
 
 /// The figure's skin: the shader-drawn picture inside a sprite node, larger than it by the pads.
+/// A part's skin knows which part it is; the body's (or a whole picture's) is `None`.
 #[derive(Component)]
-pub(super) struct RigSkin;
+pub(super) struct RigSkin {
+    pub part: Option<Part>,
+}
 
 /// How the figure is bent this frame, worked out from its animation (see `animate_sprites`).
 #[derive(Clone, Copy)]
@@ -61,26 +113,38 @@ pub(super) struct Pose {
     pub flash_color: Color,
     pub tint: Color,
     pub fade: f32,
+    /// How far each part is turned (radians, + clockwise on a hero's screen): the weapon arm
+    /// (+ down and back, - raised toward the foe), the head (+ bowed, - thrown back), the shield
+    /// (- raised before the body).
+    pub swing: f32,
+    pub nod: f32,
+    pub guard: f32,
 }
 
 impl Pose {
     /// At rest: breathing, swaying a little, cloth stirring.
     pub fn idle(tint: Color, hero: bool) -> Pose {
-        Pose { lean: 0.0, sway: if hero { 0.005 } else { 0.007 }, wave: 0.0035, breath: 0.018, squash: 1.0, flash: 0.0, flash_color: Color::WHITE, tint, fade: 1.0 }
+        Pose { lean: 0.0, sway: if hero { 0.005 } else { 0.007 }, wave: 0.0035, breath: 0.018, squash: 1.0, flash: 0.0, flash_color: Color::WHITE, tint, fade: 1.0, swing: 0.0, nod: 0.0, guard: 0.0 }
     }
 }
 
 /// The skin for a picture drawn at `draw` stage pixels, as a child of the sprite node.
-pub(super) fn skin(materials: &mut Assets<RigMaterial>, picture: Option<Handle<Image>>, tint: Color, draw: Vec2, hero: bool) -> impl Bundle {
+pub(super) fn skin(materials: &mut Assets<RigMaterial>, picture: Option<Handle<Image>>, tint: Color, draw: Vec2, hero: bool, part: Option<(Part, Vec2)>) -> impl Bundle {
     let w = draw.x / (1.0 - 2.0 * PAD_X);
     let h = draw.y / (1.0 - PAD_TOP);
     let face = if hero { 1.0 } else { -1.0 };
     let material = materials.add(RigMaterial {
-        rig: RigUniform { pad: Vec4::new(PAD_X, PAD_X, PAD_TOP, face), tint: tint.to_linear().to_vec4(), body: Vec4::new(0.0, 1.0, 0.0, 1.0), ..default() },
+        rig: RigUniform {
+            pad: Vec4::new(PAD_X, PAD_X, PAD_TOP, face),
+            tint: tint.to_linear().to_vec4(),
+            body: Vec4::new(0.0, 1.0, 0.0, 1.0),
+            limb: part.map(|(_, j)| Vec4::new(j.x, j.y, 0.0, draw.x / draw.y)).unwrap_or(Vec4::new(0.0, 0.0, 0.0, 1.0)),
+            ..default()
+        },
         picture: picture.unwrap_or_default(),
     });
     (
-        RigSkin,
+        RigSkin { part: part.map(|(p, _)| p) },
         MaterialNode(material),
         Node { position_type: PositionType::Absolute, left: px(-(w - draw.x) / 2.0), top: px(-(h - draw.y)), width: px(w), height: px(h), ..default() },
         Pickable::IGNORE,
@@ -88,8 +152,16 @@ pub(super) fn skin(materials: &mut Assets<RigMaterial>, picture: Option<Handle<I
 }
 
 /// Writes a pose into a skin's material.
-pub(super) fn pose(materials: &mut Assets<RigMaterial>, handle: &MaterialNode<RigMaterial>, t: f32, p: Pose) {
+pub(super) fn pose(materials: &mut Assets<RigMaterial>, handle: &MaterialNode<RigMaterial>, skin: &RigSkin, t: f32, p: Pose) {
     let Some(mut m) = materials.get_mut(&handle.0) else { return };
+    // a foe faces the other way: its picture is mirrored, so is the turn
+    let turn = match skin.part {
+        Some(Part::Arm) => p.swing,
+        Some(Part::Head) => p.nod,
+        Some(Part::Shield) => p.guard,
+        None => 0.0,
+    };
+    m.rig.limb.z = turn * m.rig.pad.w;
     m.rig.motion = Vec4::new(t, p.lean, p.sway, p.wave);
     m.rig.body = Vec4::new(p.breath, p.squash, p.flash, p.fade);
     m.rig.tint = p.tint.to_linear().to_vec4();

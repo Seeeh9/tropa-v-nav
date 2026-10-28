@@ -16,6 +16,8 @@ struct Rig {
     flash: vec4<f32>,
     // share of the node padded on the left, on the right and on top of the picture; facing (+1/-1)
     pad: vec4<f32>,
+    // a limb's joint on the picture, its turn (radians, clockwise on screen), picture width/height
+    limb: vec4<f32>,
 }
 
 @group(1) @binding(0)
@@ -49,6 +51,13 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     // breath swells the chest a little
     let chest = exp(-pow((h - 0.62) / 0.16, 2.0));
     p.x = 0.5 + (p.x - 0.5) / (1.0 + rig.body.x * chest * (0.5 + 0.5 * sin(t * 2.5)));
+    // a limb turns about its joint: look up where its paint was before the turn, measured in
+    // true proportions so the turn does not shear the picture
+    let k = vec2<f32>(rig.limb.w, 1.0);
+    let d = (p - rig.limb.xy) * k;
+    let ca = cos(rig.limb.z);
+    let sa = sin(rig.limb.z);
+    p = rig.limb.xy + vec2<f32>(ca * d.x + sa * d.y, -sa * d.x + ca * d.y) / k;
     // sampled everywhere (a texture is read in uniform control flow), dropped outside the picture
     let c = textureSample(picture, picture_sampler, clamp(p, vec2<f32>(0.0), vec2<f32>(1.0)));
     let inside = step(0.0, p.x) * step(p.x, 1.0) * step(0.0, p.y) * step(p.y, 1.0);

@@ -65,7 +65,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
         let mut e = commands.spawn((
             Node { position_type: PositionType::Absolute, left: px(p.at.x), top: px(p.at.y), width: px(p.size), height: px(p.size), border_radius: BorderRadius::MAX, ..default() },
             UiTransform::IDENTITY,
-            GlobalZIndex(30),
+            GlobalZIndex(25),
             Pickable::IGNORE,
             ChildOf(*layer),
         ));

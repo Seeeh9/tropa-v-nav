@@ -142,6 +142,7 @@ pub(super) fn play(commands: &mut Commands, parent: Entity, frames: &[Handle<Ima
         ImageNode { color, flip_x: flip, ..ImageNode::new(first.clone()) },
         Node { position_type: PositionType::Absolute, left: px(at.x - size.x * anchor.x), top: px(at.y - size.y * anchor.y), width: px(size.x), height: px(size.y), ..default() },
         UiTransform { rotation: Rot2::radians(angle), ..default() },
+        GlobalZIndex(25),
         Pickable::IGNORE,
         ChildOf(parent),
     ));
@@ -304,6 +305,8 @@ pub(super) fn strike_down(
                 },
                 Node { position_type: PositionType::Absolute, left: px(at.x), top: px(at.y), width: px(0), height: px(0), ..default() },
                 UiTransform::IDENTITY,
+                // over the units, under the hand of cards
+                GlobalZIndex(25),
                 Pickable::IGNORE,
                 ChildOf(float_layer),
             ))

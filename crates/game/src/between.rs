@@ -22,7 +22,9 @@ const BETWEEN: [AppState; 5] = [AppState::Map, AppState::Reward, AppState::Rest,
 /// How tall the bar along the top is.
 pub const BAR_H: f32 = 64.0;
 /// Where the pedlar stands in the clearing, his feet and his size.
-pub const PEDLAR_FOOT: Vec2 = Vec2::new(1450.0, 760.0);
+pub const PEDLAR_FOOT: Vec2 = Vec2::new(1450.0, 760.0 + CLEARING_DROP);
+/// How much lower than in a fight the party stands in the pedlar's clearing.
+const CLEARING_DROP: f32 = 135.0;
 const PEDLAR_SIZE: Vec2 = Vec2::new(390.0, 520.0);
 
 pub fn plugin(app: &mut App) {
@@ -367,15 +369,22 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
     let act = run.act.clamp(1, 3);
     let backdrop = [format!("bg/shop_act{act}"), format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(assets, s).is_some()).unwrap_or_default();
     let lift = crate::battle::ground_lift(&backdrop);
+    // with no hand of cards below, everyone stands CLEARING_DROP lower than in a fight, and the
+    // picture is raised only as much as still puts its ground under their feet, then grown
+    // evenly so it reaches the bottom of the screen
+    let ground = (crate::battle::hero_foot(0).y + lift) / STAGE_H;
+    let raise = ((lift - CLEARING_DROP) / (1.0 - ground)).max(0.0);
+    let grow = (STAGE_H + raise) / STAGE_H;
     commands.spawn((
-        Node { position_type: PositionType::Absolute, left: px(0), top: px(-lift), width: px(STAGE_W), height: px(STAGE_H), ..default() },
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(-STAGE_W * (grow - 1.0) / 2.0),
+            top: px(-raise),
+            width: px(STAGE_W * grow),
+            height: px(STAGE_H + raise),
+            ..default()
+        },
         art.node(assets, &backdrop, theme::SOOT),
-        Pickable::IGNORE,
-        ChildOf(root),
-    ));
-    commands.spawn((
-        Node { position_type: PositionType::Absolute, left: px(0), top: px(STAGE_H - lift - 60.0), width: px(STAGE_W), height: px(lift + 60.0), ..default() },
-        BackgroundColor(theme::SOOT.with_alpha(0.9)),
         Pickable::IGNORE,
         ChildOf(root),
     ));
@@ -385,7 +394,7 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
     order.sort_by(|a, b| crate::battle::hero_foot(*a as u8).y.total_cmp(&crate::battle::hero_foot(*b as u8).y));
     for i in order {
         let pl = &run.players[i];
-        let foot = crate::battle::hero_foot(i as u8);
+        let foot = crate::battle::hero_foot(i as u8) + Vec2::new(0.0, CLEARING_DROP);
         let Some(h) = art.image(assets, &format!("heroes/{}", pl.hero)) else { continue };
         commands.spawn((
             Node { position_type: PositionType::Absolute, left: px(foot.x - size.x / 2.0), top: px(foot.y - size.y), width: px(size.x), height: px(size.y), ..default() },
@@ -421,7 +430,8 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
         theme::panel(Node {
             position_type: PositionType::Absolute,
             left: px(PEDLAR_FOOT.x - 200.0),
-            top: px(PEDLAR_FOOT.y + 16.0),
+            // over his head: below his feet the Leave button stands
+            top: px(PEDLAR_FOOT.y - PEDLAR_SIZE.y - 70.0),
             width: px(400),
             padding: UiRect::all(px(10)),
             border: UiRect::all(px(2)),

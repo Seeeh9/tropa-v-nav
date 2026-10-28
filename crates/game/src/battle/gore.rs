@@ -90,6 +90,9 @@ pub(super) fn blood_of(comfort: &Comfort, shown: &Combat, unit: UnitRef) -> Colo
         "nav_soul" | "weeper" | "mara" | "drowned_maiden" | "mavka" | "koschei_shadow" | "swamp_light" | "sirin" => Color::srgb(0.50, 0.60, 0.64),
         // wood and fungus bleed sap
         "leshy" | "tree_guard" | "death_oak" | "death_oak_chest" | "mushroom_corpse" | "lesavka" => Color::srgb(0.42, 0.40, 0.10),
+        // things, not bodies: splinters and ash, meltwater, a dying glow
+        "death_chest" | "death_egg" | "death_egg_solo" => Color::srgb(0.30, 0.25, 0.18),
+        "ice_crown" => Color::srgb(0.62, 0.74, 0.80),
         // bone has only dust in it
         "kostomakha" | "koschei" => Color::srgb(0.42, 0.36, 0.26),
         // the swamp's things run green-black

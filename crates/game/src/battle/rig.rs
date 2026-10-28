@@ -79,6 +79,8 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("heroes/volkolak_beast", &[(Part::Head, Vec2::new(0.69, 0.22), 1.2)]),
     ("heroes/skomoroh", &[(Part::Shield, Vec2::new(0.69, 0.44), 0.8), (Part::Head, Vec2::new(0.57, 0.22), 1.0), (Part::Arm, Vec2::new(0.20, 0.37), 0.8)]),
     ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
+    ("enemies/bolotnik", &[(Part::Head, Vec2::new(0.377, 0.260), 1.0), (Part::Shield, Vec2::new(0.222, 0.412), 0.8), (Part::Arm, Vec2::new(0.811, 0.363), 1.0)]),
+    ("enemies/igosha", &[(Part::Head, Vec2::new(0.473, 0.346), 1.0)]),
     ("enemies/vurdalak_elder", &[(Part::Head, Vec2::new(0.509, 0.254), 1.0), (Part::Shield, Vec2::new(0.723, 0.460), 0.8), (Part::Arm, Vec2::new(0.25, 0.37), -0.6)]),
     ("enemies/shatun", &[(Part::Head, Vec2::new(0.387, 0.241), 1.0), (Part::Shield, Vec2::new(0.269, 0.485), 0.8), (Part::Arm, Vec2::new(0.690, 0.480), 1.0)]),
     ("enemies/upyr", &[(Part::Head, Vec2::new(0.458, 0.223), 1.0), (Part::Shield, Vec2::new(0.671, 0.402), 0.8), (Part::Arm, Vec2::new(0.250, 0.407), 1.0)]),

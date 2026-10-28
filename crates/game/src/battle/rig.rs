@@ -79,6 +79,14 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("heroes/volkolak_beast", &[(Part::Head, Vec2::new(0.69, 0.22), 1.2)]),
     ("heroes/skomoroh", &[(Part::Shield, Vec2::new(0.69, 0.44), 0.8), (Part::Head, Vec2::new(0.57, 0.22), 1.0), (Part::Arm, Vec2::new(0.20, 0.37), 0.8)]),
     ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
+    ("enemies/upyr", &[(Part::Head, Vec2::new(0.458, 0.223), 1.0), (Part::Shield, Vec2::new(0.671, 0.402), 0.8), (Part::Arm, Vec2::new(0.250, 0.407), 1.0)]),
+    ("enemies/auka", &[(Part::Head, Vec2::new(0.52, 0.29), 1.0), (Part::Shield, Vec2::new(0.74, 0.48), -0.6), (Part::Arm, Vec2::new(0.25, 0.43), -0.6)]),
+    ("enemies/kikimora", &[(Part::Head, Vec2::new(0.46, 0.22), 1.0), (Part::Shield, Vec2::new(0.56, 0.33), 0.8), (Part::Arm, Vec2::new(0.64, 0.42), 1.0)]),
+    ("enemies/leshy", &[(Part::Head, Vec2::new(0.48, 0.30), 1.0), (Part::Shield, Vec2::new(0.853, 0.33), 0.8), (Part::Arm, Vec2::new(0.497, 0.434), 1.0)]),
+    ("enemies/koschei_guard", &[(Part::Head, Vec2::new(0.488, 0.153), 1.0), (Part::Shield, Vec2::new(0.653, 0.286), 0.8), (Part::Arm, Vec2::new(0.317, 0.393), 1.0)]),
+    ("enemies/kostomakha", &[(Part::Head, Vec2::new(0.473, 0.143), 1.0), (Part::Shield, Vec2::new(0.888, 0.338), 0.8), (Part::Arm, Vec2::new(0.460, 0.381), 1.0)]),
+    ("enemies/mara", &[(Part::Head, Vec2::new(0.54, 0.22), 1.0), (Part::Shield, Vec2::new(0.58, 0.45), 0.8), (Part::Arm, Vec2::new(0.32, 0.42), -0.5)]),
+    ("enemies/poludnitsa", &[(Part::Head, Vec2::new(0.464, 0.219), 1.0), (Part::Shield, Vec2::new(0.387, 0.406), 0.8), (Part::Arm, Vec2::new(0.545, 0.406), 1.0)]),
 ];
 
 /// Whether `stem` is a figure cut into parts (its blows take longer: a weapon is swung).

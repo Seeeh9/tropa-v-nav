@@ -543,8 +543,25 @@ fn draw_rest(
         status.run_dirty = true;
     }
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Rest, *canvas, Color::srgb(0.09, 0.06, 0.04)) else { return };
-    // the forest by firelight
-    crate::between::act_backdrop(&mut commands, root, run, &art, &assets, Color::srgb(0.42, 0.27, 0.16));
+    // the party's own fire in a clearing (the act's forest by firelight when that is missing)
+    if art.image(&assets, "bg/lobby").is_some() {
+        commands.spawn((crate::menu::backdrop(&art, &assets, "bg/lobby", 0.75), ChildOf(root)));
+        // the party round it, the far side facing back across the flames
+        for (i, pl) in run.players.iter().enumerate() {
+            let Some(h) = art.image(&assets, &format!("heroes/{}", pl.hero)) else { continue };
+            let (x, flip) = [(420.0, false), (1340.0, true), (240.0, false), (1530.0, true)][i.min(3)];
+            let height = 400.0;
+            let width = height * art.aspect(&format!("heroes/{}", pl.hero)).unwrap_or(0.75);
+            commands.spawn((
+                ImageNode { color: Color::srgb(1.0, 0.86, 0.72), flip_x: flip, ..ImageNode::new(h) },
+                Node { position_type: PositionType::Absolute, left: px(x - width / 2.0), top: px(880.0 - height), width: px(width), height: px(height), ..default() },
+                Pickable::IGNORE,
+                ChildOf(root),
+            ));
+        }
+    } else {
+        crate::between::act_backdrop(&mut commands, root, run, &art, &assets, Color::srgb(0.42, 0.27, 0.16));
+    }
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let pl = &run.players[me as usize];
 
@@ -925,6 +942,8 @@ fn draw_omen(
     let Stage::Omen { id, picks } = &run.stage else { return };
     let Some(def) = db.0.events.get(id) else { return };
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Omen, *canvas, Color::srgb(0.06, 0.06, 0.08)) else { return };
+    // the act's forest, deep in shadow, round the omen's own picture
+    crate::between::act_backdrop(&mut commands, root, run, &art, &assets, Color::srgb(0.22, 0.22, 0.25));
     omen_picture(&mut commands, root, id, run.act, &art, &assets);
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let pl = &run.players[me as usize];
@@ -1033,6 +1052,7 @@ fn draw_trophy(
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
     let Stage::Trophy { offers, picks } = &run.stage else { return };
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Omen, *canvas, Color::srgb(0.06, 0.06, 0.08)) else { return };
+    crate::between::act_backdrop(&mut commands, root, run, &art, &assets, Color::srgb(0.28, 0.26, 0.24));
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
     let column = commands
         .spawn((

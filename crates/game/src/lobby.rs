@@ -220,9 +220,16 @@ fn draw_lobby(
         .id();
     commands.spawn((crate::menu::backdrop(&art, &assets, "bg/lobby", 0.8), ChildOf(root)));
     // the faces to pick from sit on a darker band, so they read over the firelight
+    // fading in from above, so it reads as the ground darkening away from the fire, not a slab
     commands.spawn((
-        Node { position_type: PositionType::Absolute, left: px(0), bottom: px(0), width: px(STAGE_W), height: px(400), ..default() },
-        BackgroundColor(theme::SOOT.with_alpha(0.62)),
+        ImageNode { color: theme::SOOT.with_alpha(0.75), ..ImageNode::new(assets.load("fx/fade_down.png")) },
+        Node { position_type: PositionType::Absolute, left: px(0), bottom: px(260), width: px(STAGE_W), height: px(200), ..default() },
+        Pickable::IGNORE,
+        ChildOf(root),
+    ));
+    commands.spawn((
+        Node { position_type: PositionType::Absolute, left: px(0), bottom: px(0), width: px(STAGE_W), height: px(260), ..default() },
+        BackgroundColor(theme::SOOT.with_alpha(0.75)),
         Pickable::IGNORE,
         ChildOf(root),
     ));
@@ -307,6 +314,14 @@ fn draw_lobby(
             let figure_h = 460.0;
             let figure_w = figure_h * art.aspect(&format!("heroes/{hero}")).unwrap_or(0.75);
             if let Some(figure) = art.image(&assets, &format!("heroes/{hero}")) {
+                // standing on the ground by the fire: a soft shadow under the feet
+                let feet = 222.0 + figure_h * 0.97;
+                commands.spawn((
+                    ImageNode { color: Color::WHITE.with_alpha(0.85), ..ImageNode::new(assets.load("fx/shadow.png")) },
+                    Node { width: px(figure_w * 0.9), height: px(46), ..absolute(560.0 - figure_w * 0.45, feet - 23.0) },
+                    Pickable::IGNORE,
+                    ChildOf(root),
+                ));
                 commands.spawn((
                     ImageNode::new(figure),
                     Node { width: px(figure_w), height: px(figure_h), ..absolute(560.0 - figure_w / 2.0, 222.0) },

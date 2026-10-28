@@ -805,15 +805,32 @@ fn layout_units(session: Res<Session>, time: Res<Time>, mut widgets: Query<(&mut
 }
 
 /// The werewolf has a second body: when the form changes, so does the sprite.
+/// Pictures a hero may change into mid-fight (a blow, the Edge, the other form), loaded as the
+/// fight begins: one loaded only when first wanted would come a frame or more too late.
+#[derive(Default)]
+struct Preloaded(Vec<Handle<Image>>);
+
 fn swap_form_art(
     session: Res<Session>,
     art: Res<Art>,
     assets: Res<AssetServer>,
+    mut preloaded: Local<Preloaded>,
     mut sprites: Query<(&mut UnitSprite, &Children)>,
     skins: Query<(&MaterialNode<rig::RigMaterial>, &rig::RigSkin, &mut Visibility)>,
     mut rigs: ResMut<Assets<rig::RigMaterial>>,
 ) {
     let mut skins = skins;
+    if preloaded.0.is_empty() {
+        for h in &session.shown.heroes {
+            for form in ["", "_beast"] {
+                for pose in ["", "_strike", "_downed"] {
+                    if let Some(handle) = art.image(&assets, &format!("heroes/{}{form}{pose}", h.def)) {
+                        preloaded.0.push(handle);
+                    }
+                }
+            }
+        }
+    }
     for (mut s, children) in &mut sprites {
         let UnitRef::Hero(i) = s.unit else { continue };
         let Some(h) = session.shown.hero(i) else { continue };
@@ -821,6 +838,11 @@ fn swap_form_art(
         // on the Edge a hero is drawn down on one knee, wounded, when that picture exists
         if h.downed && art.image(&assets, &format!("{want}_downed")).is_some() {
             want = format!("{want}_downed");
+        }
+        // through the heart of a lunge the hero is drawn mid-blow, when that picture exists
+        let striking = matches!(s.anim, Some((Anim::Lunge, t)) if (0.12..0.38).contains(&t));
+        if striking && !h.downed && art.image(&assets, &format!("{want}_strike")).is_some() {
+            want = format!("{want}_strike");
         }
         if s.stem == want {
             continue;
@@ -877,7 +899,7 @@ fn animate_sprites(
         pose.nod = 0.025 * (s.t * 0.7 + 1.0).sin() + 0.012 * (s.t * 1.9).sin();
         pose.guard = 0.02 * (s.t * 0.9 + 2.0).sin();
 
-        let cut = rig::is_cut(&s.stem);
+        let cut = rig::is_cut(s.stem.trim_end_matches("_strike"));
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
             let dur = match anim {

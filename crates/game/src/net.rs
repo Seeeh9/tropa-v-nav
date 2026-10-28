@@ -542,7 +542,7 @@ fn notes(
             }
             Note::Ping { from, kind, at } => status.pings.push((from, kind, at)),
             Note::StoryVote { from, page, skip } => status.story_votes.push((from, page, skip)),
-            note @ (Note::BookHand { .. } | Note::BookTear { .. } | Note::BookTurn { .. }) => status.book.push(note),
+            note @ (Note::BookHand { .. } | Note::BookTear { .. } | Note::BookTurn { .. } | Note::BookCarry { .. }) => status.book.push(note),
             Note::MapPointer { from, at } => status.pointers.push((from, at)),
             Note::Nudge { from, node } => status.nudges.push((from, node)),
         }

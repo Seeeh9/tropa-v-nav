@@ -438,6 +438,7 @@ fn book_hands(mut commands: Commands, tale: Res<Tale>, net: Option<ResMut<Net>>,
         match n {
             HandNews::Hand { at, hold } => net.node.book_hand(&page, at, hold),
             HandNews::Tear(edge) => net.node.book_tear(&page, edge),
+            HandNews::Carry { piece, point, at } => net.node.book_carry(&page, piece, point, at),
         }
     }
     let colour = |seat: u8| {
@@ -450,6 +451,10 @@ fn book_hands(mut commands: Commands, tale: Res<Tale>, net: Option<ResMut<Net>>,
                 book.remote_hand(from, c, at, hold);
             }
             Note::BookTear { page: p, edge, .. } if p == page => book.remote_tear(edge),
+            Note::BookCarry { from, page: p, piece, point, at } if p == page => {
+                let c = colour(from);
+                book.remote_carry(from, c, piece, point, at);
+            }
             Note::BookTurn { page: p, .. } if p == page => commands.trigger(Turn::TheirLeaf),
             Note::BookTurn { page: p, .. } if p.strip_prefix(BACK) == Some(page.as_str()) => commands.trigger(Turn::TheirBack),
             _ => {}

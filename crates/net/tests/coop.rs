@@ -171,12 +171,14 @@ fn a_hand_on_the_book_reaches_the_others() {
     hub.node(2).book_hand("story-pro_1", [0.5, 0.3, 0.1], Some(31));
     hub.node(2).book_tear("story-pro_1", 77);
     hub.node(2).book_turn("story-pro_1");
+    hub.node(2).book_carry("story-pro_1", 3, Some(12), [0.2, 0.4, -0.1]);
     hub.pump(&c);
     for n in [1, 3] {
         let notes = hub.node(n).take_notes();
         assert!(notes.contains(&Note::BookHand { from: 1, page: "story-pro_1".into(), at: [0.5, 0.3, 0.1], hold: Some(31) }), "{notes:?}");
         assert!(notes.contains(&Note::BookTear { from: 1, page: "story-pro_1".into(), edge: 77 }));
         assert!(notes.contains(&Note::BookTurn { from: 1, page: "story-pro_1".into() }));
+        assert!(notes.contains(&Note::BookCarry { from: 1, page: "story-pro_1".into(), piece: 3, point: Some(12), at: [0.2, 0.4, -0.1] }));
     }
     // the reader's own hand is not shown back to them
     assert!(!hub.node(2).take_notes().iter().any(|n| matches!(n, Note::BookHand { .. })));

@@ -97,6 +97,9 @@ pub enum Msg {
     BookTear { page: String, edge: u16 },
     /// Everyone: I have turned the leaf of `page` over; read on.
     BookTurn { page: String },
+    /// Everyone: I carry torn paper across the book of `page`: `piece` 0 is the leaf in play,
+    /// another a scrap (by the order scraps were set aside); held by `point`, or let go (`None`).
+    BookCarry { page: String, piece: u32, point: Option<u16>, at: [f32; 3] },
     /// Everyone: where my cursor is over the path map, in stage pixels.
     MapPointer { at: [f32; 2] },
     /// Everyone: hurry up, I have long since chosen this node of the map.
@@ -136,6 +139,7 @@ pub enum Note {
     BookHand { from: u8, page: String, at: [f32; 3], hold: Option<u16> },
     BookTear { from: u8, page: String, edge: u16 },
     BookTurn { from: u8, page: String },
+    BookCarry { from: u8, page: String, piece: u32, point: Option<u16>, at: [f32; 3] },
     /// Another player's cursor over the map, and their nudge at the node they chose.
     MapPointer { from: u8, at: [f32; 2] },
     Nudge { from: u8, node: u8 },
@@ -403,6 +407,11 @@ impl Node {
         self.out.push((To::All, Msg::BookTurn { page: page.into() }));
     }
 
+    /// Shows the others the torn paper I carry over the book, or that I let it go.
+    pub fn book_carry(&mut self, page: &str, piece: u32, point: Option<u16>, at: [f32; 3]) {
+        self.out.push((To::All, Msg::BookCarry { page: page.into(), piece, point, at }));
+    }
+
     /// Shows the others where my cursor is over the map.
     pub fn map_pointer(&mut self, at: [f32; 2]) {
         self.out.push((To::All, Msg::MapPointer { at }));
@@ -515,6 +524,11 @@ impl Node {
             Msg::BookTurn { page } => {
                 if let Some(slot) = self.lobby.slot_of(from) {
                     self.notes.push(Note::BookTurn { from: slot, page });
+                }
+            }
+            Msg::BookCarry { page, piece, point, at } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::BookCarry { from: slot, page, piece, point, at });
                 }
             }
             Msg::MapPointer { at } => {

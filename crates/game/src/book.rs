@@ -67,7 +67,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<Torn>()
         .add_message::<Found>()
         .add_systems(Startup, setup)
-        .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, move_leaf, redraw_pages, keep_scraps, run_scraps).chain(), flicker, sway_camera, fit_pages));
+        .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, carry_remote, move_leaf, redraw_pages, keep_scraps, run_scraps).chain(), flicker, sway_camera, fit_pages));
 }
 
 /// Sent when the reader has turned the page by hand: the story reads on.
@@ -144,6 +144,9 @@ pub enum HandNews {
     Hand { at: [f32; 3], hold: Option<u16> },
     /// The leaf the reader holds tore along this edge.
     Tear(u16),
+    /// The reader carries torn paper (`piece` 0 the leaf in play, else a scrap's age) by `point`,
+    /// or has let it go.
+    Carry { piece: u32, point: Option<u16>, at: [f32; 3] },
 }
 
 /// Another reader's hand over the book, as their machine last told it.
@@ -171,6 +174,8 @@ enum Hand {
     Loose,
     /// Nobody: the leaf falls where it will.
     Gone,
+    /// Another reader, carrying the leaf torn loose (their seat).
+    Carried(u8),
 }
 
 struct Turning {
@@ -220,6 +225,10 @@ pub struct Book {
     pub news: Vec<HandNews>,
     /// The other readers' hands, by seat.
     ghosts: [Option<Ghost>; 4],
+    /// Torn paper another reader carries, as last told: seat, piece, point, where, seconds since.
+    carried: Option<(u8, u32, u16, Vec3, f32)>,
+    /// Paper another reader let go, waiting to fall: the piece.
+    dropped: Vec<u32>,
     /// The spread the pages beneath show.
     shown: Option<Spread>,
     /// The story's spread the book has last followed.
@@ -301,9 +310,23 @@ impl Book {
         }
     }
 
+    /// Torn paper another reader carries (`point` held) or lets go (`None`).
+    pub fn remote_carry(&mut self, seat: u8, color: Color, piece: u32, point: Option<u16>, at: [f32; 3]) {
+        self.remote_hand(seat, color, at, None);
+        match point {
+            Some(p) => self.carried = Some((seat, piece, p, Vec3::from_array(at), 0.0)),
+            None => {
+                if self.carried.is_some_and(|c| c.0 == seat) {
+                    self.carried = None;
+                }
+                self.dropped.push(piece);
+            }
+        }
+    }
+
     /// The leaf another reader holds tore there.
     pub fn remote_tear(&mut self, edge: u16) {
-        if matches!(self.turn.as_ref().map(|t| &t.hand), Some(Hand::Remote(_)) | Some(Hand::Gone)) {
+        if matches!(self.turn.as_ref().map(|t| &t.hand), Some(Hand::Remote(_)) | Some(Hand::Gone) | Some(Hand::Carried(_))) {
             self.leaf.tear_edge(edge as usize);
         }
     }
@@ -701,6 +724,8 @@ fn setup(
         shared: false,
         news: Vec::new(),
         ghosts: Default::default(),
+        carried: None,
+        dropped: Vec::new(),
         shown: None,
         followed: None,
         opened: Vec::new(),
@@ -846,21 +871,27 @@ fn hold_leaf(
     let book = &mut *book;
     // over a page read together the others see where the hand is, a few times a second
     *since_told += time.delta_secs();
-    let mut tell = |book: &mut Book, at: Vec3, hold: Option<usize>, now: bool| {
+    let mut tell_news = |book: &mut Book, news: HandNews, now: bool| {
         if book.shared && (now || *since_told >= 1.0 / HAND_RATE) {
             *since_told = 0.0;
-            book.news.push(HandNews::Hand { at: at.to_array(), hold: hold.map(|p| p as u16) });
+            book.news.push(news);
         }
     };
+    let hand_news = |at: Vec3, hold: Option<usize>| HandNews::Hand { at: at.to_array(), hold: hold.map(|p| p as u16) };
+    // torn paper carried: `piece` 0 the leaf in play, else a scrap's age
+    let carry_news = |piece: u32, point: Option<usize>, at: Vec3| HandNews::Carry { piece, point: point.map(|p| p as u16), at: at.to_array() };
     // a scrap of an older leaf in the hand: it goes where the hand goes, and falls when let go
-    if let Some((_, mut scrap)) = scraps.iter_mut().find(|(_, s)| s.held) {
+    if let Some((_, mut scrap)) = scraps.iter_mut().find(|(_, s)| s.held && !s.theirs) {
         match cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right + LIFT)) {
             Some(hand) if down => {
                 if let Some((p, _)) = scrap.leaf.grab {
                     scrap.leaf.grab = Some((p, hand));
+                    tell_news(book, carry_news(scrap.age, Some(p), hand), false);
                 }
             }
             _ => {
+                let hand = scrap.leaf.grab.map(|(_, h)| h).unwrap_or_default();
+                tell_news(book, carry_news(scrap.age, None, hand), true);
                 scrap.held = false;
                 scrap.leaf.grab = None;
                 scrap.active = SETTLE;
@@ -892,7 +923,7 @@ fn hold_leaf(
                 play(&mut commands, &art, &assets, &mixer, "book_rustle");
                 return;
             }
-            let newest = scraps.iter().filter_map(|(e, s)| s.leaf.pick(sight, LOOSE_REACH, false, TOP).map(|p| (s.age, e, p))).max_by_key(|(age, ..)| *age);
+            let newest = scraps.iter().filter(|(_, s)| !s.held).filter_map(|(e, s)| s.leaf.pick(sight, LOOSE_REACH, false, TOP).map(|p| (s.age, e, p))).max_by_key(|(age, ..)| *age);
             if let Some((_, e, p)) = newest {
                 if let Ok((_, mut scrap)) = scraps.get_mut(e) {
                     let from = scrap.leaf.points[p];
@@ -929,7 +960,7 @@ fn hold_leaf(
         let peeling = book.turn.as_ref().is_some_and(|t| t.peel.is_some());
         let point = if peeling { book.leaf.nearest_border(hit) } else { book.leaf.nearest(hit) };
         book.leaf.grab = Some((point, book.leaf.points[point]));
-        tell(book, hit, Some(point), true);
+        tell_news(book, hand_news(hit, Some(point)), true);
         play(&mut commands, &art, &assets, &mixer, "book_rustle");
         return;
     }
@@ -939,10 +970,12 @@ fn hold_leaf(
             Some(hand) if down => {
                 if let Some((p, _)) = book.leaf.grab {
                     book.leaf.grab = Some((p, hand));
+                    tell_news(book, carry_news(0, Some(p), hand), false);
                 }
-                tell(book, hand, None, false);
             }
             _ => {
+                let hand = book.leaf.grab.map(|(_, h)| h).unwrap_or_default();
+                tell_news(book, carry_news(0, None, hand), true);
                 book.leaf.grab = None;
                 if let Some(turn) = book.turn.as_mut() {
                     turn.hand = Hand::Gone;
@@ -955,14 +988,14 @@ fn hold_leaf(
     if !holding {
         // an empty hand hovering over the book
         if let Some(hit) = cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right)) {
-            tell(book, hit, None, false);
+            tell_news(book, hand_news(hit, None), false);
         }
         return;
     }
     if !down {
         // let go: past the spine the leaf is turned, and the story reads on
         let hand = book.leaf.grab.map(|(_, h)| h).unwrap_or_default();
-        tell(book, hand, None, true);
+        tell_news(book, hand_news(hand, None), true);
         book.leaf.grab = None;
         let back = book.turn.as_ref().is_some_and(|t| t.back);
         let over = if back { book.leaf.side() > -0.15 } else { book.leaf.side() < 0.15 };
@@ -1006,7 +1039,7 @@ fn hold_leaf(
     // a page turned back is told the others whole when it lands, not hand by hand: there the
     // hand would take up the right-hand page instead
     let back = book.turn.as_ref().is_some_and(|t| t.back);
-    tell(book, hand, (!back).then_some(point), false);
+    tell_news(book, hand_news(hand, (!back).then_some(point)), false);
 }
 
 /// Dev: `TROPA_GHOST=1` plays a second reader, as their machine would tell of them: a hand that
@@ -1284,7 +1317,71 @@ fn keep_scraps(
         let fringe = meshes.add(fringe);
         commands.spawn((part, Mesh3d(fringe.clone()), MeshMaterial3d(fibres), place, bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver));
         let [front, back] = shapes;
-        commands.spawn((ScrapPart { age }, ScrapLeaf { age, leaf, meshes: [front, back, fringe], held: false, active: 0.0 }));
+        commands.spawn((ScrapPart { age }, ScrapLeaf { age, leaf, meshes: [front, back, fringe], held: false, theirs: false, active: 0.0 }));
+    }
+}
+
+/// Torn paper another reader carries is carried here too: the leaf torn loose or a scrap follows
+/// their hand smoothly between the few times a second their machine tells of it, and falls when
+/// they let it go (or when their machine falls silent).
+fn carry_remote(time: Res<Time>, mut book: ResMut<Book>, mut scraps: Query<&mut ScrapLeaf>) {
+    let book = &mut *book;
+    let dt = time.delta_secs();
+    let follow = (dt * 20.0).min(1.0);
+    for piece in std::mem::take(&mut book.dropped) {
+        if piece == 0 {
+            if let Some(turn) = book.turn.as_mut().filter(|t| matches!(t.hand, Hand::Carried(_))) {
+                turn.hand = Hand::Gone;
+                turn.loose = 0.0;
+                book.leaf.grab = None;
+            }
+        } else if let Some(mut s) = scraps.iter_mut().find(|s| s.age == piece && s.theirs) {
+            s.held = false;
+            s.theirs = false;
+            s.leaf.grab = None;
+            s.active = SETTLE;
+        }
+    }
+    let Some((seat, piece, point, at, quiet)) = book.carried.as_mut() else { return };
+    *quiet += dt;
+    let (seat, piece, point, at) = (*seat, *piece, *point as usize, *at);
+    if *quiet > GHOST_LINGER {
+        book.carried = None;
+        book.dropped.push(piece);
+        return;
+    }
+    if piece == 0 {
+        // only paper torn loose and lying free, or already in their hand
+        let free = match book.turn.as_ref() {
+            None => book.kept,
+            // paper in one reader's hand is not snatched by another
+            Some(t) => matches!(t.hand, Hand::Gone) || matches!(t.hand, Hand::Carried(s) if s == seat),
+        };
+        if !free || point >= book.leaf.points.len() || book.open < 1.0 {
+            return;
+        }
+        match book.turn.as_mut() {
+            Some(turn) => {
+                turn.hand = Hand::Carried(seat);
+                turn.loose = 0.0;
+            }
+            None => {
+                let Some(shown) = book.shown.clone() else { return };
+                book.turn = Some(Turning { from: shown.clone(), to: shown, committed: false, hand: Hand::Carried(seat), loose: 0.0, mine: false, peel: None, back: false });
+            }
+        }
+        // their machine tears it; here it only follows, and is told of the tears
+        book.leaf.tearing = false;
+        let from = book.leaf.grab.map(|(_, h)| h).unwrap_or(book.leaf.points[point]);
+        book.leaf.grab = Some((point, from.lerp(at, follow)));
+    } else if let Some(mut s) = scraps.iter_mut().find(|s| s.age == piece && (!s.held || s.theirs)) {
+        if point >= s.leaf.points.len() {
+            return;
+        }
+        s.held = true;
+        s.theirs = true;
+        let from = s.leaf.grab.map(|(_, h)| h).unwrap_or(s.leaf.points[point]);
+        s.leaf.grab = Some((point, from.lerp(at, follow)));
     }
 }
 
@@ -1296,6 +1393,8 @@ struct ScrapLeaf {
     /// Its two faces and the fibres along its tears.
     meshes: [Handle<Mesh>; 3],
     held: bool,
+    /// The hand holding it is another reader's.
+    theirs: bool,
     /// Seconds it may yet stir after being let go.
     active: f32,
 }

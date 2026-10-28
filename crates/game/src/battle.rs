@@ -36,6 +36,7 @@ mod gore;
 mod impact;
 mod piles;
 mod rig;
+mod stature;
 mod status_row;
 
 pub fn plugin(app: &mut App) {
@@ -626,7 +627,16 @@ fn sync_units(
         // elites and bosses are painted square and stand larger than their slot: the picture
         // spills over the sides and the top, the layout box stays put
         let wide = !is_hero && art.aspect(&stem).is_some_and(|a| a > 0.9);
-        let draw = if wide { Vec2::splat(size.y * 1.25) } else { size };
+        // a foe of known stature is drawn as tall as it stands, a raven small, a giant huge
+        let tall = match unit {
+            UnitRef::Enemy(uid) => shown.enemy(uid).and_then(|e| stature::height_of(&e.def)),
+            UnitRef::Hero(_) => None,
+        };
+        let draw = match tall {
+            Some(h) => Vec2::new(h * art.aspect(&stem).unwrap_or(size.x / size.y), h),
+            None if wide => Vec2::splat(size.y * 1.25),
+            None => size,
+        };
         commands
             .spawn((
                 UnitWidget { unit, pos: origin },

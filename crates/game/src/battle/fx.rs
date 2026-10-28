@@ -46,6 +46,8 @@ struct Particle {
     streak: f32,
     /// A drop that stays where it falls: the ground's height, and the stain's colour.
     land: Option<(f32, Color)>,
+    /// Drawn as a wisp of dust, not a dot.
+    dust: bool,
 }
 
 /// A cheap repeatable scatter, so no random source is needed.
@@ -67,10 +69,14 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
             Pickable::IGNORE,
             ChildOf(*layer),
         ));
-        // blood in flight is a real drop, the rest soft dots of light, dust and smoke
+        // blood in flight is a real drop, dust a photographed wisp, the rest soft dots
         if p.land.is_some() && !art.drops.is_empty() {
             let drop = art.drops[(scatter(seed, n) * art.drops.len() as f32) as usize % art.drops.len()].clone();
             e.insert((ImageNode { color: p.color, ..ImageNode::new(drop) }, BackgroundColor(Color::NONE)));
+        } else if p.dust && !art.dust.is_empty() {
+            let wisp = art.dust[(scatter(seed, n + 7) * art.dust.len() as f32) as usize % art.dust.len()].clone();
+            e.insert((ImageNode { color: p.color, flip_x: scatter(seed, n + 9) < 0.5, ..ImageNode::new(wisp) }, BackgroundColor(Color::NONE)));
+            e.entry::<Node>().and_modify(|mut n| n.border_radius = BorderRadius::ZERO);
         } else {
             e.insert(BackgroundColor(p.color));
         }
@@ -82,7 +88,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
             Burst::Wound { at, dir, weight, blood, ground } => {
                 // the slash: one long white-hot stroke across the body
                 let angle = -0.6 + 0.35 * r(0);
-                spawn(Particle { at, vel: Vec2::from_angle(angle) * 900.0 * dir, fall: 0.0, drag: 9.0, life: 0.0, ttl: 0.22, size: 10.0 + 6.0 * weight, grow: -0.6, color: Color::srgb(1.0, 0.97, 0.88), streak: 24.0, land: None });
+                spawn(Particle { at, vel: Vec2::from_angle(angle) * 900.0 * dir, fall: 0.0, drag: 9.0, life: 0.0, ttl: 0.22, size: 10.0 + 6.0 * weight, grow: -0.6, color: Color::srgb(1.0, 0.97, 0.88), streak: 24.0, land: None, dust: false });
                 let n = 8 + (weight * 26.0) as u32;
                 for i in 0..n {
                     let a = (r(i * 3 + 1) - 0.5) * 1.9 - 0.35;
@@ -100,6 +106,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         streak: 2.2,
                         // most of it reaches the ground, some way in front of or behind the feet
                         land: (r(i * 3 + 8) < 0.8).then_some((ground + (r(i * 3 + 9) - 0.35) * 70.0, blood)),
+                        dust: false,
                     });
                 }
             }
@@ -120,6 +127,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         color: blood.mix(&Color::BLACK, 0.2 * r(i * 3 + 5)),
                         streak: 2.5,
                         land: Some((ground + (r(i * 3 + 6) - 0.4) * 40.0, blood)),
+                        dust: false,
                     });
                 }
             }
@@ -138,7 +146,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 4.0 + 3.0 * r(i * 2 + 3),
                         grow: -0.7,
                         color: Color::srgb(0.85, 0.95, 1.0).mix(&Color::srgb(1.0, 0.85, 0.5), r(i * 2 + 5)),
-                        streak: 5.0, land: None,
+                        streak: 5.0, land: None, dust: false,
                     });
                 }
             }
@@ -151,10 +159,10 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         drag: 2.5,
                         life: 0.0,
                         ttl: 0.7 + 0.3 * r(i + 23),
-                        size: 22.0 + 20.0 * r(i + 31),
-                        grow: 1.4,
-                        color: Color::srgba(0.45, 0.38, 0.28, 0.35),
-                        streak: 1.0, land: None,
+                        size: 70.0 + 70.0 * r(i + 31),
+                        grow: 1.3,
+                        color: Color::srgba(0.72, 0.64, 0.52, 0.3),
+                        streak: 1.0, land: None, dust: true,
                     });
                 }
             }
@@ -170,7 +178,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 6.0 + 7.0 * r(i + 51),
                         grow: -0.5,
                         color: color.with_alpha(0.9),
-                        streak: 1.0, land: None,
+                        streak: 1.0, land: None, dust: false,
                     });
                 }
             }
@@ -186,7 +194,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 30.0 + 30.0 * r(i + 51),
                         grow: 1.2,
                         color: color.with_alpha(0.32),
-                        streak: 1.0, land: None,
+                        streak: 1.0, land: None, dust: false,
                     });
                 }
             }

@@ -666,30 +666,17 @@ fn sync_units(
                     }
                 });
                 // the feet are painted a little above the bottom edge of the picture
+                // a soft contact shadow, feathered out to nothing at its edge
                 u.spawn((
+                    ImageNode { color: Color::WHITE.with_alpha(0.75), ..ImageNode::new(assets.load("fx/shadow.png")) },
                     Node {
                         position_type: PositionType::Absolute,
-                        left: px((UNIT_W - size.x * 0.86) / 2.0),
-                        top: px(HEAD_ROOM + size.y * 0.957 - 15.0),
-                        width: px(size.x * 0.86),
-                        height: px(30),
-                        border_radius: BorderRadius::all(percent(50)),
+                        left: px((UNIT_W - size.x * 0.95) / 2.0),
+                        top: px(HEAD_ROOM + size.y * 0.957 - 20.0),
+                        width: px(size.x * 0.95),
+                        height: px(40),
                         ..default()
                     },
-                    BackgroundColor(Color::BLACK.with_alpha(0.42)),
-                    Pickable::IGNORE,
-                ));
-                u.spawn((
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px((UNIT_W - size.x * 0.56) / 2.0),
-                        top: px(HEAD_ROOM + size.y * 0.957 - 9.0),
-                        width: px(size.x * 0.56),
-                        height: px(18),
-                        border_radius: BorderRadius::all(percent(50)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::BLACK.with_alpha(0.45)),
                     Pickable::IGNORE,
                 ));
                 // drawn through the rig, so the figure bends as if it had a body

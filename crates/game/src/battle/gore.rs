@@ -108,6 +108,8 @@ pub(super) struct BloodArt {
     /// Large stains: a splat, a pool, old dried blood.
     big: Vec<Handle<Image>>,
     pub smear: Handle<Image>,
+    /// Photographed dust (Flow): wisps and low clouds.
+    pub dust: Vec<Handle<Image>>,
 }
 
 impl BloodArt {
@@ -118,6 +120,7 @@ impl BloodArt {
             splashes: many("splash", 7),
             big: ["splat_a", "pool", "dried", "spray", "smear", "smear"].iter().map(|s| assets.load(format!("blood/{s}.png"))).collect(),
             smear: assets.load("blood/smear.png"),
+            dust: (0..6).map(|i| assets.load(format!("fx/wisp_{i}.png"))).chain(["fx/dust_low.png", "fx/dust_drift.png"].map(|p| assets.load(p))).collect(),
         }
     }
 }

@@ -79,6 +79,8 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("heroes/volkolak_beast", &[(Part::Head, Vec2::new(0.69, 0.22), 1.2)]),
     ("heroes/skomoroh", &[(Part::Shield, Vec2::new(0.69, 0.44), 0.8), (Part::Head, Vec2::new(0.57, 0.22), 1.0), (Part::Arm, Vec2::new(0.20, 0.37), 0.8)]),
     ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
+    ("enemies/vurdalak_elder", &[(Part::Head, Vec2::new(0.509, 0.254), 1.0), (Part::Shield, Vec2::new(0.723, 0.460), 0.8), (Part::Arm, Vec2::new(0.25, 0.37), -0.6)]),
+    ("enemies/shatun", &[(Part::Head, Vec2::new(0.387, 0.241), 1.0), (Part::Shield, Vec2::new(0.269, 0.485), 0.8), (Part::Arm, Vec2::new(0.690, 0.480), 1.0)]),
     ("enemies/upyr", &[(Part::Head, Vec2::new(0.458, 0.223), 1.0), (Part::Shield, Vec2::new(0.671, 0.402), 0.8), (Part::Arm, Vec2::new(0.250, 0.407), 1.0)]),
     ("enemies/auka", &[(Part::Head, Vec2::new(0.52, 0.29), 1.0), (Part::Shield, Vec2::new(0.74, 0.48), -0.6), (Part::Arm, Vec2::new(0.25, 0.43), -0.6)]),
     ("enemies/kikimora", &[(Part::Head, Vec2::new(0.46, 0.22), 1.0), (Part::Shield, Vec2::new(0.56, 0.33), 0.8), (Part::Arm, Vec2::new(0.64, 0.42), 1.0)]),

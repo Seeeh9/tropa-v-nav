@@ -31,7 +31,19 @@ pub(super) struct Corpse {
     /// Stage point of those feet.
     ground: Vec2,
     pub angle: f32,
+    /// The picture of the body lying dead, which the standing one gives way to (`None` when
+    /// something was struck off, since that picture is whole).
+    lying: Option<Entity>,
 }
+
+/// The bodies lying dead, over the stains and under the living.
+#[derive(Component)]
+pub(super) struct CorpseLayer;
+
+/// Seconds after the blow when the falling body gives way to the one lying dead, and how long
+/// that takes.
+pub(super) const SWAP_AT: f32 = 0.55;
+pub(super) const SWAP_FOR: f32 = 0.22;
 
 /// A part struck off: flying, bouncing, then rolling, dripping all the while.
 #[derive(Component)]
@@ -140,29 +152,57 @@ pub(super) fn strike_down(
     parts: Vec<(rig::Part, Vec2, Handle<Image>, Entity)>,
     images: &Assets<Image>,
     float_layer: Entity,
+    corpse_layer: Entity,
+    lying: Option<Handle<Image>>,
     seed: u32,
     weight: f32,
-) {
+) -> bool {
     let r = |i: u32| fx::scatter(seed, i);
     // a foe falls back, away from the heroes; a hero the other way
     let side = if hero { -1.0 } else { 1.0 };
     // the picture's top-left on the stage, and the widget's
     let pic = Vec2::new(foot.x - draw.x / 2.0, foot.y - draw.y);
-    // the dead lie behind the living
-    commands.entity(widget).insert((Corpse { t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0 }, ZIndex(0)));
     // only a heavy killing blow strikes anything off, and each part takes its own chance: a
     // light one only fells the body, a crushing one may take every part at once
+    let flying: Vec<bool> = parts
+        .iter()
+        .enumerate()
+        .map(|(k, (part, ..))| {
+            let chance = match part {
+                rig::Part::Head => weight * 1.3 - 0.2,
+                rig::Part::Arm => weight * 1.1 - 0.25,
+                rig::Part::Shield => weight * 0.9 - 0.3,
+            };
+            r(70 + k as u32) < chance
+        })
+        .collect();
+    // a body still whole crumples and gives way to its picture lying dead; one cut to pieces
+    // goes over as it is
+    let lying = lying.filter(|_| !flying.contains(&true)).map(|picture| {
+        commands
+            .spawn((
+                ImageNode { color: Color::WHITE.with_alpha(0.0), ..ImageNode::new(picture) },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(foot.x - draw.y * 0.75),
+                    top: px(foot.y - draw.y),
+                    width: px(draw.y * 1.5),
+                    height: px(draw.y),
+                    ..default()
+                },
+                Pickable::IGNORE,
+                ChildOf(corpse_layer),
+            ))
+            .id()
+    });
+    let swaps = lying.is_some();
+    // the dead lie behind the living
+    commands.entity(widget).insert((Corpse { t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying }, ZIndex(0)));
     for (k, (part, joint, picture, skin)) in parts.into_iter().enumerate() {
-        let k = k as u32;
-        let chance = match part {
-            rig::Part::Head => weight * 1.3 - 0.2,
-            rig::Part::Arm => weight * 1.1 - 0.25,
-            rig::Part::Shield => weight * 0.9 - 0.3,
-        };
-        let flies = r(70 + k) < chance;
-        if !flies {
+        if !flying[k] {
             continue;
         }
+        let k = k as u32;
         commands.entity(skin).insert(Visibility::Hidden);
         let (centre, radius) = centre_of(images, &picture).unwrap_or((joint - Vec2::new(0.0, 0.06), 0.08));
         let at = pic + centre * draw;
@@ -205,6 +245,7 @@ pub(super) fn strike_down(
         let dir = if part == rig::Part::Head { Vec2::new(side * 0.25, -1.0) } else { Vec2::new(-side * 0.6, -0.5) };
         commands.spawn(Bleeder { corpse: widget, local: wound, dir: dir.normalize(), color: blood, t: 0.0, life: 4.5, due: 0.0, strength: weight });
     }
+    swaps
 }
 
 /// Where a part's paint is centred on its picture (0..1), and how far it reaches.
@@ -237,7 +278,7 @@ fn centre_of(images: &Assets<Image>, picture: &Handle<Image>) -> Option<(Vec2, f
 }
 
 /// A body topples about its feet, slowly and then all at once, and settles with a bump.
-fn fall(time: Res<Time>, mut q: Query<(&mut Corpse, &mut UiTransform, &ComputedNode)>) {
+fn fall(time: Res<Time>, mut q: Query<(&mut Corpse, &mut UiTransform, &ComputedNode)>, mut lying: Query<(&mut ImageNode, &mut UiTransform), Without<Corpse>>) {
     let dt = time.delta_secs();
     for (mut c, mut tf, node) in &mut q {
         c.t += dt;
@@ -245,7 +286,16 @@ fn fall(time: Res<Time>, mut q: Query<(&mut Corpse, &mut UiTransform, &ComputedN
         // gravity: the fall gathers speed; at the end it hits and rocks a little
         let ease = p * p;
         let bump = if p >= 1.0 { 0.06 * (-(c.t - 0.9) * 7.0).exp() * ((c.t - 0.9) * 18.0).sin() } else { 0.0 };
-        c.angle = c.side * (FRAC_PI_2 * 0.93 * ease - bump);
+        // a body that will lie as painted only sags back as its knees go, then gives way
+        let reach = if c.lying.is_some() { 0.32 } else { FRAC_PI_2 * 0.93 };
+        c.angle = c.side * (reach * ease - bump);
+        if let Some((mut image, mut ltf)) = c.lying.and_then(|e| lying.get_mut(e).ok()) {
+            let k = ((c.t - SWAP_AT) / SWAP_FOR).clamp(0.0, 1.0);
+            image.color = Color::WHITE.with_alpha(k);
+            // it lands: squashed a moment and settling
+            let land = (1.0 - k) * 0.12 + 0.05 * (-(c.t - SWAP_AT - SWAP_FOR).max(0.0) * 9.0).exp() * (k * 9.0).sin();
+            ltf.scale = Vec2::new(1.0 + land, 1.0 - land);
+        }
         let size = node.size() * node.inverse_scale_factor();
         // a transform turns about the middle: move the middle so the feet stay put
         let arm = size / 2.0 - c.feet;

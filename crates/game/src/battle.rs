@@ -126,6 +126,8 @@ struct UnitSprite {
     alive: f32,
     /// Drawn size of the picture.
     draw: Vec2,
+    /// Killed and giving way to its picture lying dead: fades out (see `gore::SWAP_AT`).
+    vanish: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -389,6 +391,7 @@ fn enter(
             }
             // blood soaks into the ground under everyone
             p.spawn((gore::StainLayer, layer(), Pickable::IGNORE));
+            p.spawn((gore::CorpseLayer, layer(), Pickable::IGNORE));
             p.spawn((UnitLayer, layer(), Pickable::IGNORE));
 
             // party panel, top-left
@@ -701,7 +704,7 @@ fn sync_units(
                     None => (rig::skin(&mut rigs, picture, base, draw, is_hero, None), Vec::new()),
                 };
                 u.spawn((
-                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y, alive: 1.0, draw },
+                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y, alive: 1.0, draw, vanish: false },
                     {
                         Node {
                             width: px(draw.x),
@@ -994,10 +997,15 @@ fn animate_sprites(
             }
         }
         if s.alive < 1.0 {
-            // dying: the body gives at the knees and goes over (see `gore`), and stays
+            // dying: the knees give first and the body sinks on them, the head drops, the arms
+            // go slack and swing; then it goes over (see `gore`) and lies
             let k = 1.0 - s.alive;
-            pose.lean = -0.12 * k * k;
-            pose.squash = 1.0 - 0.08 * k;
+            let knees = (k / 0.45).min(1.0);
+            pose.squash = 1.0 - 0.16 * knees * knees;
+            pose.lean = -0.05 * knees - 0.1 * k * k;
+            pose.nod = 0.35 * knees - 0.5 * (k - 0.45).max(0.0);
+            pose.swing = 0.5 * knees + 0.25 * (k * 11.0).sin() * (1.0 - k);
+            pose.guard = 0.4 * knees;
             pose.swing = 0.7 * k;
             pose.nod = -0.45 * k;
             pose.guard = 0.5 * k;
@@ -1005,6 +1013,11 @@ fn animate_sprites(
             pose.wave = 0.01 * (1.0 - k);
             offset.x -= toward * 30.0 * k;
             tint = tint.mix(&Color::srgb(0.42, 0.42, 0.42), 0.55 * k);
+            if s.vanish {
+                // the time since the blow, from how much is left
+                let t = k * DYING;
+                pose.fade = 1.0 - ((t - gore::SWAP_AT) / gore::SWAP_FOR).clamp(0.0, 1.0);
+            }
         }
         // a transform stretches about the middle: lift by as much as the stretch lowers the feet,
         // so they stay on the ground through every breath
@@ -1029,6 +1042,9 @@ fn dying(
     images: Res<Assets<Image>>,
     rigs: Res<Assets<rig::RigMaterial>>,
     float_layer: Single<Entity, With<FloatLayer>>,
+    corpse_layer: Single<Entity, With<gore::CorpseLayer>>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
     mut q: Query<(Entity, &mut Dying, &Children, Option<&UnitWidget>)>,
     mut sprites: Query<(&mut UnitSprite, &Children)>,
     skins: Query<(Entity, &rig::RigSkin, &MaterialNode<rig::RigMaterial>)>,
@@ -1041,10 +1057,12 @@ fn dying(
             commands.entity(entity).remove::<(UnitWidget, Hovered)>().insert(Pickable::IGNORE);
             let mut parts = Vec::new();
             let mut draw = ENEMY_SIZE;
+            let mut stem = String::new();
             for c in children.iter() {
                 match sprites.get(c) {
                     Ok((s, skin_children)) => {
                         draw = s.draw;
+                        stem = s.stem.clone();
                         let cuts = rig::cuts_of(&s.stem);
                         for (skin, part, material) in skins.iter_many(skin_children).flatten() {
                             let (Some(part), Some(m)) = (part.part, rigs.get(&material.0)) else { continue };
@@ -1072,7 +1090,13 @@ fn dying(
                 }
                 .wrapping_mul(7919)
                 .wrapping_add(lost * 104_729);
-                gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, seed, weight);
+                let lying = art.image(&assets, &format!("{stem}_dead"));
+                let swaps = gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *corpse_layer, lying, seed, weight);
+                for c in children.iter() {
+                    if let Ok((mut s, _)) = sprites.get_mut(c) {
+                        s.vanish = swaps;
+                    }
+                }
             }
         }
         d.0 -= time.delta_secs();

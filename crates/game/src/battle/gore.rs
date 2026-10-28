@@ -9,7 +9,8 @@ use super::*;
 use std::f32::consts::FRAC_PI_2;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Blows>().add_systems(OnEnter(AppState::Battle), |mut b: ResMut<Blows>| b.0.clear()).add_systems(Update, (fall, fly_gibs, bleed).chain().after(dying).run_if(in_state(AppState::Battle)));
+    app.init_resource::<Blows>()
+        .add_systems(Startup, |mut commands: Commands, assets: Res<AssetServer>| commands.insert_resource(BloodArt::load(&assets))).add_systems(OnEnter(AppState::Battle), |mut b: ResMut<Blows>| b.0.clear()).add_systems(Update, (fall, fly_gibs, bleed).chain().after(dying).run_if(in_state(AppState::Battle)));
 }
 
 /// The last blow each unit took: its weight (0..1) and the HP it cost.
@@ -75,26 +76,52 @@ pub(super) fn blood_of(comfort: &Comfort, shown: &Combat, unit: UnitRef) -> Colo
         // the drowned and the ghosts: a pale cold ichor
         "nav_soul" | "weeper" | "mara" | "drowned_maiden" | "mavka" | "koschei_shadow" | "swamp_light" | "sirin" => Color::srgb(0.50, 0.60, 0.64),
         // wood and fungus bleed sap
-        "leshy" | "tree_guard" | "death_oak" | "death_oak_chest" | "mushroom_corpse" | "lesavka" => Color::srgb(0.30, 0.30, 0.07),
+        "leshy" | "tree_guard" | "death_oak" | "death_oak_chest" | "mushroom_corpse" | "lesavka" => Color::srgb(0.42, 0.40, 0.10),
         // bone has only dust in it
         "kostomakha" | "koschei" => Color::srgb(0.42, 0.36, 0.26),
         // the swamp's things run green-black
-        "bolotnik" | "kikimora" | "tinyak" | "shishiga" | "yrka" => Color::srgb(0.16, 0.20, 0.06),
+        "bolotnik" | "kikimora" | "tinyak" | "shishiga" | "yrka" => Color::srgb(0.26, 0.32, 0.08),
         // old dead blood, black and thick
-        "koschei_guard" | "black_rider" | "vurdalak_elder" | "volot" | "volot_giant" => Color::srgb(0.13, 0.04, 0.03),
+        "koschei_guard" | "black_rider" | "vurdalak_elder" | "volot" | "volot_giant" => Color::srgb(0.30, 0.06, 0.04),
         // the rest rot: a dark brown-red
-        _ => Color::srgb(0.36, 0.06, 0.03),
+        _ => Color::srgb(0.52, 0.09, 0.04),
     }
 }
 
-/// A stain where a drop of `size` landed at `at`, in `color`.
-pub(super) fn stain(commands: &mut Commands, layer: Entity, at: Vec2, size: f32, color: Color, seed: u32) {
+/// Photographed blood (Flow), painted grey so it takes any colour: stains, splashes and drops.
+#[derive(Resource, Clone)]
+pub(super) struct BloodArt {
+    pub drops: Vec<Handle<Image>>,
+    splashes: Vec<Handle<Image>>,
+    /// Large stains: a splat, a pool, old dried blood.
+    big: Vec<Handle<Image>>,
+    pub smear: Handle<Image>,
+}
+
+impl BloodArt {
+    fn load(assets: &AssetServer) -> BloodArt {
+        let many = |stem: &str, n: usize| (0..n).map(|i| assets.load(format!("blood/{stem}_{i}.png"))).collect();
+        BloodArt {
+            drops: many("drop", 8),
+            splashes: many("splash", 7),
+            big: ["splat_a", "pool", "dried", "spray", "smear", "smear"].iter().map(|s| assets.load(format!("blood/{s}.png"))).collect(),
+            smear: assets.load("blood/smear.png"),
+        }
+    }
+}
+
+/// A stain where a drop of `size` landed at `at`, in `color`: a small drop leaves a drip, a
+/// heavy one a splash, a great deal a pool; all lie flat on the ground, turned every which way.
+pub(super) fn stain(commands: &mut Commands, art: &BloodArt, layer: Entity, at: Vec2, size: f32, color: Color, seed: u32) {
     let r = |i: u32| fx::scatter(seed, i);
-    let w = size * (1.4 + 0.8 * r(1));
-    let h = w * (0.28 + 0.12 * r(2));
+    let pick = |v: &Vec<Handle<Image>>| v[(r(5) * v.len() as f32) as usize % v.len().max(1)].clone();
+    let (picture, grow) = if size > 20.0 { (pick(&art.big), 2.8) } else if size > 9.0 { (pick(&art.splashes), 3.0) } else { (pick(&art.drops), 2.2) };
+    let w = size * grow * (0.8 + 0.4 * r(1));
+    // seen at a slant: the ground is flattened
+    let h = w * (0.38 + 0.1 * r(2));
     commands.spawn((
-        Node { position_type: PositionType::Absolute, left: px(at.x - w / 2.0), top: px(at.y - h / 2.0), width: px(w), height: px(h), border_radius: BorderRadius::MAX, ..default() },
-        BackgroundColor(color.mix(&Color::BLACK, 0.25 + 0.25 * r(3)).with_alpha(0.55 + 0.3 * r(4))),
+        ImageNode { color: color.mix(&Color::BLACK, 0.1 * r(3)).with_alpha(0.85 + 0.15 * r(4)), flip_x: r(6) < 0.5, flip_y: r(7) < 0.5, ..ImageNode::new(picture) },
+        Node { position_type: PositionType::Absolute, left: px(at.x - w / 2.0), top: px(at.y - h / 2.0), width: px(w), height: px(h), ..default() },
         Pickable::IGNORE,
         ChildOf(layer),
     ));
@@ -234,6 +261,7 @@ fn fly_gibs(
     stains: Option<Single<Entity, With<StainLayer>>>,
     mut gibs: Query<(&mut Gib, &mut Node, &mut UiTransform)>,
     mut seed: Local<u32>,
+    art: Res<BloodArt>,
 ) {
     let dt = time.delta_secs().min(0.05);
     let Some(stains) = stains.map(|s| *s) else { return };
@@ -254,7 +282,7 @@ fn fly_gibs(
                     let n = (hit / 90.0).clamp(2.0, 18.0) as u32;
                     for i in 0..n {
                         let off = Vec2::new((r(i * 2) - 0.5) * g.radius * 3.0 * (hit / 800.0).min(2.0), (r(i * 2 + 1) - 0.5) * 18.0);
-                        stain(&mut commands, stains, Vec2::new(g.at.x, g.ground) + off, 6.0 + 16.0 * r(i + 50) * (hit / 900.0).min(1.5), g.blood, *seed + i);
+                        stain(&mut commands, &art, stains, Vec2::new(g.at.x, g.ground) + off, 6.0 + 16.0 * r(i + 50) * (hit / 900.0).min(1.5), g.blood, *seed + i);
                     }
                     g.vel.y = -g.vel.y * 0.32;
                     g.vel.x *= 0.72;
@@ -267,7 +295,15 @@ fn fly_gibs(
                     g.smear += step.x.abs();
                     if g.bleed > 0.0 && g.smear > 16.0 {
                         g.smear = 0.0;
-                        stain(&mut commands, stains, Vec2::new(g.at.x, g.ground + (r(7) - 0.5) * 6.0), 5.0 + 7.0 * g.weight * (g.bleed / 3.5), g.blood, *seed);
+                        // a smear along the way it rolls
+                        let w = 70.0 + 50.0 * g.weight * (g.bleed / 3.5);
+                        let h = w * 0.3;
+                        commands.spawn((
+                            ImageNode { color: g.blood.mix(&Color::BLACK, 0.2).with_alpha(0.8), flip_x: g.vel.x < 0.0, ..ImageNode::new(art.smear.clone()) },
+                            Node { position_type: PositionType::Absolute, left: px(g.at.x - w / 2.0), top: px(g.ground + (r(7) - 0.5) * 6.0 - h / 2.0), width: px(w), height: px(h), ..default() },
+                            Pickable::IGNORE,
+                            ChildOf(stains),
+                        ));
                     }
                     if g.vel.x.abs() < 6.0 {
                         g.still = true;
@@ -295,7 +331,7 @@ fn fly_gibs(
             if r(99) < dt * 6.0 * (g.bleed / 3.5) {
                 let drop_at = g.at + Vec2::new((r(98) - 0.5) * g.radius, 0.0);
                 if g.still {
-                    stain(&mut commands, stains, Vec2::new(drop_at.x, g.ground + (r(97) - 0.5) * 8.0), 5.0 + 6.0 * r(96), g.blood, *seed + 3);
+                    stain(&mut commands, &art, stains, Vec2::new(drop_at.x, g.ground + (r(97) - 0.5) * 8.0), 5.0 + 6.0 * r(96), g.blood, *seed + 3);
                 }
             }
         }

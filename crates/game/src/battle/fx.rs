@@ -55,18 +55,26 @@ pub(super) fn scatter(seed: u32, i: u32) -> f32 {
     ((x ^ (x >> 13)) & 0xFFFF) as f32 / 65_535.0
 }
 
-fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entity, With<FloatLayer>>, time: Res<Time>) {
+fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entity, With<FloatLayer>>, time: Res<Time>, art: Res<gore::BloodArt>) {
     let seed = (time.elapsed_secs() * 1000.0) as u32;
+    let mut n = 0u32;
     let mut spawn = |p: Particle| {
-        commands.spawn((
+        n += 1;
+        let mut e = commands.spawn((
             Node { position_type: PositionType::Absolute, left: px(p.at.x), top: px(p.at.y), width: px(p.size), height: px(p.size), border_radius: BorderRadius::MAX, ..default() },
-            BackgroundColor(p.color),
             UiTransform::IDENTITY,
             GlobalZIndex(30),
             Pickable::IGNORE,
             ChildOf(*layer),
-            p,
         ));
+        // blood in flight is a real drop, the rest soft dots of light, dust and smoke
+        if p.land.is_some() && !art.drops.is_empty() {
+            let drop = art.drops[(scatter(seed, n) * art.drops.len() as f32) as usize % art.drops.len()].clone();
+            e.insert((ImageNode { color: p.color, ..ImageNode::new(drop) }, BackgroundColor(Color::NONE)));
+        } else {
+            e.insert(BackgroundColor(p.color));
+        }
+        e.insert(p);
     };
     for (k, b) in bursts.0.drain(..).enumerate() {
         let r = |i: u32| scatter(seed.wrapping_add(k as u32 * 977), i);
@@ -190,16 +198,17 @@ fn fly(
     mut commands: Commands,
     time: Res<Time>,
     stains: Option<Single<Entity, With<gore::StainLayer>>>,
-    mut q: Query<(Entity, &mut Particle, &mut Node, &mut UiTransform, &mut BackgroundColor)>,
+    mut q: Query<(Entity, &mut Particle, &mut Node, &mut UiTransform, &mut BackgroundColor, Option<&mut ImageNode>)>,
+    art: Res<gore::BloodArt>,
 ) {
     let dt = time.delta_secs();
-    for (e, mut p, mut node, mut tf, mut bg) in &mut q {
+    for (e, mut p, mut node, mut tf, mut bg, image) in &mut q {
         // a drop reaching the ground stays there as a stain
         if let Some((ground, color)) = p.land {
             if p.vel.y > 0.0 && p.at.y >= ground {
                 if let Some(layer) = stains.as_deref() {
                     let seed = (p.at.x * 7.0 + p.at.y * 13.0) as u32;
-                    gore::stain(&mut commands, *layer, Vec2::new(p.at.x, ground), p.size * (0.8 + p.vel.length() / 900.0), color, seed);
+                    gore::stain(&mut commands, &art, *layer, Vec2::new(p.at.x, ground), p.size * (0.8 + p.vel.length() / 900.0), color, seed);
                 }
                 commands.entity(e).despawn();
                 continue;
@@ -228,6 +237,9 @@ fn fly(
         tf.scale = Vec2::new(stretch, 1.0 / stretch.sqrt());
         // a drop that will land does not fade on the way
         let a = if p.land.is_some() { p.color.alpha() } else { p.color.alpha() * (1.0 - k * k) };
-        bg.0 = p.color.with_alpha(a);
+        match image {
+            Some(mut i) => i.color = p.color.with_alpha(a),
+            None => bg.0 = p.color.with_alpha(a),
+        }
     }
 }

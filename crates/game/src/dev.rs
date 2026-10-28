@@ -12,6 +12,7 @@
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release)
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
+//!   TROPA_SHOT_COUNT=<n>        instead a series of n frames, TROPA_SHOT_EVERY seconds apart (default 0.1), as <file>_<i>.png
 //!   TROPA_STORY=<scene>         open a story scene in the book at once (see story.rs), TROPA_STORY_PAGE=<n> on its n-th page
 //!   TROPA_GHOST=1               a second reader's hand turns the book's leaf, as their machine would tell it
 
@@ -77,10 +78,25 @@ fn open_screen(
     }
 }
 
-fn shot(mut commands: Commands, time: Res<Time>, mut taken: Local<Option<f32>>, mut exit: MessageWriter<AppExit>) {
+fn shot(mut commands: Commands, time: Res<Time>, mut taken: Local<Option<f32>>, mut series: Local<u32>, mut exit: MessageWriter<AppExit>) {
     let Ok(path) = std::env::var("TROPA_SHOT") else { return };
     let at = env::<f32>("TROPA_SHOT_AT").unwrap_or(3.0);
     let now = time.elapsed_secs();
+    // TROPA_SHOT_COUNT=n frames TROPA_SHOT_EVERY seconds apart, saved as <file>_<i>.png, to
+    // look at an animation
+    let count = env::<u32>("TROPA_SHOT_COUNT").unwrap_or(1).max(1);
+    let every = env::<f32>("TROPA_SHOT_EVERY").unwrap_or(0.1);
+    if count > 1 && *series < count {
+        if now >= at + every * *series as f32 {
+            let file = path.replace(".png", &format!("_{:02}.png", *series));
+            commands.spawn(Screenshot::primary_window()).observe(save_to_disk(file));
+            *series += 1;
+            if *series == count {
+                *taken = Some(now);
+            }
+        }
+        return;
+    }
     match *taken {
         None if now >= at => {
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));

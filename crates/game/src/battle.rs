@@ -27,14 +27,18 @@ const HEAD_ROOM: f32 = 62.0;
 /// Side of the picture that says what an enemy is about to do.
 const INTENT_ICON: f32 = 60.0;
 const UNIT_W: f32 = 280.0;
+/// How long a fallen unit takes to collapse and fade, in seconds.
+const DYING: f32 = 1.1;
 
 mod aim;
+mod fx;
 mod impact;
 mod piles;
+mod rig;
 mod status_row;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((aim::plugin, impact::plugin, piles::plugin, status_row::plugin));
+    app.add_plugins((aim::plugin, fx::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -117,6 +121,8 @@ struct UnitSprite {
     anim: Option<(Anim, f32)>,
     /// Drawn height, so a stretch can be taken from the feet and not from the middle.
     height: f32,
+    /// How much of a dying unit is still there: 1 alive, 0 gone.
+    alive: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -585,6 +591,7 @@ fn sync_units(
     l10n: Res<L10n>,
     art: Res<Art>,
     assets: Res<AssetServer>,
+    mut rigs: ResMut<Assets<rig::RigMaterial>>,
 ) {
     let shown = &session.shown;
     let have = |u: UnitRef| widgets.iter().find(|(_, w, _)| w.unit == u);
@@ -599,7 +606,7 @@ fn sync_units(
         match have(unit) {
             None if e.alive => wanted.push((unit, format!("enemies/{}", e.def), l10n.t(&format!("enemy-{}", e.def)), theme::SWAMP)),
             Some((entity, _, false)) if !e.alive => {
-                commands.entity(entity).insert(Dying(0.7));
+                commands.entity(entity).insert(Dying(DYING));
             }
             _ => {}
         }
@@ -677,10 +684,12 @@ fn sync_units(
                     BackgroundColor(Color::BLACK.with_alpha(0.45)),
                     Pickable::IGNORE,
                 ));
-                let sprite = art.node(&assets, &stem, color);
-                let base = sprite.0.color;
+                // drawn through the rig, so the figure bends as if it had a body
+                let picture = art.image(&assets, &stem);
+                let base = if picture.is_some() { Color::WHITE } else { color };
+                let skin = rig::skin(&mut rigs, picture, base, draw, is_hero);
                 u.spawn((
-                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y },
+                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y, alive: 1.0 },
                     {
                         Node {
                             width: px(draw.x),
@@ -690,9 +699,9 @@ fn sync_units(
                             ..default()
                         }
                     },
-                    sprite,
                     UiTransform::IDENTITY,
                     Pickable::IGNORE,
+                    children![skin],
                 ));
                 u.spawn((
                     Node {
@@ -778,8 +787,15 @@ fn layout_units(session: Res<Session>, time: Res<Time>, mut widgets: Query<(&mut
 }
 
 /// The werewolf has a second body: when the form changes, so does the sprite.
-fn swap_form_art(session: Res<Session>, art: Res<Art>, assets: Res<AssetServer>, mut sprites: Query<(&mut UnitSprite, &mut ImageNode)>) {
-    for (mut s, mut image) in &mut sprites {
+fn swap_form_art(
+    session: Res<Session>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    mut sprites: Query<(&mut UnitSprite, &Children)>,
+    skins: Query<&MaterialNode<rig::RigMaterial>>,
+    mut rigs: ResMut<Assets<rig::RigMaterial>>,
+) {
+    for (mut s, children) in &mut sprites {
         let UnitRef::Hero(i) = s.unit else { continue };
         let Some(h) = session.shown.hero(i) else { continue };
         let want = if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) };
@@ -788,7 +804,9 @@ fn swap_form_art(session: Res<Session>, art: Res<Art>, assets: Res<AssetServer>,
         }
         // no beast art for this hero: keep what is shown rather than blank the sprite
         if let Some(handle) = art.image(&assets, &want) {
-            image.image = handle;
+            for skin in skins.iter_many(children).flatten() {
+                rig::repaint(&mut rigs, skin, handle.clone());
+            }
         }
         s.stem = want;
     }
@@ -799,17 +817,21 @@ fn animate_sprites(
     time: Res<Time>,
     speed: Res<AnimSpeed>,
     comfort: Res<Comfort>,
-    mut sprites: Query<(&mut UnitSprite, &mut UiTransform, &mut ImageNode)>,
+    mut sprites: Query<(&mut UnitSprite, &mut UiTransform, &Children)>,
+    skins: Query<&MaterialNode<rig::RigMaterial>>,
+    mut rigs: ResMut<Assets<rig::RigMaterial>>,
 ) {
     let dt = time.delta_secs() * speed.0;
-    for (mut s, mut tf, mut image) in &mut sprites {
+    for (mut s, mut tf, children) in &mut sprites {
         s.t += dt;
-        // idle: slow breathing, feet planted
+        // idle: slow breathing, feet planted (the rig sways and ripples the figure itself)
         let breath = (s.t * 2.5).sin();
-        let mut scale = Vec2::new(1.0 - breath * 0.006, 1.0 + breath * 0.012);
+        let mut scale = Vec2::new(1.0 - breath * 0.004, 1.0 + breath * 0.008);
         let mut offset = Vec2::ZERO;
-        let toward = if matches!(s.unit, UnitRef::Hero(_)) { 1.0 } else { -1.0 };
+        let hero = matches!(s.unit, UnitRef::Hero(_));
+        let toward = if hero { 1.0 } else { -1.0 };
         let mut tint = s.base;
+        let mut pose = rig::Pose::idle(s.base, hero);
 
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
@@ -828,30 +850,63 @@ fn animate_sprites(
                     offset.y -= 14.0 * swell;
                     offset.x += toward * 12.0 * swell;
                     scale *= 1.0 + 0.05 * swell;
+                    // drawn back, then thrown forward
+                    pose.lean = if p < 0.4 { -0.05 * (p / 0.4) } else { 0.09 * ((p - 0.4) / 0.6 * std::f32::consts::PI).sin() };
+                    pose.wave = 0.012 * swell;
+                    pose.flash = 0.08 * swell;
+                    pose.flash_color = Color::srgb(0.8, 0.85, 1.0);
                 }
                 Anim::Guarded => {
                     scale *= Vec2::new(1.0 + 0.04 * swell, 1.0 - 0.02 * swell);
-                    tint = s.base.mix(&Color::srgb(0.45, 0.65, 1.0), 0.5 * swell);
+                    pose.squash = 1.0 - 0.04 * swell;
+                    pose.lean = -0.025 * swell;
+                    tint = s.base.mix(&Color::srgb(0.45, 0.65, 1.0), 0.3 * swell);
                 }
                 Anim::Healed => {
                     offset.y -= 8.0 * swell;
+                    pose.squash = 1.0 + 0.035 * swell;
+                    pose.flash = 0.09 * swell;
+                    pose.flash_color = Color::srgb(0.7, 1.0, 0.6);
                     scale *= 1.0 + 0.04 * swell;
-                    tint = s.base.mix(&Color::srgb(0.65, 1.0, 0.55), 0.5 * swell);
+                    tint = s.base.mix(&Color::srgb(0.65, 1.0, 0.55), 0.3 * swell);
                 }
                 Anim::Buffed => {
                     scale *= 1.0 + 0.07 * swell;
-                    tint = s.base.mix(&Color::srgb(1.0, 0.8, 0.4), 0.5 * swell);
+                    pose.squash = 1.0 + 0.05 * swell;
+                    pose.flash = 0.1 * swell;
+                    pose.flash_color = Color::srgb(1.0, 0.85, 0.45);
+                    tint = s.base.mix(&Color::srgb(1.0, 0.8, 0.4), 0.22 * swell);
                 }
                 Anim::Cursed => {
                     offset.x += 6.0 * (p * 38.0).sin() * (1.0 - p);
+                    // a shudder runs up the body
+                    pose.wave = 0.03 * (1.0 - p);
+                    pose.squash = 1.0 - 0.05 * swell;
                     tint = s.base.mix(&Color::srgb(0.25, 0.4, 0.15), 0.6 * swell);
                 }
-                Anim::Lunge => offset.x += toward * 70.0 * (p * std::f32::consts::PI).sin(),
+                Anim::Lunge => {
+                    offset.x += toward * 70.0 * (p * std::f32::consts::PI).sin();
+                    // a crouch to wind up, then the whole body thrown into the blow
+                    pose.squash = if p < 0.25 { 1.0 - 0.06 * (p / 0.25) } else { 0.94 + 0.1 * ((p - 0.25) / 0.75 * std::f32::consts::PI).sin() };
+                    pose.lean = if p < 0.25 { -0.03 * (p / 0.25) } else { 0.16 * ((p - 0.25) / 0.75 * std::f32::consts::PI).sin() };
+                }
                 Anim::Hit => {
                     offset.x -= toward * 22.0 * (1.0 - p) * (p * 40.0).cos().abs();
                     scale.x *= 1.0 - 0.04 * (1.0 - p);
-                    if p < 0.4 {
-                        tint = s.base.mix(&if comfort.ink { Color::srgb(0.1, 0.1, 0.14) } else { Color::srgb(1.0, 0.2, 0.15) }, 0.55);
+                    // bent back by the blow, the head going furthest, and springing upright
+                    pose.lean = -0.13 * (1.0 - p) * (1.0 + 0.4 * (p * 18.0).cos());
+                    pose.squash = 1.0 - 0.05 * (1.0 - p);
+                    // a white-hot instant, then the blow's colour fading off
+                    // (the flash mixes in linear light, where a little goes a long way; the
+                    // colour is a tint, so the painting still shows through it)
+                    if p < 0.2 {
+                        pose.flash = 0.45 * (1.0 - p / 0.2);
+                        pose.flash_color = Color::WHITE;
+                    }
+                    if p < 0.6 {
+                        let k = 1.0 - p / 0.6;
+                        let blow = if comfort.ink { Color::srgb(0.35, 0.35, 0.4) } else { Color::srgb(1.0, 0.35, 0.3) };
+                        tint = s.base.mix(&blow, 0.8 * k);
                     }
                 }
             }
@@ -865,25 +920,41 @@ fn animate_sprites(
                 tint = s.base.mix(&Color::srgb(0.05, 0.05, 0.08), 0.72);
                 offset.y += 16.0;
                 scale *= Vec2::new(1.0, 0.86);
+                pose.lean = -0.06;
+                pose.sway = 0.002;
+                pose.breath = 0.006;
             }
+        }
+        if s.alive < 1.0 {
+            // dying: the body gives at the knees and falls back, greying, and is gone
+            let k = 1.0 - s.alive;
+            pose.lean = -0.22 * k * k;
+            pose.squash = 1.0 - 0.3 * k;
+            pose.sway = 0.0;
+            pose.wave = 0.01 * (1.0 - k);
+            offset.x -= toward * 30.0 * k;
+            tint = tint.mix(&Color::srgb(0.45, 0.5, 0.45), k);
+            pose.fade = (s.alive * 1.6).min(1.0);
         }
         // a transform stretches about the middle: lift by as much as the stretch lowers the feet,
         // so they stay on the ground through every breath
         offset.y -= (scale.y - 1.0) * s.height / 2.0;
         tf.translation = Val2::px(offset.x, offset.y);
         tf.scale = scale;
-        if image.color != tint {
-            image.color = tint;
+        pose.tint = tint;
+        for skin in skins.iter_many(children).flatten() {
+            rig::pose(&mut rigs, skin, s.t, pose);
         }
     }
 }
 
-fn dying(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Dying, &Children)>, mut images: Query<&mut ImageNode>) {
+fn dying(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Dying, &Children)>, mut sprites: Query<&mut UnitSprite>) {
     for (entity, mut d, children) in &mut q {
         d.0 -= time.delta_secs();
+        // the rig lets the body fall (see `animate_sprites`)
         for c in children.iter() {
-            if let Ok(mut image) = images.get_mut(c) {
-                image.color = Color::srgba(0.5, 0.55, 0.5, (d.0 / 0.7).clamp(0.0, 1.0));
+            if let Ok(mut s) = sprites.get_mut(c) {
+                s.alive = (d.0 / DYING).clamp(0.0, 1.0);
             }
         }
         if d.0 <= 0.0 {
@@ -1583,6 +1654,7 @@ fn cue_effects(
     l10n: Res<L10n>,
     mut sprites: Query<&mut UnitSprite>,
     mut impacts: ResMut<impact::Impacts>,
+    mut fx: ResMut<fx::Bursts>,
     comfort: Res<Comfort>,
     db: Res<Db>,
 ) {
@@ -1632,13 +1704,21 @@ fn cue_effects(
     for e in &cues.0 {
         match e {
             Event::Damage { src, dst, blocked, lost, attack, .. } => {
+                // the blow comes from the attacker's side: blood and sparks fly the other way
+                let dir = if matches!(dst, UnitRef::Enemy(_)) { 1.0 } else { -1.0 };
                 if *attack {
                     if let Some(s) = src {
                         play(*s, Anim::Lunge);
+                        if let Some((foot, _)) = unit_place(&session.shown, *s) {
+                            fx.0.push(fx::Burst::Dust { at: foot, dir });
+                        }
                     }
                 }
                 if *blocked > 0 {
                     impacts.0.push(impact::Impact::Blocked { unit: *dst, blocked: *blocked, through: *lost });
+                    if let Some(at) = body(*dst) {
+                        fx.0.push(fx::Burst::Sparks { at: at - Vec2::new(dir * 60.0, 0.0), dir, weight: (*blocked as f32 / 20.0).min(1.0) });
+                    }
                 }
                 if *lost > 0 {
                     // the screen shakes with the weight of the blow (see `impact`)
@@ -1649,6 +1729,10 @@ fn cue_effects(
                     let share = max.map_or(0.0, |m| *lost as f32 / m.max(1) as f32);
                     impacts.0.push(impact::Impact::Hurt { unit: *dst, lost: *lost, share });
                     play(*dst, Anim::Hit);
+                    if let Some(at) = body(*dst) {
+                        let weight = (share * 3.0).max(*lost as f32 / 30.0).min(1.0);
+                        fx.0.push(fx::Burst::Wound { at: at - Vec2::new(0.0, 40.0), dir, weight, blood: comfort.blood() });
+                    }
                     float(&mut commands, *dst, format!("-{lost}"), comfort.blood(), 46.0 + (*lost as f32).min(30.0), 0.0);
                 }
                 if *blocked > 0 {
@@ -1661,10 +1745,16 @@ fn cue_effects(
             }
             Event::Heal { unit, amount, .. } => {
                 play(*unit, Anim::Healed);
+                if let Some((foot, _)) = unit_place(&session.shown, *unit) {
+                    fx.0.push(fx::Burst::Motes { at: foot, color: Color::srgb(0.6, 1.0, 0.5) });
+                }
                 float(&mut commands, *unit, format!("+{amount}"), theme::ROTLIGHT, 38.0, 40.0)
             }
             Event::Status { unit, status, delta, .. } if *delta > 0 => {
                 play(*unit, if status.debuff() { Anim::Cursed } else { Anim::Buffed });
+                if let Some((foot, _)) = unit_place(&session.shown, *unit) {
+                    fx.0.push(if status.debuff() { fx::Burst::Smoke { at: foot, color: Color::srgb(0.2, 0.3, 0.12) } } else { fx::Burst::Motes { at: foot, color: Color::srgb(1.0, 0.82, 0.4) } });
+                }
                 let color = if status.debuff() { theme::ROTLIGHT } else { theme::CANDLE };
                 float(&mut commands, *unit, format!("{} +{delta}", l10n.t(&format!("status-{status:?}"))), color, 24.0, 30.0)
             }

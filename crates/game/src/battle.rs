@@ -816,7 +816,11 @@ fn swap_form_art(
     for (mut s, children) in &mut sprites {
         let UnitRef::Hero(i) = s.unit else { continue };
         let Some(h) = session.shown.hero(i) else { continue };
-        let want = if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) };
+        let mut want = if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) };
+        // on the Edge a hero is drawn down on one knee, wounded, when that picture exists
+        if h.downed && art.image(&assets, &format!("{want}_downed")).is_some() {
+            want = format!("{want}_downed");
+        }
         if s.stem == want {
             continue;
         }
@@ -981,10 +985,13 @@ fn animate_sprites(
         }
         if let UnitRef::Hero(i) = s.unit {
             if session.shown.hero(i).is_some_and(|h| h.downed) {
-                // on the Edge: slumped and dark
-                tint = s.base.mix(&Color::srgb(0.05, 0.05, 0.08), 0.72);
-                offset.y += 16.0;
-                scale *= Vec2::new(1.0, 0.86);
+                // on the Edge: slumped and dark; a picture already kneeling is only dimmed
+                let kneeling = s.stem.ends_with("_downed");
+                tint = s.base.mix(&Color::srgb(0.05, 0.05, 0.08), if kneeling { 0.35 } else { 0.72 });
+                if !kneeling {
+                    offset.y += 16.0;
+                    scale *= Vec2::new(1.0, 0.86);
+                }
                 pose.lean = -0.06;
                 pose.swing = 0.3;
                 pose.nod = 0.3;

@@ -278,6 +278,12 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
                             e.hp = e.hp.min(hp);
                         }
                     }
+                    // TROPA_HERO_HP=2 leaves the heroes that weak, to watch them go down
+                    if let (Some(hp), Some(c)) = (std::env::var("TROPA_HERO_HP").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
+                        for h in &mut c.heroes {
+                            h.hp = h.hp.min(hp);
+                        }
+                    }
                     // TROPA_ACT=2 puts that fight on another act's backdrop
                     if let Some(act) = std::env::var("TROPA_ACT").ok().and_then(|a| a.parse().ok()) {
                         run.act = act;

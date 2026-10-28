@@ -35,8 +35,12 @@ def soft(m, grow):
     return np.asarray(Image.fromarray((m * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.5))).astype(float) / 255
 
 
+import os
+only = os.environ.get("PARTS", "").split(",") if os.environ.get("PARTS") else None
 parts = {}
 for part, c in COLOURS.items():
+    if only and part not in only:
+        continue
     m = np.linalg.norm(M - np.array(c, float), axis=2) < 90
     if m.sum() > w * h * 0.002:
         parts[part] = soft(m, 2)

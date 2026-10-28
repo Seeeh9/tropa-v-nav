@@ -67,12 +67,19 @@ impl Part {
     }
 }
 
-/// Figures cut into parts: the art stem, and each part with its joint on the picture, in the
-/// order they are laid over the body.
-const FIGURES: &[(&str, &[(Part, Vec2)])] = &[(
-    "heroes/bogatyr",
-    &[(Part::Head, Vec2::new(0.52, 0.15)), (Part::Shield, Vec2::new(0.68, 0.30)), (Part::Arm, Vec2::new(0.275, 0.42))],
-)];
+/// Figures cut into parts: the art stem, and each part with its joint on the picture and how
+/// strongly (and which way) it follows its turn, in the order they are laid over the body. An
+/// arm held up (a staff, a hand raised to curse) turns the other way from one hanging down.
+type Cut = (Part, Vec2, f32);
+const FIGURES: &[(&str, &[Cut])] = &[
+    ("heroes/bogatyr", &[(Part::Head, Vec2::new(0.52, 0.15), 1.0), (Part::Shield, Vec2::new(0.68, 0.30), 1.0), (Part::Arm, Vec2::new(0.275, 0.42), 1.0)]),
+    ("heroes/vorozheya", &[(Part::Shield, Vec2::new(0.36, 0.355), 0.8), (Part::Head, Vec2::new(0.46, 0.22), 1.0), (Part::Arm, Vec2::new(0.66, 0.335), -0.7)]),
+    ("heroes/volhv", &[(Part::Shield, Vec2::new(0.33, 0.36), 0.8), (Part::Head, Vec2::new(0.47, 0.18), 0.9), (Part::Arm, Vec2::new(0.635, 0.37), -0.45)]),
+    ("heroes/volkolak", &[(Part::Shield, Vec2::new(0.70, 0.43), 0.8), (Part::Head, Vec2::new(0.58, 0.24), 1.0), (Part::Arm, Vec2::new(0.29, 0.42), 1.0)]),
+    ("heroes/volkolak_beast", &[(Part::Head, Vec2::new(0.69, 0.22), 1.2)]),
+    ("heroes/skomoroh", &[(Part::Shield, Vec2::new(0.69, 0.44), 0.8), (Part::Head, Vec2::new(0.57, 0.22), 1.0), (Part::Arm, Vec2::new(0.20, 0.37), 0.8)]),
+    ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
+];
 
 /// Whether `stem` is a figure cut into parts (its blows take longer: a weapon is swung).
 pub(super) fn is_cut(stem: &str) -> bool {
@@ -81,10 +88,10 @@ pub(super) fn is_cut(stem: &str) -> bool {
 
 /// The pictures of `stem` cut into parts: its body and each part with its joint, when all of
 /// them are there.
-pub(super) fn parts_of(art: &Art, assets: &AssetServer, stem: &str) -> Option<(Handle<Image>, Vec<(Part, Vec2, Handle<Image>)>)> {
+pub(super) fn parts_of(art: &Art, assets: &AssetServer, stem: &str) -> Option<(Handle<Image>, Vec<(Cut, Handle<Image>)>)> {
     let (_, parts) = FIGURES.iter().find(|(s, _)| *s == stem)?;
     let body = art.image(assets, &format!("{stem}_body"))?;
-    let parts = parts.iter().map(|(part, joint)| Some((*part, *joint, art.image(assets, &format!("{stem}_{}", part.file()))?))).collect::<Option<Vec<_>>>()?;
+    let parts = parts.iter().map(|cut| Some((*cut, art.image(assets, &format!("{stem}_{}", cut.0.file()))?))).collect::<Option<Vec<_>>>()?;
     Some((body, parts))
 }
 
@@ -99,6 +106,8 @@ impl UiMaterial for RigMaterial {
 #[derive(Component)]
 pub(super) struct RigSkin {
     pub part: Option<Part>,
+    /// How strongly, and which way, the part follows its turn.
+    pub gain: f32,
 }
 
 /// How the figure is bent this frame, worked out from its animation (see `animate_sprites`).
@@ -129,7 +138,7 @@ impl Pose {
 }
 
 /// The skin for a picture drawn at `draw` stage pixels, as a child of the sprite node.
-pub(super) fn skin(materials: &mut Assets<RigMaterial>, picture: Option<Handle<Image>>, tint: Color, draw: Vec2, hero: bool, part: Option<(Part, Vec2)>) -> impl Bundle {
+pub(super) fn skin(materials: &mut Assets<RigMaterial>, picture: Option<Handle<Image>>, tint: Color, draw: Vec2, hero: bool, part: Option<Cut>) -> impl Bundle {
     let w = draw.x / (1.0 - 2.0 * PAD_X);
     let h = draw.y / (1.0 - PAD_TOP);
     let face = if hero { 1.0 } else { -1.0 };
@@ -138,13 +147,13 @@ pub(super) fn skin(materials: &mut Assets<RigMaterial>, picture: Option<Handle<I
             pad: Vec4::new(PAD_X, PAD_X, PAD_TOP, face),
             tint: tint.to_linear().to_vec4(),
             body: Vec4::new(0.0, 1.0, 0.0, 1.0),
-            limb: part.map(|(_, j)| Vec4::new(j.x, j.y, 0.0, draw.x / draw.y)).unwrap_or(Vec4::new(0.0, 0.0, 0.0, 1.0)),
+            limb: part.map(|(_, j, _)| Vec4::new(j.x, j.y, 0.0, draw.x / draw.y)).unwrap_or(Vec4::new(0.0, 0.0, 0.0, 1.0)),
             ..default()
         },
         picture: picture.unwrap_or_default(),
     });
     (
-        RigSkin { part: part.map(|(p, _)| p) },
+        RigSkin { part: part.map(|(p, ..)| p), gain: part.map(|(.., g)| g).unwrap_or(0.0) },
         MaterialNode(material),
         Node { position_type: PositionType::Absolute, left: px(-(w - draw.x) / 2.0), top: px(-(h - draw.y)), width: px(w), height: px(h), ..default() },
         Pickable::IGNORE,
@@ -161,7 +170,7 @@ pub(super) fn pose(materials: &mut Assets<RigMaterial>, handle: &MaterialNode<Ri
         Some(Part::Shield) => p.guard,
         None => 0.0,
     };
-    m.rig.limb.z = turn * m.rig.pad.w;
+    m.rig.limb.z = turn * skin.gain * m.rig.pad.w;
     m.rig.motion = Vec4::new(t, p.lean, p.sway, p.wave);
     m.rig.body = Vec4::new(p.breath, p.squash, p.flash, p.fade);
     m.rig.tint = p.tint.to_linear().to_vec4();

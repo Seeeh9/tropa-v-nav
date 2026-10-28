@@ -691,7 +691,7 @@ fn sync_units(
                 let (skin, parts) = match rig::parts_of(&art, &assets, &stem) {
                     Some((body, parts)) => (
                         rig::skin(&mut rigs, Some(body), base, draw, is_hero, None),
-                        parts.into_iter().map(|(part, joint, picture)| rig::skin(&mut rigs, Some(picture), base, draw, is_hero, Some((part, joint)))).collect(),
+                        parts.into_iter().map(|(cut, picture)| rig::skin(&mut rigs, Some(picture), base, draw, is_hero, Some(cut))).collect(),
                     ),
                     None => (rig::skin(&mut rigs, picture, base, draw, is_hero, None), Vec::new()),
                 };
@@ -824,8 +824,8 @@ fn swap_form_art(
             while let Some(Ok((skin, part, mut vis))) = iter.fetch_next() {
                 match (&parts, part.part) {
                     (Some((body, _)), None) => rig::repaint(&mut rigs, skin, body.clone()),
-                    (Some((_, parts)), Some(p)) => match parts.iter().find(|(q, ..)| *q == p) {
-                        Some((.., picture)) => {
+                    (Some((_, parts)), Some(p)) => match parts.iter().find(|(cut, _)| cut.0 == p) {
+                        Some((_, picture)) => {
                             rig::repaint(&mut rigs, skin, picture.clone());
                             *vis = Visibility::Inherited;
                         }

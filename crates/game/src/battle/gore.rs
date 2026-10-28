@@ -35,6 +35,8 @@ pub(super) struct Corpse {
     /// The picture of the body lying dead, which the standing one gives way to (`None` when
     /// something was struck off, since that picture is whole).
     lying: Option<Entity>,
+    /// What runs in its veins.
+    blood: Color,
 }
 
 /// The bodies lying dead, over the stains and under the living.
@@ -44,7 +46,7 @@ pub(super) struct CorpseLayer;
 /// Seconds after the blow when the falling body gives way to the one lying dead, and how long
 /// that takes.
 pub(super) const SWAP_AT: f32 = 0.55;
-pub(super) const SWAP_FOR: f32 = 0.22;
+pub(super) const SWAP_FOR: f32 = 0.06;
 
 /// A part struck off: flying, bouncing, then rolling, dripping all the while.
 #[derive(Component)]
@@ -267,7 +269,7 @@ pub(super) fn strike_down(
     let wide = draw.y * if flying.contains(&true) { 1.3 } else { 0.9 };
     play(commands, stain_layer, &art.pool, foot + Vec2::new(side * draw.y * 0.25, 8.0), Vec2::new(wide, wide * 0.36), Vec2::splat(0.5), 0.0, blood.with_alpha(0.9), 3.0, true, side < 0.0);
     // the dead lie behind the living
-    commands.entity(widget).insert((Corpse { t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying }, ZIndex(0)));
+    commands.entity(widget).insert((Corpse { t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying, blood }, ZIndex(0)));
     for (k, (part, joint, picture, skin)) in parts.into_iter().enumerate() {
         if !flying[k] {
             continue;
@@ -348,10 +350,23 @@ fn centre_of(images: &Assets<Image>, picture: &Handle<Image>) -> Option<(Vec2, f
 }
 
 /// A body topples about its feet, slowly and then all at once, and settles with a bump.
-fn fall(time: Res<Time>, mut q: Query<(&mut Corpse, &mut UiTransform, &ComputedNode)>, mut lying: Query<(&mut ImageNode, &mut UiTransform), Without<Corpse>>) {
+fn fall(
+    time: Res<Time>,
+    mut q: Query<(&mut Corpse, &mut UiTransform, &ComputedNode)>,
+    mut lying: Query<(&mut ImageNode, &mut UiTransform), Without<Corpse>>,
+    mut bursts: ResMut<fx::Bursts>,
+) {
     let dt = time.delta_secs();
     for (mut c, mut tf, node) in &mut q {
+        let before = c.t;
         c.t += dt;
+        // the body hits the ground as one picture gives way to the other: a burst of blood hides
+        // the change
+        if c.lying.is_some() && before < SWAP_AT && c.t >= SWAP_AT {
+            // the blood still in it is thrown out as it hits
+            bursts.0.push(fx::Burst::Spurt { at: c.ground - Vec2::new(0.0, 25.0), dir: Vec2::new(-c.side * 0.7, -0.7).normalize(), force: 0.8, blood: c.blood, ground: c.ground.y });
+            bursts.0.push(fx::Burst::Spurt { at: c.ground - Vec2::new(0.0, 20.0), dir: Vec2::new(c.side * 0.4, -1.0).normalize(), force: 0.9, blood: c.blood, ground: c.ground.y });
+        }
         let p = ((c.t - 0.15) / 0.75).clamp(0.0, 1.0);
         // gravity: the fall gathers speed; at the end it hits and rocks a little
         let ease = p * p;

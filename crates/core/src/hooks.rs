@@ -255,6 +255,11 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                 e.statuses.clear();
                 let (unit, hp) = (UnitRef::Enemy(e.uid), e.hp);
                 ex.ev.push(Event::Heal { unit, amount: hp, hp });
+            } else if ex.s.enemies.iter().filter(|e| e.alive).count() < 3 {
+                // no one has fallen yet: he digs a fresh one out of the graveyard
+                if let Some(uid) = ex.spawn(&"upyr".to_string()) {
+                    ex.ev.push(Event::Summoned { enemy: uid, def: "upyr".into() });
+                }
             }
         }
         // the fever moves on to the next hero

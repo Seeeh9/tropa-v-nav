@@ -550,7 +550,8 @@ fn enter(
                 Node { position_type: PositionType::Absolute, left: px(18), top: px(150), column_gap: px(10), ..default() },
                 Pickable::IGNORE,
             ));
-            p.spawn((HandLayer, layer(), Pickable::IGNORE));
+            // the hand over every unit, bar and intent: a card held is never under anything
+            p.spawn((HandLayer, layer(), Pickable::IGNORE, GlobalZIndex(30)));
             p.spawn((FloatLayer, layer(), Pickable::IGNORE, GlobalZIndex(50)));
             // the aiming arrow, over everything
             p.spawn((layer(), Pickable::IGNORE)).with_children(|a| aim::spawn_arrow(a, &mut images));
@@ -1369,8 +1370,11 @@ pub fn spawn_card<B: Bundle>(
                 Pickable::IGNORE,
             ));
             c.spawn((theme::text(l10n.t(&format!("type-{:?}", view.kind)), &fonts.body, 14.0, theme::DIM), Node { margin: UiRect::vertical(px(2)), ..default() }));
+            // a long text shrinks to stay on the card: about 110 letters fit at full size
+            let text = l10n.card_text(&card.def, def, &view);
+            let size = (18.0 * (110.0 / text.chars().count().max(1) as f32).sqrt()).clamp(12.0, 18.0);
             c.spawn((
-                theme::text(l10n.card_text(&card.def, def, &view), &fonts.body, 18.0, theme::BONE),
+                theme::text(text, &fonts.body, size, theme::BONE),
                 TextLayout::justify(Justify::Center),
                 Node { width: px(196), ..default() },
             ));
@@ -1651,15 +1655,27 @@ let rest = hand_slot(i, n);
     }
 }
 
-fn on_drag_start(ev: On<PointerDragStart>, mut cards: Query<&mut CardWidget>) {
-    if let Ok(mut w) = cards.get_mut(ev.event_target()) {
+fn on_drag_start(ev: On<PointerDragStart>, top: Res<HoverTop>, mut cards: Query<&mut CardWidget>) {
+    // one card in the hand at a time: the one on top under the cursor. Overlapping cards each
+    // hear the press at their edges, and both used to come away together
+    if cards.iter().any(|w| w.dragging) {
+        return;
+    }
+    let target = ev.event_target();
+    let Ok(uid) = cards.get(target).map(|w| w.uid) else { return };
+    if top.0.is_some_and(|t| t != uid) {
+        return;
+    }
+    if let Ok(mut w) = cards.get_mut(target) {
         w.dragging = true;
     }
 }
 
 fn on_drag(ev: On<PointerDrag>, scale: Res<UiScale>, mut cards: Query<&mut CardWidget>) {
     if let Ok(mut w) = cards.get_mut(ev.event_target()) {
-        w.drag = ev.distance / scale.0;
+        if w.dragging {
+            w.drag = ev.distance / scale.0;
+        }
     }
 }
 
@@ -1672,6 +1688,10 @@ fn on_drag_end(
     mut outbox: ResMut<Outbox>,
 ) {
     let Ok(mut w) = cards.get_mut(ev.event_target()) else { return };
+    // a card that never took the drag (another card had it) plays nothing
+    if !w.dragging {
+        return;
+    }
     let lifted = ev.distance.y / scale.0 < -aim::LIFT_TO_AIM;
     w.dragging = false;
     w.aiming = false;
@@ -1710,6 +1730,9 @@ fn on_drop(
         return;
     }
     let (Ok(unit), Ok(w), Some(session)) = (units.get(ev.event_target()), cards.get(ev.dropped), session) else { return };
+    if !w.dragging {
+        return;
+    }
     let h = session.my_hero();
     let Some(card) = h.hand.iter().find(|c| c.uid == w.uid) else { return };
     let Some(def) = db.0.cards.get(&card.def) else { return };

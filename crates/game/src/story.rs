@@ -31,7 +31,9 @@ pub const ENDINGS: [&str; 8] = ["fall_forest", "fall_village", "fall_nav", "fall
 const THRONE_CURSES: usize = 3;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<Tale>().add_systems(Update, (watch_run, turn_pages, tally_votes, show_page, want_book, book_hands, read_secret).chain());
+    app.init_resource::<Tale>()
+        .init_resource::<PendingVoice>()
+        .add_systems(Update, ((watch_run, turn_pages, tally_votes, show_page, want_book, book_hands, read_secret).chain(), speak_when_open));
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
 }
@@ -90,6 +92,23 @@ impl Tale {
 
     pub fn open(&self) -> bool {
         !self.pages.is_empty()
+    }
+}
+
+/// The page's reading, waiting for the book to open (and its volume).
+#[derive(Resource, Default)]
+struct PendingVoice(Option<(Handle<AudioSource>, f32)>);
+
+fn speak_when_open(mut commands: Commands, mut pending: ResMut<PendingVoice>, book: Res<crate::book::Book>, tale: Res<Tale>, speaking: Query<(), With<Narration>>) {
+    if !tale.open() {
+        pending.0 = None;
+        return;
+    }
+    if book.open < 1.0 || !speaking.is_empty() {
+        return;
+    }
+    if let Some((voice, volume)) = pending.0.take() {
+        commands.spawn((Narration, AudioPlayer::new(voice), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume))));
     }
 }
 
@@ -520,8 +539,9 @@ fn show_page(
     let Some(page) = tale.pages.front() else { return };
     // the page read aloud, in the language chosen for speech; a page with no recording is silent
     let spoken = format!("voice/{}/{}.wav", l10n.lang.voice(profile.settings.voice_lang).code(), page.text);
+    // the storyteller waits for the book to lie open before speaking
     if mixer.narrator > 0.0 && art.root().join(&spoken).is_file() {
-        commands.spawn((Narration, AudioPlayer::new(assets.load::<AudioSource>(spoken)), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.narrator))));
+        commands.insert_resource(PendingVoice(Some((assets.load::<AudioSource>(spoken), mixer.narrator))));
     }
     let together = net.as_ref().is_some_and(|n| shared(n, page));
     let left = tale.pages.len();

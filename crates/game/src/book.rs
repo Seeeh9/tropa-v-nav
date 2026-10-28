@@ -256,9 +256,11 @@ pub struct Book {
     /// The fibres along the leaf's tears.
     fringe: Handle<Mesh>,
     /// 0 closed .. 1 open.
-    open: f32,
+    pub open: f32,
     /// The cover's sounds have been played for this opening.
     heard: bool,
+    /// The reader has lifted the cover: the book lies shut on the table until they do.
+    pub lifted: bool,
 }
 
 impl Book {
@@ -742,6 +744,7 @@ fn setup(
         fringe,
         open: 0.0,
         heard: false,
+        lifted: false,
     });
 }
 
@@ -761,6 +764,8 @@ fn open_cover(
     art: Res<Art>,
     assets: Res<AssetServer>,
     mixer: Res<Mixer>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
     for mut cam in &mut cams {
         if cam.is_active != book.wanted {
@@ -770,7 +775,17 @@ fn open_cover(
     if !book.wanted {
         book.open = 0.0;
         book.heard = false;
+        book.lifted = false;
         return;
+    }
+    // shut on the table until the reader opens it (an unattended dev run opens it at once)
+    if !book.lifted {
+        let unattended = cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok();
+        if unattended || mouse.just_pressed(MouseButton::Left) || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
+            book.lifted = true;
+        } else {
+            return;
+        }
     }
     if !book.heard {
         book.heard = true;

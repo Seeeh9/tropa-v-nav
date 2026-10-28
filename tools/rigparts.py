@@ -136,6 +136,12 @@ for _kind in ("dead", "dead_headless"):
       D_ = np.asarray(Image.open(dead_p).convert("RGB").transform((W2, h), Image.AFFINE, dcoeffs, Image.BICUBIC, fillcolor=tuple(int(v) for v in mbg))).astype(float)
       dbg = np.median(np.concatenate([D_[:10, :10].reshape(-1, 3), D_[:10, -10:].reshape(-1, 3)]), axis=0)
       da = np.clip((np.linalg.norm(D_ - dbg, axis=2) - 12) / 25, 0, 1)
+      # an uneven grey floor: whatever pale and grey touches the edge of the picture is background
+      pale = (D_.min(2) > 120) & (D_.max(2) - D_.min(2) < 28)
+      lab_, _n = ndimage.label(pale)
+      edge_ids = np.unique(np.concatenate([lab_[0], lab_[-1], lab_[:, 0], lab_[:, -1]]))
+      floor = np.isin(lab_, edge_ids[edge_ids > 0])
+      da = da * (1 - ndimage.binary_dilation(floor, iterations=1))
       da = np.asarray(Image.fromarray((da * 255).astype(np.uint8)).filter(ImageFilter.MedianFilter(5))).astype(float) / 255
       lab, n = ndimage.label(da > 0.3)
       if n > 1:

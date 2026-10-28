@@ -10,7 +10,8 @@
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_POTIONS=<id>,<id>     every player's belt holds these draughts
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
-//!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release)
+//!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release),
+//!                               `s <lines>` (turn the wheel, positive up the page)
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 //!   TROPA_SHOT_COUNT=<n>        instead a series of n frames, TROPA_SHOT_EVERY seconds apart (default 0.1), as <file>_<i>.png
 //!   TROPA_STORY=<scene>         open a story scene in the book at once (see story.rs), TROPA_STORY_PAGE=<n> on its n-th page
@@ -116,6 +117,8 @@ enum Step {
     Move(Vec2),
     Down,
     Up,
+    /// Wheel lines, positive away from the player (up the page).
+    Wheel(f32),
 }
 
 /// Plays `TROPA_ROBOT` into the window's own event stream, so hovering, dragging and clicking
@@ -124,6 +127,7 @@ fn robot(
     time: Res<Time>,
     window: Single<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
     mut events: MessageWriter<bevy::window::WindowEvent>,
+    mut wheel: MessageWriter<bevy::input::mouse::MouseWheel>,
     mut script: Local<Option<Vec<Step>>>,
     mut at: Local<(usize, f32, Vec2, Vec2)>,
 ) {
@@ -140,6 +144,7 @@ fn robot(
                     ["m", x, y] => Some(Step::Move(Vec2::new(x.parse().ok()?, y.parse().ok()?))),
                     ["d"] => Some(Step::Down),
                     ["u"] => Some(Step::Up),
+                    ["s", n] => n.parse().ok().map(Step::Wheel),
                     _ => None,
                 }
             })
@@ -160,6 +165,12 @@ fn robot(
             events.write(WindowEvent::CursorMoved(CursorMoved { window: entity, position: now * k, delta: Some((now - *pos) * k) }));
             *pos = now;
             p >= 1.0
+        }
+        Step::Wheel(n) => {
+            use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+            // the wheel is read as its own message, not from the window's event stream
+            wheel.write(MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y: *n, window: entity, phase: bevy::input::touch::TouchPhase::Moved });
+            true
         }
         Step::Down | Step::Up => {
             let state = if matches!(step, Step::Down) { ButtonState::Pressed } else { ButtonState::Released };

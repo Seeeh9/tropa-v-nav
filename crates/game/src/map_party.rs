@@ -13,7 +13,9 @@ use nav_core::RunEvent;
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<MapSpots>()
-        .add_systems(Update, (send_pointer, show_pointers, show_votes, play_lot, pulse).chain().run_if(in_state(AppState::Map)))
+        .init_resource::<MapScroll>()
+        .add_systems(OnEnter(AppState::Map), |mut scroll: ResMut<MapScroll>| scroll.fresh = true)
+        .add_systems(Update, (roll_sheet, send_pointer, show_pointers, show_votes, play_lot, pulse).chain().run_if(in_state(AppState::Map)))
         .add_systems(OnExit(AppState::Map), |mut commands: Commands, marks: Query<Entity, With<MapOverlay>>| {
             for e in &marks {
                 commands.entity(e).despawn();
@@ -21,10 +23,62 @@ pub fn plugin(app: &mut App) {
         });
 }
 
-/// Where each node the party may step to sits on the stage, by choice number; the map screen
+/// Where each node the party may step to sits on the map sheet, by choice number; the map screen
 /// writes it as it draws.
 #[derive(Resource, Default)]
 pub struct MapSpots(pub Vec<Vec2>);
+
+/// Height of the map sheet, far taller than the screen: the map is rolled through by the wheel.
+pub const SHEET_H: f32 = 2000.0;
+
+/// The tall sheet the map is drawn on; its own coordinates are what the players tell each other.
+#[derive(Component)]
+pub struct MapSheet;
+
+/// How far down the sheet the top of the screen (below the bar) is, and where it is rolling to.
+/// `fresh` asks the map to roll to the party when it is next drawn.
+#[derive(Resource, Default)]
+pub struct MapScroll {
+    pub y: f32,
+    pub target: f32,
+    pub fresh: bool,
+}
+
+impl MapScroll {
+    /// From a point on the sheet to the same point on the stage.
+    fn to_stage(&self, at: Vec2) -> Vec2 {
+        at + Vec2::new(0.0, crate::between::BAR_H - self.y)
+    }
+}
+
+/// The wheel rolls the sheet; it glides to where it was sent.
+fn roll_sheet(
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut scroll: ResMut<MapScroll>,
+    time: Res<Time>,
+    mut sheets: Query<&mut Node, With<MapSheet>>,
+) {
+    use bevy::input::mouse::MouseScrollUnit;
+    let most = SHEET_H - (crate::STAGE_H - crate::between::BAR_H);
+    for w in wheel.read() {
+        let step = match w.unit {
+            MouseScrollUnit::Line => w.y * 110.0,
+            MouseScrollUnit::Pixel => w.y,
+        };
+        scroll.target = (scroll.target - step).clamp(0.0, most);
+    }
+    let k = (time.delta_secs() * 12.0).min(1.0);
+    let y = scroll.y + (scroll.target - scroll.y) * k;
+    if (y - scroll.y).abs() > 0.01 {
+        scroll.y = y;
+    }
+    for mut node in &mut sheets {
+        let top = px(-scroll.y);
+        if node.top != top {
+            node.top = top;
+        }
+    }
+}
 
 /// A lot being drawn: the votes as tickets (each the choice it was for), the choice it fell to,
 /// and how far it has run. While it runs the map stays up.
@@ -37,6 +91,8 @@ pub struct MapLot {
     wait: f32,
     /// Seconds left to linger on the chosen node once the ring has stopped.
     after: f32,
+    /// Where the ring stands on the sheet.
+    at: Option<Vec2>,
 }
 
 /// Everything this module puts over the map, gone when the map is left.
@@ -56,6 +112,7 @@ struct LotRing;
 
 #[derive(Component)]
 struct Pulse {
+    /// On the map sheet.
     at: Vec2,
     t: f32,
     life: f32,
@@ -88,6 +145,7 @@ fn send_pointer(
     mut moves: MessageReader<bevy::window::WindowEvent>,
     window: Single<&Window>,
     scale: Res<UiScale>,
+    scroll: Res<MapScroll>,
     time: Res<Time>,
     mut last: Local<(f32, Vec2, Option<Vec2>)>,
 ) {
@@ -102,7 +160,7 @@ fn send_pointer(
     }
     last.0 += time.delta_secs();
     let Some(pos) = last.2 else { return };
-    let at = crate::stage_point(&window, scale.0, pos);
+    let at = crate::stage_point(&window, scale.0, pos) - scroll.to_stage(Vec2::ZERO);
     if last.0 >= 1.0 / 12.0 && at.distance(last.1) > 2.0 {
         last.0 = 0.0;
         last.1 = at;
@@ -118,6 +176,7 @@ fn show_pointers(
     fonts: Res<Fonts>,
     l10n: Res<crate::l10n::L10n>,
     time: Res<Time>,
+    scroll: Res<MapScroll>,
     mut cursors: Query<(Entity, &mut Cursor, &mut Node, &mut Visibility)>,
 ) {
     let Some(net) = net else { return };
@@ -156,8 +215,9 @@ fn show_pointers(
     for (_, mut c, mut node, mut vis) in &mut cursors {
         c.quiet += dt;
         c.at = c.at.lerp(c.to, (dt * 14.0).min(1.0));
-        node.left = px(c.at.x - 10.0);
-        node.top = px(c.at.y - 10.0);
+        let at = scroll.to_stage(c.at);
+        node.left = px(at.x - 10.0);
+        node.top = px(at.y - 10.0);
         // a cursor not heard of for a while has left the map, or its player the game
         vis.set_if_neq(if c.quiet < 3.0 { Visibility::Inherited } else { Visibility::Hidden });
     }
@@ -187,7 +247,7 @@ fn show_votes(
                 let n = tied.len();
                 let last = tied.iter().rposition(|t| *t == chosen).unwrap_or(0);
                 let stops: Vec<usize> = (0..n * 3 + last + 1).map(|k| k % n).collect();
-                commands.insert_resource(MapLot { tickets: tied, stops, step: 0, wait: 0.0, after: 1.0 });
+                commands.insert_resource(MapLot { tickets: tied, stops, step: 0, wait: 0.0, after: 1.0, at: None });
                 commands.spawn((
                     MapOverlay,
                     LotRing,
@@ -220,12 +280,20 @@ fn play_lot(
     spots: Res<MapSpots>,
     time: Res<Time>,
     canvas: Single<Entity, With<Canvas>>,
+    scroll: Res<MapScroll>,
     mut rings: Query<(&mut Node, &mut Visibility), With<LotRing>>,
     sfx: Res<Sfx>,
     mixer: Res<Mixer>,
 ) {
     let Some(mut lot) = lot else { return };
     let dt = time.delta_secs();
+    if let Some(at) = lot.at {
+        let at = scroll.to_stage(at);
+        for (mut node, _) in &mut rings {
+            node.left = px(at.x - 39.0);
+            node.top = px(at.y - 39.0);
+        }
+    }
     if lot.step >= lot.stops.len() {
         lot.after -= dt;
         if lot.after <= 0.0 {
@@ -243,9 +311,11 @@ fn play_lot(
         commands.remove_resource::<MapLot>();
         return;
     };
+    lot.at = Some(at);
+    let shown = scroll.to_stage(at);
     for (mut node, mut vis) in &mut rings {
-        node.left = px(at.x - 39.0);
-        node.top = px(at.y - 39.0);
+        node.left = px(shown.x - 39.0);
+        node.top = px(shown.y - 39.0);
         vis.set_if_neq(Visibility::Inherited);
     }
     lot.step += 1;
@@ -260,7 +330,7 @@ fn play_lot(
     lot.wait = 0.07 + 0.5 / (left as f32 + 1.0).powf(1.2);
 }
 
-fn pulse(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Pulse, &mut Node, &mut BorderColor)>) {
+fn pulse(mut commands: Commands, time: Res<Time>, scroll: Res<MapScroll>, mut q: Query<(Entity, &mut Pulse, &mut Node, &mut BorderColor)>) {
     for (e, mut p, mut node, mut edge) in &mut q {
         p.t += time.delta_secs() / p.life;
         if p.t >= 1.0 {
@@ -269,8 +339,9 @@ fn pulse(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Pul
         }
         let ease = 1.0 - (1.0 - p.t).powi(2);
         let size = p.from + (p.to - p.from) * ease;
-        node.left = px(p.at.x - size / 2.0);
-        node.top = px(p.at.y - size / 2.0);
+        let at = scroll.to_stage(p.at);
+        node.left = px(at.x - size / 2.0);
+        node.top = px(at.y - size / 2.0);
         node.width = px(size);
         node.height = px(size);
         *edge = BorderColor::all(p.color.with_alpha(1.0 - p.t));

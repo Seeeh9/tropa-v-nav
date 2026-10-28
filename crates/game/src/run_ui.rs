@@ -165,17 +165,24 @@ fn party_panel(commands: &mut Commands, root: Entity, run: &Run, me: u8, fonts: 
 
 // ---- map ----
 
+/// A node's place on the map sheet (see `map_party::SHEET_H`), the first floor at the bottom.
 fn map_pos(floor: usize, col: u8) -> Vec2 {
-    // a little off the grid, the same on every machine, so the map looks drawn by hand
-    let h = (floor as u32 * 73 + col as u32 * 151).wrapping_mul(2_654_435_761);
-    let jx = ((h >> 8) % 41) as f32 - 20.0;
-    let jy = ((h >> 20) % 13) as f32 - 6.0;
-    Vec2::new(620.0 + col as f32 * 118.0 + jx, 1010.0 - floor as f32 * 60.0 + jy)
+    // well off the grid, the same on every machine, so the map looks drawn by hand
+    let jx = (hash2(floor as f32, col as f32) - 0.5) * 56.0;
+    let jy = (hash2(col as f32 + 17.0, floor as f32) - 0.5) * 36.0;
+    Vec2::new(620.0 + col as f32 * 118.0 + jx, crate::map_party::SHEET_H - 150.0 - floor as f32 * 118.0 + jy)
+}
+
+/// A number in 0..1 that looks random but is the same for the same two inputs on every machine.
+fn hash2(a: f32, b: f32) -> f32 {
+    ((a * 12.9898 + b * 78.233).sin() * 43_758.547).fract().abs()
 }
 
 const BOSS_POS: Vec2 = Vec2::new(965.0, 96.0);
 /// The ink the map is drawn in, on its parchment.
 const INK: Color = Color::srgb(0.17, 0.11, 0.07);
+/// The parchment's own pale colour.
+const PAPER: Color = Color::srgb(0.93, 0.86, 0.71);
 
 /// A node the party may step to next: it swells and settles, asking to be picked.
 #[derive(Component)]
@@ -208,12 +215,14 @@ fn draw_map(
     art: Res<Art>,
     assets: Res<AssetServer>,
     mut spots: ResMut<crate::map_party::MapSpots>,
+    mut scroll: ResMut<crate::map_party::MapScroll>,
 ) {
     let Some(net) = net else { return };
     let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
     let Stage::Map { votes } = &run.stage else { return };
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::Map, *canvas, theme::SOOT) else { return };
 
+    let here = run.at;
     // the act's forest, dimmed, and the map unrolled over it
     let act = run.act.clamp(1, 3);
     let forest = [format!("map/forest_act{act}"), format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(&assets, s).is_some());
@@ -222,14 +231,40 @@ fn draw_map(
         image.color = Color::srgb(0.32, 0.32, 0.34);
         commands.spawn((image, Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() }, Pickable::IGNORE, ChildOf(root)));
     }
-    let scroll = [format!("map/scroll_act{act}"), "map/scroll".to_string(), "book/parchment".to_string()].into_iter().find(|s| art.image(&assets, s).is_some());
-    let on_parchment = scroll.is_some();
-    if let Some(stem) = scroll {
-        commands.spawn((
-            art.node(&assets, &stem, theme::PEAT),
-            Node { position_type: PositionType::Absolute, left: px(420), top: px(crate::between::BAR_H + 4.0), width: px(1090), height: px(STAGE_H - crate::between::BAR_H - 10.0), ..default() },
+    // the map is a tall sheet seen through the screen below the bar, rolled up and down by the
+    // wheel; on coming to the map it rolls to where the party stands
+    let view_h = STAGE_H - crate::between::BAR_H;
+    let next_y = run.map.floors.get(here.map(|(f, _)| f as usize + 1).unwrap_or(0)).and_then(|f| f.first()).map(|_| map_pos(here.map(|(f, _)| f as usize + 1).unwrap_or(0), 3).y).unwrap_or(BOSS_POS.y);
+    if scroll.fresh {
+        scroll.fresh = false;
+        scroll.target = (next_y - view_h * 0.62).clamp(0.0, crate::map_party::SHEET_H - view_h);
+        scroll.y = scroll.target;
+    }
+    let view = commands
+        .spawn((
+            Node { position_type: PositionType::Absolute, left: px(0), top: px(crate::between::BAR_H), width: px(STAGE_W), height: px(view_h), overflow: Overflow::clip(), ..default() },
             Pickable::IGNORE,
             ChildOf(root),
+        ))
+        .id();
+    let root_sheet = commands
+        .spawn((
+            crate::map_party::MapSheet,
+            Node { position_type: PositionType::Absolute, left: px(0), top: px(-scroll.y), width: px(STAGE_W), height: px(crate::map_party::SHEET_H), ..default() },
+            Pickable::IGNORE,
+            ChildOf(view),
+        ))
+        .id();
+    let paper = [format!("map/sheet_act{act}"), "map/sheet".to_string(), "map/scroll".to_string(), "book/parchment".to_string()].into_iter().find(|s| art.image(&assets, s).is_some());
+    let on_parchment = paper.is_some();
+    if let Some(stem) = paper {
+        let (mut image, _) = art.node(&assets, &stem, theme::PEAT);
+        image.image_mode = NodeImageMode::Stretch;
+        commands.spawn((
+            image,
+            Node { position_type: PositionType::Absolute, left: px(420), top: px(0), width: px(1090), height: px(crate::map_party::SHEET_H), ..default() },
+            Pickable::IGNORE,
+            ChildOf(root_sheet),
         ));
     }
     let icon = |kind: NodeKind| art.image(&assets, &format!("map/{}", format!("{kind:?}").to_lowercase()));
@@ -273,26 +308,33 @@ fn draw_map(
     let line = |commands: &mut Commands, a: Vec2, b: Vec2, lit: bool| {
         let d = b - a;
         let len = d.length();
-        let steps = ((len - 44.0) / 12.0).floor().max(0.0) as i32;
+        let across = Vec2::new(-d.y, d.x) / len.max(1.0);
+        // each path bows its own way and wavers a little along its length
+        let seed = hash2(a.x + b.y * 0.37, a.y + b.x * 0.61);
+        let bow = (seed - 0.5) * 48.0;
+        let steps = ((len - 44.0) / 13.0).floor().max(0.0) as i32;
         let (size, color) = match (lit, on_parchment) {
-            (true, true) => (6.0, INK.with_alpha(0.95)),
-            (false, true) => (5.0, INK.with_alpha(0.62)),
+            (true, true) => (7.0, INK.with_alpha(0.95)),
+            (false, true) => (6.0, INK.with_alpha(0.78)),
             (true, false) => (6.0, theme::BONE.with_alpha(0.85)),
             (false, false) => (4.5, theme::DIM.with_alpha(0.45)),
         };
         for k in 0..=steps {
-            let p = a + d * ((22.0 + k as f32 * 12.0) / len);
+            let s = (22.0 + k as f32 * 13.0) / len;
+            let waver = 3.5 * (s * len / 37.0 + seed * 9.0).sin();
+            let p = a + d * s + across * (bow * (std::f32::consts::PI * s).sin() + waver);
+            // the pen presses harder and lighter
+            let size = size * (0.75 + 0.5 * hash2(k as f32, seed * 100.0));
             commands.spawn((
                 Node { position_type: PositionType::Absolute, left: px(p.x - size / 2.0), top: px(p.y - size / 2.0), width: px(size), height: px(size), border_radius: BorderRadius::MAX, ..default() },
                 BackgroundColor(color),
                 Pickable::IGNORE,
-                ChildOf(root),
+                ChildOf(root_sheet),
             ));
         }
     };
 
     let choices = run.choices();
-    let here = run.at;
     let next_floor = here.map(|(f, _)| f as usize + 1).unwrap_or(0);
     // where each choice sits, for the party's rings and the lot (see `map_party`)
     spots.0 = match run.map.floors.get(next_floor) {
@@ -332,9 +374,10 @@ fn draw_map(
                     ..default()
                 },
                 BorderColor::all(if standing { INK } else { theme::CANDLE.mix(&INK, 0.35) }),
-                BackgroundColor(if choice.is_some() { theme::CANDLE.with_alpha(0.22) } else { Color::NONE }),
+                // a pale wash of paper under every mark, so it stands clear of the map's own drawings
+                BackgroundColor(if choice.is_some() { theme::CANDLE.with_alpha(0.3) } else { PAPER.with_alpha(0.7) }),
                 UiTransform::IDENTITY,
-                ChildOf(root),
+                ChildOf(root_sheet),
             ));
             e.with_child((
                 Node { position_type: PositionType::Absolute, left: percent(8), top: percent(8), width: percent(84), height: percent(84), ..default() },
@@ -342,7 +385,7 @@ fn draw_map(
                 Pickable::IGNORE,
             ));
             if let Some(c) = choice {
-                e.insert((Button, Hovered::default(), Btn(theme::CANDLE.with_alpha(0.22)), Beckon));
+                e.insert((Button, Hovered::default(), Btn(theme::CANDLE.with_alpha(0.3)), Beckon));
                 let mine = party && votes[me as usize] == Some(c);
                 e.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>, net: Option<ResMut<Net>>, mut status: ResMut<NetStatus>| {
                     if mine {
@@ -389,7 +432,7 @@ fn draw_map(
             },
             BackgroundColor(base),
             BorderColor::all(edge),
-            ChildOf(root),
+            ChildOf(root_sheet),
         ));
         if let Some(c) = choice {
             // only the nodes the party can step to are buttons

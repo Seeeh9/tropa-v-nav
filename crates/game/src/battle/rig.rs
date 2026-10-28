@@ -76,7 +76,7 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("heroes/vorozheya", &[(Part::Shield, Vec2::new(0.36, 0.355), 0.8), (Part::Head, Vec2::new(0.46, 0.22), 1.0), (Part::Arm, Vec2::new(0.66, 0.335), -0.7)]),
     ("heroes/volhv", &[(Part::Shield, Vec2::new(0.33, 0.36), 0.8), (Part::Head, Vec2::new(0.47, 0.18), 0.9), (Part::Arm, Vec2::new(0.635, 0.37), -0.45)]),
     ("heroes/volkolak", &[(Part::Shield, Vec2::new(0.70, 0.43), 0.8), (Part::Head, Vec2::new(0.58, 0.24), 1.0), (Part::Arm, Vec2::new(0.29, 0.42), 1.0)]),
-    ("heroes/volkolak_beast", &[(Part::Head, Vec2::new(0.69, 0.22), 1.2)]),
+    ("heroes/volkolak_beast", &[(Part::Shield, Vec2::new(0.265, 0.30), 0.8), (Part::Head, Vec2::new(0.70, 0.24), 1.2), (Part::Arm, Vec2::new(0.654, 0.36), 1.0)]),
     ("heroes/skomoroh", &[(Part::Shield, Vec2::new(0.69, 0.44), 0.8), (Part::Head, Vec2::new(0.57, 0.22), 1.0), (Part::Arm, Vec2::new(0.20, 0.37), 0.8)]),
     ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
     ("enemies/death_duck", &[(Part::Head, Vec2::new(0.27, 0.74), 0.8)]),

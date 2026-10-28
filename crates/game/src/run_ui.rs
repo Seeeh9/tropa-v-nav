@@ -166,7 +166,11 @@ fn party_panel(commands: &mut Commands, root: Entity, run: &Run, me: u8, fonts: 
 // ---- map ----
 
 fn map_pos(floor: usize, col: u8) -> Vec2 {
-    Vec2::new(560.0 + col as f32 * 135.0, 1000.0 - floor as f32 * 58.0)
+    // a little off the grid, the same on every machine, so the map looks drawn by hand
+    let h = (floor as u32 * 73 + col as u32 * 151).wrapping_mul(2_654_435_761);
+    let jx = ((h >> 8) % 41) as f32 - 20.0;
+    let jy = ((h >> 20) % 13) as f32 - 6.0;
+    Vec2::new(620.0 + col as f32 * 118.0 + jx, 1010.0 - floor as f32 * 60.0 + jy)
 }
 
 const BOSS_POS: Vec2 = Vec2::new(965.0, 96.0);
@@ -186,7 +190,11 @@ fn beckon(time: Res<Time>, mut q: Query<&mut UiTransform, With<Beckon>>) {
 
 /// The ink colour a kind of place is drawn in on the map.
 fn node_ink(kind: NodeKind) -> Color {
-    node_color(kind).mix(&INK, 0.45)
+    match kind {
+        // the fire's own orange is lost on yellow parchment: a burnt red-brown reads
+        NodeKind::Rest => Color::srgb(0.60, 0.22, 0.06),
+        _ => node_color(kind).mix(&INK, 0.45),
+    }
 }
 
 fn draw_map(
@@ -268,7 +276,7 @@ fn draw_map(
         let steps = ((len - 44.0) / 12.0).floor().max(0.0) as i32;
         let (size, color) = match (lit, on_parchment) {
             (true, true) => (6.0, INK.with_alpha(0.95)),
-            (false, true) => (4.5, INK.with_alpha(0.5)),
+            (false, true) => (5.0, INK.with_alpha(0.62)),
             (true, false) => (6.0, theme::BONE.with_alpha(0.85)),
             (false, false) => (4.5, theme::DIM.with_alpha(0.45)),
         };
@@ -311,7 +319,7 @@ fn draw_map(
         if let Some(h) = icon(kind) {
             // drawn in ink: places behind fade, the one the party stands on is ringed
             let ink = if passed { node_ink(kind).with_alpha(0.35) } else { node_ink(kind) };
-            let side = size * if kind == NodeKind::Boss { 1.7 } else { 1.3 };
+            let side = size * if kind == NodeKind::Boss { 1.7 } else { 1.12 };
             let mut e = commands.spawn((
                 Node {
                     position_type: PositionType::Absolute,
@@ -1091,6 +1099,8 @@ fn draw_end(
     canvas: Single<Entity, With<Canvas>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
 ) {
     let Some(mut net) = net else { return };
     let me = net.node.my_slot();
@@ -1106,6 +1116,8 @@ fn draw_end(
         status.run_dirty = true;
     }
     let Some(root) = redraw(&mut commands, &mut status, &old, AppState::RunEnd, *canvas, theme::SOOT) else { return };
+    // the far shore of the black river, or dawn over the forest
+    commands.spawn((crate::menu::backdrop(&art, &assets, if won { "bg/end_victory" } else { "bg/end_defeat" }, 0.6), ChildOf(root)));
     let heroes = run.players.iter().map(|p| l10n.t(&format!("hero-{}", p.hero))).collect::<Vec<_>>().join(", ");
     commands.spawn((
         Node {

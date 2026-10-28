@@ -453,3 +453,14 @@ settings-voice-lang-1 = Old Russian
 settings-voice-lang-2 = Russian
 settings-voice-lang-3 = English
 battle-blocked = Blocked!
+
+hero-bogatyr-desc = The party's shield. Takes the blows meant for others, gathers Valor from the damage he soaks and spends it on crushing finishers.
+hero-vorozheya-desc = Lays curses: Rot, Evil Eye and Muted. Her Echo cards devour the foe's curses for power.
+hero-volhv-desc = Carves runes on himself and his allies: thunder, frost and mist. Runes fire every turn, and an invocation wakes them all at once.
+hero-volkolak-desc = Lives by the Moon. As a man he is quick and hard to hit, as a beast he tears the foe apart; when he turns, his whole hand flips.
+hero-znaharka-desc = Gathers herbs in her Cauldron and brews them by recipe: healing the party, poisoning foes, steeling allies.
+hero-skomoroh-desc = Wears the masks of Bear, Goat and Mara, confuses the enemy and echoes the cards of others. Strongest beside the party.
+lobby-pick = Choose a hero by the fire
+lobby-hp = Health { $n }
+lobby-relic = Starting relic
+lobby-taken = { $name }'s

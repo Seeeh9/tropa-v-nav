@@ -38,6 +38,13 @@ fn screen(state: AppState, stage: Entity) -> impl Bundle {
     )
 }
 
+/// A painting behind a whole screen, darkened by `shade` (1 = as painted) so text reads over it.
+pub fn backdrop(art: &Art, assets: &AssetServer, stem: &str, shade: f32) -> impl Bundle {
+    let (mut image, _) = art.node(assets, stem, theme::SOOT);
+    image.color = Color::srgb(shade, shade, shade);
+    (image, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: px(STAGE_W), height: px(STAGE_H), ..default() }, Pickable::IGNORE)
+}
+
 pub fn menu_button(label: String, fonts: &Fonts) -> impl Bundle {
     (
         Button,
@@ -52,7 +59,7 @@ pub fn menu_button(label: String, fonts: &Fonts) -> impl Bundle {
         },
         BackgroundColor(theme::PEAT),
         BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
-        children![theme::text(label, &fonts.title, 32.0, theme::BONE)],
+        children![(theme::text(label, &fonts.title, 32.0, theme::BONE), TextLayout::justify(Justify::Center))],
     )
 }
 
@@ -163,7 +170,15 @@ pub fn apply_settings(
     }
 }
 
-fn enter_settings(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, profile: Res<crate::profile::Profile>) {
+fn enter_settings(
+    mut commands: Commands,
+    stage: Single<Entity, With<Stage>>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+    profile: Res<crate::profile::Profile>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+) {
     use crate::profile::{Profile, Settings};
     let s = profile.settings;
     let on_off = |v: bool| l10n.t(if v { "settings-on" } else { "settings-off" });
@@ -179,6 +194,7 @@ fn enter_settings(mut commands: Commands, stage: Single<Entity, With<Stage>>, fo
         (format!("{}: {}", l10n.t("settings-sfx"), pct(s.sfx)), |s| s.sfx = if s.sfx >= 0.95 { 0.0 } else { (s.sfx + 0.2).min(1.0) }),
         (format!("{}: {}", l10n.t("settings-voice-lang"), l10n.t(&format!("settings-voice-lang-{}", s.voice_lang.min(3)))), |s| s.voice_lang = (s.voice_lang.min(3) + 1) % 4),
     ];
+    commands.spawn((DespawnOnExit(AppState::Settings), backdrop(&art, &assets, "bg/menu", 0.45), ChildOf(*stage)));
     commands.spawn(screen(AppState::Settings, *stage)).with_children(|p| {
         p.spawn(theme::text(l10n.t("menu-settings"), &fonts.title, 72.0, theme::BONE));
         for (label, change) in rows {
@@ -286,8 +302,18 @@ fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fon
 }
 
 /// The graveyard's chronicle: every enemy in the game, named once met, and the last runs.
-fn enter_chronicle(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, profile: Res<crate::profile::Profile>, db: Res<Db>) {
+fn enter_chronicle(
+    mut commands: Commands,
+    stage: Single<Entity, With<Stage>>,
+    fonts: Res<Fonts>,
+    l10n: Res<L10n>,
+    profile: Res<crate::profile::Profile>,
+    db: Res<Db>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+) {
     let met = db.0.enemies.keys().filter(|id| profile.bestiary.contains_key(*id)).count();
+    commands.spawn((DespawnOnExit(AppState::Chronicle), backdrop(&art, &assets, "bg/chronicle", 0.55), ChildOf(*stage)));
     commands.spawn(screen(AppState::Chronicle, *stage)).with_children(|p| {
         p.spawn(theme::text(l10n.t("chronicle-title"), &fonts.title, 56.0, theme::BONE));
         p.spawn(theme::text(
@@ -296,13 +322,31 @@ fn enter_chronicle(mut commands: Commands, stage: Single<Entity, With<Stage>>, f
             22.0,
             theme::CANDLE,
         ));
-        p.spawn(Node { width: px(1640), flex_wrap: FlexWrap::Wrap, column_gap: px(20), row_gap: px(4), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
-            for (id, def) in &db.0.enemies {
-                let (label, color) = match profile.bestiary.get(id) {
-                    Some(n) => (format!("{}  ·  HP {}  ·  ×{n}", l10n.t(&format!("enemy-{id}")), def.hp.1), theme::BONE),
-                    None => ("? ? ?".to_string(), theme::DIM),
+        // every enemy by its picture: the ones never met only as a black shape
+        p.spawn((
+            Node { width: px(1780), flex_wrap: FlexWrap::Wrap, column_gap: px(6), row_gap: px(6), justify_content: JustifyContent::Center, ..default() },
+            Pickable::IGNORE,
+        ))
+        .with_children(|grid| {
+            for id in db.0.enemies.keys() {
+                let seen = profile.bestiary.get(id);
+                let (mut face, _) = art.node(&assets, &format!("enemies/{id}"), theme::PEAT);
+                face.color = if seen.is_some() { Color::WHITE } else { Color::srgba(0.0, 0.0, 0.0, 0.85) };
+                let label = match seen {
+                    Some(n) => format!("{}  ×{n}", l10n.t(&format!("enemy-{id}"))),
+                    None => "? ? ?".to_string(),
                 };
-                grid.spawn((theme::text(label, &fonts.body, 18.0, color), Node { width: px(390), ..default() }));
+                grid.spawn((
+                    theme::panel_edged(
+                        Node { width: px(120), height: px(108), border: UiRect::all(px(2)), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(px(3)), ..default() },
+                        if seen.is_some() { Color::srgb(0.42, 0.33, 0.22) } else { Color::srgb(0.2, 0.17, 0.14) },
+                    ),
+                    Pickable::IGNORE,
+                ))
+                .with_children(|cell| {
+                    cell.spawn((face, Node { width: px(76), height: px(76), ..default() }, Pickable::IGNORE));
+                    cell.spawn((theme::text(label, &fonts.body, 13.0, if seen.is_some() { theme::BONE } else { theme::DIM }), TextLayout::justify(Justify::Center)));
+                });
             }
         });
         p.spawn(theme::text(
@@ -312,8 +356,8 @@ fn enter_chronicle(mut commands: Commands, stage: Single<Entity, With<Stage>>, f
             theme::CANDLE,
         ));
         p.spawn(Node { width: px(1640), flex_wrap: FlexWrap::Wrap, column_gap: px(20), row_gap: px(4), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
-            // newest first; twelve fit on the page
-            for r in profile.history.iter().rev().take(12) {
+            // newest first; six fit on the page under the faces
+            for r in profile.history.iter().rev().take(6) {
                 let key = if r.won { "chronicle-won" } else { "chronicle-fell" };
                 let line = l10n.tf(key, &[("hero", l10n.t(&format!("hero-{}", r.hero)).into()), ("act", (r.act as i32).into()), ("floors", (r.floors as i32).into()), ("circle", (r.circle as i32).into())]);
                 grid.spawn((theme::text(line, &fonts.body, 18.0, if r.won { theme::ROTLIGHT } else { theme::BONE }), Node { width: px(530), ..default() }));

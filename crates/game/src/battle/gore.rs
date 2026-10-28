@@ -10,6 +10,7 @@ use std::f32::consts::FRAC_PI_2;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Blows>()
+        .add_systems(Update, play_frames.run_if(in_state(AppState::Battle)))
         .add_systems(Startup, |mut commands: Commands, assets: Res<AssetServer>| commands.insert_resource(BloodArt::load(&assets))).add_systems(OnEnter(AppState::Battle), |mut b: ResMut<Blows>| b.0.clear()).add_systems(Update, (fall, fly_gibs, bleed).chain().after(dying).run_if(in_state(AppState::Battle)));
 }
 
@@ -110,6 +111,53 @@ pub(super) struct BloodArt {
     pub smear: Handle<Image>,
     /// Photographed dust (Flow): wisps and low clouds.
     pub dust: Vec<Handle<Image>>,
+    /// Frame by frame (Flow sprite sheets): a jet out of a wound, a splash off a blow, a pool
+    /// spreading on the ground.
+    pub spurt: Vec<Handle<Image>>,
+    pub splash: Vec<Handle<Image>>,
+    pub pool: Vec<Handle<Image>>,
+}
+
+/// A blood effect played frame by frame; a pool keeps its last frame, the rest are gone after.
+#[derive(Component)]
+pub(super) struct Frames {
+    frames: Vec<Handle<Image>>,
+    t: f32,
+    fps: f32,
+    keep: bool,
+}
+
+/// Spawns a frame-by-frame effect, `size` stage pixels, its anchor (0..1 of the frame, e.g. the
+/// bottom middle for a jet) at `at`, turned by `angle`, under `parent`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn play(commands: &mut Commands, parent: Entity, frames: &[Handle<Image>], at: Vec2, size: Vec2, anchor: Vec2, angle: f32, color: Color, fps: f32, keep: bool, flip: bool) {
+    let Some(first) = frames.first() else { return };
+    commands.spawn((
+        Frames { frames: frames.to_vec(), t: 0.0, fps, keep },
+        ImageNode { color, flip_x: flip, ..ImageNode::new(first.clone()) },
+        Node { position_type: PositionType::Absolute, left: px(at.x - size.x * anchor.x), top: px(at.y - size.y * anchor.y), width: px(size.x), height: px(size.y), ..default() },
+        UiTransform { rotation: Rot2::radians(angle), ..default() },
+        Pickable::IGNORE,
+        ChildOf(parent),
+    ));
+}
+
+fn play_frames(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Frames, &mut ImageNode)>) {
+    for (e, mut f, mut image) in &mut q {
+        f.t += time.delta_secs();
+        let k = (f.t * f.fps) as usize;
+        if k >= f.frames.len() {
+            if f.keep {
+                commands.entity(e).remove::<Frames>();
+            } else {
+                commands.entity(e).despawn();
+            }
+            continue;
+        }
+        if image.image != f.frames[k] {
+            image.image = f.frames[k].clone();
+        }
+    }
 }
 
 impl BloodArt {
@@ -120,6 +168,9 @@ impl BloodArt {
             splashes: many("splash", 7),
             big: ["splat_a", "pool", "dried", "spray", "smear", "smear"].iter().map(|s| assets.load(format!("blood/{s}.png"))).collect(),
             smear: assets.load("blood/smear.png"),
+            spurt: (0..8).map(|i| assets.load(format!("blood/anim/spurt_{i}.png"))).collect(),
+            splash: (0..8).map(|i| assets.load(format!("blood/anim/splash_{i}.png"))).collect(),
+            pool: (0..8).map(|i| assets.load(format!("blood/anim/pool_{i}.png"))).collect(),
             dust: (0..6).map(|i| assets.load(format!("fx/wisp_{i}.png"))).chain(["fx/dust_low.png", "fx/dust_drift.png"].map(|p| assets.load(p))).collect(),
         }
     }
@@ -156,6 +207,8 @@ pub(super) fn strike_down(
     images: &Assets<Image>,
     float_layer: Entity,
     corpse_layer: Entity,
+    stain_layer: Entity,
+    art: &BloodArt,
     lying: Option<Handle<Image>>,
     lying_headless: Option<Handle<Image>>,
     seed: u32,
@@ -207,6 +260,9 @@ pub(super) fn strike_down(
             .id()
     });
     let swaps = lying.is_some();
+    // blood spreads out from under the body as it lies, the more if it was cut to pieces
+    let wide = draw.y * if flying.contains(&true) { 1.3 } else { 0.9 };
+    play(commands, stain_layer, &art.pool, foot + Vec2::new(side * draw.y * 0.25, 8.0), Vec2::new(wide, wide * 0.36), Vec2::splat(0.5), 0.0, blood.with_alpha(0.9), 3.0, true, side < 0.0);
     // the dead lie behind the living
     commands.entity(widget).insert((Corpse { t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying }, ZIndex(0)));
     for (k, (part, joint, picture, skin)) in parts.into_iter().enumerate() {
@@ -408,6 +464,8 @@ fn bleed(
     corpses: Query<(&Corpse, &UiGlobalTransform, &ComputedNode)>,
     mut bleeders: Query<(Entity, &mut Bleeder)>,
     scale: Res<UiScale>,
+    art: Res<BloodArt>,
+    float_layer: Single<Entity, With<FloatLayer>>,
 ) {
     let dt = time.delta_secs();
     for (e, mut b) in &mut bleeders {
@@ -434,6 +492,11 @@ fn bleed(
         let beat = 0.42;
         let force = if spurting { b.strength * (1.0 - b.t / 2.4) } else { 0.15 * b.strength * (1.0 - (b.t - 2.0) / (b.life - 2.0)) };
         bursts.0.push(fx::Burst::Spurt { at, dir, force, blood: b.color, ground: corpse.ground.y });
+        // a strong beat throws a jet out of the wound, drawn frame by frame
+        if spurting && force > 0.25 {
+            let h = 120.0 + 160.0 * force;
+            play(&mut commands, *float_layer, &art.spurt, at, Vec2::new(h * 0.33, h), Vec2::new(0.1, 1.0), dir.x.atan2(-dir.y), b.color, 16.0, false, dir.x < 0.0);
+        }
         b.due = if spurting { beat } else { 0.25 };
     }
 }

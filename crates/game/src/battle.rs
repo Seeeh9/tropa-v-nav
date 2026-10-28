@@ -1039,7 +1039,8 @@ fn dying(
     images: Res<Assets<Image>>,
     rigs: Res<Assets<rig::RigMaterial>>,
     float_layer: Single<Entity, With<FloatLayer>>,
-    corpse_layer: Single<Entity, With<gore::CorpseLayer>>,
+    layers: (Single<Entity, With<gore::CorpseLayer>>, Single<Entity, With<gore::StainLayer>>),
+    blood_art: Res<gore::BloodArt>,
     art: Res<Art>,
     assets: Res<AssetServer>,
     mut q: Query<(Entity, &mut Dying, &Children, Option<&UnitWidget>)>,
@@ -1089,7 +1090,7 @@ fn dying(
                 .wrapping_add(lost * 104_729);
                 let lying = art.image(&assets, &format!("{stem}_dead"));
                 let headless = art.image(&assets, &format!("{stem}_dead_headless"));
-                let swaps = gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *corpse_layer, lying, headless, seed, weight);
+                let swaps = gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *layers.0, *layers.1, &blood_art, lying, headless, seed, weight);
                 for c in children.iter() {
                     if let Ok((mut s, _)) = sprites.get_mut(c) {
                         s.vanish = swaps;

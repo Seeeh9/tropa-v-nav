@@ -82,10 +82,13 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
         }
         e.insert(p);
     };
+    let mut splashes: Vec<(Vec2, f32, Color, f32)> = Vec::new();
     for (k, b) in bursts.0.drain(..).enumerate() {
         let r = |i: u32| scatter(seed.wrapping_add(k as u32 * 977), i);
         match b {
             Burst::Wound { at, dir, weight, blood, ground } => {
+                // the splash off the blow, frame by frame, thrown away from the attacker
+                splashes.push((at, 140.0 + 160.0 * weight, blood, dir));
                 // the slash: one long white-hot stroke across the body
                 let angle = -0.6 + 0.35 * r(0);
                 spawn(Particle { at, vel: Vec2::from_angle(angle) * 900.0 * dir, fall: 0.0, drag: 9.0, life: 0.0, ttl: 0.22, size: 10.0 + 6.0 * weight, grow: -0.6, color: Color::srgb(1.0, 0.97, 0.88), streak: 24.0, land: None, dust: false });
@@ -199,6 +202,10 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                 }
             }
         }
+    }
+    // the splash off each blow, frame by frame, thrown away from the attacker
+    for (at, s, blood, dir) in splashes {
+        gore::play(&mut commands, *layer, &art.splash, at, Vec2::new(s, s * 1.5), Vec2::new(0.15, 0.5), 0.0, blood, 18.0, false, dir < 0.0);
     }
 }
 

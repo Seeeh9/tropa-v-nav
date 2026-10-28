@@ -79,6 +79,7 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("heroes/volkolak_beast", &[(Part::Head, Vec2::new(0.69, 0.22), 1.2)]),
     ("heroes/skomoroh", &[(Part::Shield, Vec2::new(0.69, 0.44), 0.8), (Part::Head, Vec2::new(0.57, 0.22), 1.0), (Part::Arm, Vec2::new(0.20, 0.37), 0.8)]),
     ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
+    ("enemies/anchutka", &[(Part::Head, Vec2::new(0.53, 0.44), 1.0), (Part::Shield, Vec2::new(0.70, 0.22), -0.8), (Part::Arm, Vec2::new(0.32, 0.14), 0.8)]),
     ("enemies/poloz", &[(Part::Head, Vec2::new(0.55, 0.47), 0.7)]),
     ("enemies/sirin", &[(Part::Head, Vec2::new(0.42, 0.28), 1.0), (Part::Shield, Vec2::new(0.60, 0.30), -0.8), (Part::Arm, Vec2::new(0.36, 0.30), 0.8)]),
     ("enemies/koschei_shadow", &[(Part::Head, Vec2::new(0.440, 0.223), 1.0), (Part::Shield, Vec2::new(0.551, 0.417), 0.8), (Part::Arm, Vec2::new(0.337, 0.457), 1.0)]),

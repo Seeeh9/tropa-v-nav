@@ -15,7 +15,9 @@ pub(super) struct Bursts(pub Vec<Burst>);
 
 pub(super) enum Burst {
     /// A blow drawing blood at `at`, coming from the side `dir` points away from; `weight` 0..1.
-    Wound { at: Vec2, dir: f32, weight: f32, blood: Color },
+    Wound { at: Vec2, dir: f32, weight: f32, blood: Color, ground: f32 },
+    /// Blood pumped out of a wound at `at` along `dir`, with `force` 0..1; it lands at `ground`.
+    Spurt { at: Vec2, dir: Vec2, force: f32, blood: Color, ground: f32 },
     /// A blow stopped by a shield at `at`.
     Sparks { at: Vec2, dir: f32, weight: f32 },
     /// Feet pushing off the ground.
@@ -42,10 +44,12 @@ struct Particle {
     color: Color,
     /// Drawn stretched along its flight, this many times longer than wide.
     streak: f32,
+    /// A drop that stays where it falls: the ground's height, and the stain's colour.
+    land: Option<(f32, Color)>,
 }
 
 /// A cheap repeatable scatter, so no random source is needed.
-fn scatter(seed: u32, i: u32) -> f32 {
+pub(super) fn scatter(seed: u32, i: u32) -> f32 {
     let x = (seed.wrapping_mul(747_796_405).wrapping_add(i.wrapping_mul(2_891_336_453))) ^ 0x9E37_79B9;
     let x = (x ^ (x >> 15)).wrapping_mul(2_246_822_519);
     ((x ^ (x >> 13)) & 0xFFFF) as f32 / 65_535.0
@@ -67,10 +71,10 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
     for (k, b) in bursts.0.drain(..).enumerate() {
         let r = |i: u32| scatter(seed.wrapping_add(k as u32 * 977), i);
         match b {
-            Burst::Wound { at, dir, weight, blood } => {
+            Burst::Wound { at, dir, weight, blood, ground } => {
                 // the slash: one long white-hot stroke across the body
                 let angle = -0.6 + 0.35 * r(0);
-                spawn(Particle { at, vel: Vec2::from_angle(angle) * 900.0 * dir, fall: 0.0, drag: 9.0, life: 0.0, ttl: 0.22, size: 10.0 + 6.0 * weight, grow: -0.6, color: Color::srgb(1.0, 0.97, 0.88), streak: 24.0 });
+                spawn(Particle { at, vel: Vec2::from_angle(angle) * 900.0 * dir, fall: 0.0, drag: 9.0, life: 0.0, ttl: 0.22, size: 10.0 + 6.0 * weight, grow: -0.6, color: Color::srgb(1.0, 0.97, 0.88), streak: 24.0, land: None });
                 let n = 8 + (weight * 26.0) as u32;
                 for i in 0..n {
                     let a = (r(i * 3 + 1) - 0.5) * 1.9 - 0.35;
@@ -86,6 +90,28 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         grow: -0.4,
                         color: blood.mix(&Color::BLACK, 0.3 * r(i * 3 + 7)),
                         streak: 2.2,
+                        // most of it reaches the ground, some way in front of or behind the feet
+                        land: (r(i * 3 + 8) < 0.8).then_some((ground + (r(i * 3 + 9) - 0.35) * 70.0, blood)),
+                    });
+                }
+            }
+            Burst::Spurt { at, dir, force, blood, ground } => {
+                let n = 3 + (force * 14.0) as u32;
+                for i in 0..n {
+                    let a = (r(i * 3) - 0.5) * 0.5;
+                    let d = Vec2::from_angle(a).rotate(dir);
+                    spawn(Particle {
+                        at: at + Vec2::new((r(i * 3 + 1) - 0.5) * 8.0, 0.0),
+                        vel: d * (120.0 + 520.0 * force * (0.6 + 0.4 * r(i * 3 + 2))),
+                        fall: 1700.0,
+                        drag: 0.6,
+                        life: 0.0,
+                        ttl: 2.5,
+                        size: 4.0 + 6.0 * r(i * 3 + 4) * (0.5 + force),
+                        grow: -0.1,
+                        color: blood.mix(&Color::BLACK, 0.2 * r(i * 3 + 5)),
+                        streak: 2.5,
+                        land: Some((ground + (r(i * 3 + 6) - 0.4) * 40.0, blood)),
                     });
                 }
             }
@@ -104,7 +130,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 4.0 + 3.0 * r(i * 2 + 3),
                         grow: -0.7,
                         color: Color::srgb(0.85, 0.95, 1.0).mix(&Color::srgb(1.0, 0.85, 0.5), r(i * 2 + 5)),
-                        streak: 5.0,
+                        streak: 5.0, land: None,
                     });
                 }
             }
@@ -120,7 +146,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 22.0 + 20.0 * r(i + 31),
                         grow: 1.4,
                         color: Color::srgba(0.45, 0.38, 0.28, 0.35),
-                        streak: 1.0,
+                        streak: 1.0, land: None,
                     });
                 }
             }
@@ -136,7 +162,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 6.0 + 7.0 * r(i + 51),
                         grow: -0.5,
                         color: color.with_alpha(0.9),
-                        streak: 1.0,
+                        streak: 1.0, land: None,
                     });
                 }
             }
@@ -152,7 +178,7 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                         size: 30.0 + 30.0 * r(i + 51),
                         grow: 1.2,
                         color: color.with_alpha(0.32),
-                        streak: 1.0,
+                        streak: 1.0, land: None,
                     });
                 }
             }
@@ -160,9 +186,25 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
     }
 }
 
-fn fly(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Particle, &mut Node, &mut UiTransform, &mut BackgroundColor)>) {
+fn fly(
+    mut commands: Commands,
+    time: Res<Time>,
+    stains: Option<Single<Entity, With<gore::StainLayer>>>,
+    mut q: Query<(Entity, &mut Particle, &mut Node, &mut UiTransform, &mut BackgroundColor)>,
+) {
     let dt = time.delta_secs();
     for (e, mut p, mut node, mut tf, mut bg) in &mut q {
+        // a drop reaching the ground stays there as a stain
+        if let Some((ground, color)) = p.land {
+            if p.vel.y > 0.0 && p.at.y >= ground {
+                if let Some(layer) = stains.as_deref() {
+                    let seed = (p.at.x * 7.0 + p.at.y * 13.0) as u32;
+                    gore::stain(&mut commands, *layer, Vec2::new(p.at.x, ground), p.size * (0.8 + p.vel.length() / 900.0), color, seed);
+                }
+                commands.entity(e).despawn();
+                continue;
+            }
+        }
         p.life += dt;
         if p.life >= p.ttl {
             commands.entity(e).despawn();
@@ -184,7 +226,8 @@ fn fly(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Parti
         let stretch = 1.0 + (p.streak - 1.0) * (speed / 600.0).min(1.0);
         tf.rotation = Rot2::radians(p.vel.y.atan2(p.vel.x));
         tf.scale = Vec2::new(stretch, 1.0 / stretch.sqrt());
-        let a = p.color.alpha() * (1.0 - k * k);
+        // a drop that will land does not fade on the way
+        let a = if p.land.is_some() { p.color.alpha() } else { p.color.alpha() * (1.0 - k * k) };
         bg.0 = p.color.with_alpha(a);
     }
 }

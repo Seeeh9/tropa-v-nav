@@ -272,6 +272,12 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
                 if let Some(run) = n.state.as_mut() {
                     run.force_fight(db, &enemies);
+                    // TROPA_FOE_HP=5 leaves every foe that weak, to watch them die
+                    if let (Some(hp), Some(c)) = (std::env::var("TROPA_FOE_HP").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
+                        for e in &mut c.enemies {
+                            e.hp = e.hp.min(hp);
+                        }
+                    }
                     // TROPA_ACT=2 puts that fight on another act's backdrop
                     if let Some(act) = std::env::var("TROPA_ACT").ok().and_then(|a| a.parse().ok()) {
                         run.act = act;

@@ -70,7 +70,7 @@ impl Part {
 /// Figures cut into parts: the art stem, and each part with its joint on the picture and how
 /// strongly (and which way) it follows its turn, in the order they are laid over the body. An
 /// arm held up (a staff, a hand raised to curse) turns the other way from one hanging down.
-type Cut = (Part, Vec2, f32);
+pub(super) type Cut = (Part, Vec2, f32);
 const FIGURES: &[(&str, &[Cut])] = &[
     ("heroes/bogatyr", &[(Part::Head, Vec2::new(0.52, 0.15), 1.0), (Part::Shield, Vec2::new(0.68, 0.30), 1.0), (Part::Arm, Vec2::new(0.275, 0.42), 1.0)]),
     ("heroes/vorozheya", &[(Part::Shield, Vec2::new(0.36, 0.355), 0.8), (Part::Head, Vec2::new(0.46, 0.22), 1.0), (Part::Arm, Vec2::new(0.66, 0.335), -0.7)]),
@@ -88,6 +88,11 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("enemies/mara", &[(Part::Head, Vec2::new(0.54, 0.22), 1.0), (Part::Shield, Vec2::new(0.58, 0.45), 0.8), (Part::Arm, Vec2::new(0.32, 0.42), -0.5)]),
     ("enemies/poludnitsa", &[(Part::Head, Vec2::new(0.464, 0.219), 1.0), (Part::Shield, Vec2::new(0.387, 0.406), 0.8), (Part::Arm, Vec2::new(0.545, 0.406), 1.0)]),
 ];
+
+/// The parts `stem` is cut into, with their joints.
+pub(super) fn cuts_of(stem: &str) -> &'static [Cut] {
+    FIGURES.iter().find(|(s, _)| *s == stem).map(|(_, c)| *c).unwrap_or(&[])
+}
 
 /// Whether `stem` is a figure cut into parts (its blows take longer: a weapon is swung).
 pub(super) fn is_cut(stem: &str) -> bool {

@@ -32,13 +32,14 @@ const DYING: f32 = 1.1;
 
 mod aim;
 mod fx;
+mod gore;
 mod impact;
 mod piles;
 mod rig;
 mod status_row;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((aim::plugin, fx::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
+    app.add_plugins((aim::plugin, fx::plugin, gore::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -121,8 +122,10 @@ struct UnitSprite {
     anim: Option<(Anim, f32)>,
     /// Drawn height, so a stretch can be taken from the feet and not from the middle.
     height: f32,
-    /// How much of a dying unit is still there: 1 alive, 0 gone.
+    /// How much of a dying unit is still there: 1 alive, 0 fallen.
     alive: f32,
+    /// Drawn size of the picture.
+    draw: Vec2,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -384,6 +387,8 @@ fn enter(
                     Pickable::IGNORE,
                 ));
             }
+            // blood soaks into the ground under everyone
+            p.spawn((gore::StainLayer, layer(), Pickable::IGNORE));
             p.spawn((UnitLayer, layer(), Pickable::IGNORE));
 
             // party panel, top-left
@@ -696,7 +701,7 @@ fn sync_units(
                     None => (rig::skin(&mut rigs, picture, base, draw, is_hero, None), Vec::new()),
                 };
                 u.spawn((
-                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y, alive: 1.0 },
+                    UnitSprite { unit, base, stem: stem.clone(), t: if is_hero { 0.0 } else { 1.3 }, anim: None, height: draw.y, alive: 1.0, draw },
                     {
                         Node {
                             width: px(draw.x),
@@ -989,18 +994,17 @@ fn animate_sprites(
             }
         }
         if s.alive < 1.0 {
-            // dying: the body gives at the knees and falls back, greying, and is gone
+            // dying: the body gives at the knees and goes over (see `gore`), and stays
             let k = 1.0 - s.alive;
-            pose.lean = -0.22 * k * k;
-            pose.squash = 1.0 - 0.3 * k;
+            pose.lean = -0.12 * k * k;
+            pose.squash = 1.0 - 0.08 * k;
             pose.swing = 0.7 * k;
             pose.nod = -0.45 * k;
             pose.guard = 0.5 * k;
             pose.sway = 0.0;
             pose.wave = 0.01 * (1.0 - k);
             offset.x -= toward * 30.0 * k;
-            tint = tint.mix(&Color::srgb(0.45, 0.5, 0.45), k);
-            pose.fade = (s.alive * 1.6).min(1.0);
+            tint = tint.mix(&Color::srgb(0.42, 0.42, 0.42), 0.55 * k);
         }
         // a transform stretches about the middle: lift by as much as the stretch lowers the feet,
         // so they stay on the ground through every breath
@@ -1014,17 +1018,72 @@ fn animate_sprites(
     }
 }
 
-fn dying(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Dying, &Children)>, mut sprites: Query<&mut UnitSprite>) {
-    for (entity, mut d, children) in &mut q {
+/// A unit killed: its parts struck off and its body toppled (see `gore`); the body is no longer
+/// a unit (it cannot be aimed at, and its bars go) but lies where it fell until the fight ends.
+#[allow(clippy::too_many_arguments)]
+fn dying(
+    mut commands: Commands,
+    time: Res<Time>,
+    session: Res<Session>,
+    comfort: Res<Comfort>,
+    images: Res<Assets<Image>>,
+    rigs: Res<Assets<rig::RigMaterial>>,
+    float_layer: Single<Entity, With<FloatLayer>>,
+    mut q: Query<(Entity, &mut Dying, &Children, Option<&UnitWidget>)>,
+    mut sprites: Query<(&mut UnitSprite, &Children)>,
+    skins: Query<(Entity, &rig::RigSkin, &MaterialNode<rig::RigMaterial>)>,
+    mut others: Query<&mut Visibility, Without<rig::RigSkin>>,
+    blows: Res<gore::Blows>,
+) {
+    for (entity, mut d, children, widget) in &mut q {
+        if let Some(w) = widget {
+            let (unit, origin) = (w.unit, w.pos);
+            commands.entity(entity).remove::<(UnitWidget, Hovered)>().insert(Pickable::IGNORE);
+            let mut parts = Vec::new();
+            let mut draw = ENEMY_SIZE;
+            for c in children.iter() {
+                match sprites.get(c) {
+                    Ok((s, skin_children)) => {
+                        draw = s.draw;
+                        let cuts = rig::cuts_of(&s.stem);
+                        for (skin, part, material) in skins.iter_many(skin_children).flatten() {
+                            let (Some(part), Some(m)) = (part.part, rigs.get(&material.0)) else { continue };
+                            if let Some(joint) = cuts.iter().find(|(p, ..)| *p == part).map(|(_, j, _)| *j) {
+                                parts.push((part, joint, m.picture.clone(), skin));
+                            }
+                        }
+                    }
+                    // the bars, the name and the shadow go with the life
+                    Err(_) => {
+                        if let Ok(mut v) = others.get_mut(c) {
+                            *v = Visibility::Hidden;
+                        }
+                    }
+                }
+            }
+            if let Some((foot, _)) = unit_place(&session.shown, unit) {
+                let blood = gore::blood_of(&comfort, &session.shown, unit);
+                // drawn from what every player's game knows alike (who died, by how hard a
+                // blow), so the same parts fly the same way on every screen
+                let (weight, lost) = blows.0.get(&unit).copied().unwrap_or((0.0, 0));
+                let seed = match unit {
+                    UnitRef::Enemy(u) => u as u32,
+                    UnitRef::Hero(i) => 1000 + i as u32,
+                }
+                .wrapping_mul(7919)
+                .wrapping_add(lost * 104_729);
+                gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, seed, weight);
+            }
+        }
         d.0 -= time.delta_secs();
-        // the rig lets the body fall (see `animate_sprites`)
+        // the rig lets the body give (see `animate_sprites`)
         for c in children.iter() {
-            if let Ok(mut s) = sprites.get_mut(c) {
+            if let Ok((mut s, _)) = sprites.get_mut(c) {
                 s.alive = (d.0 / DYING).clamp(0.0, 1.0);
             }
         }
         if d.0 <= 0.0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).remove::<Dying>();
         }
     }
 }
@@ -1723,6 +1782,7 @@ fn cue_effects(
     mut fx: ResMut<fx::Bursts>,
     comfort: Res<Comfort>,
     db: Res<Db>,
+    mut blows: ResMut<gore::Blows>,
 ) {
     let float = |commands: &mut Commands, unit: UnitRef, text: String, color: Color, size: f32, dx: f32| {
         let Some((foot, sz)) = unit_place(&session.shown, unit) else { return };
@@ -1797,7 +1857,11 @@ fn cue_effects(
                     play(*dst, Anim::Hit);
                     if let Some(at) = body(*dst) {
                         let weight = (share * 3.0).max(*lost as f32 / 30.0).min(1.0);
-                        fx.0.push(fx::Burst::Wound { at: at - Vec2::new(0.0, 40.0), dir, weight, blood: comfort.blood() });
+                        let ground = unit_place(&session.shown, *dst).map_or(at.y + 200.0, |(foot, _)| foot.y);
+                        let blood = gore::blood_of(&comfort, &session.shown, *dst);
+                        // the last blow a unit took decides what a killing one strikes off
+                        blows.0.insert(*dst, (weight, *lost as u32));
+                        fx.0.push(fx::Burst::Wound { at: at - Vec2::new(0.0, 40.0), dir, weight, blood, ground });
                     }
                     float(&mut commands, *dst, format!("-{lost}"), comfort.blood(), 46.0 + (*lost as f32).min(30.0), 0.0);
                 }

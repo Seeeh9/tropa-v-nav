@@ -154,6 +154,7 @@ pub(super) fn strike_down(
     float_layer: Entity,
     corpse_layer: Entity,
     lying: Option<Handle<Image>>,
+    lying_headless: Option<Handle<Image>>,
     seed: u32,
     weight: f32,
 ) -> bool {
@@ -176,9 +177,16 @@ pub(super) fn strike_down(
             r(70 + k as u32) < chance
         })
         .collect();
-    // a body still whole crumples and gives way to its picture lying dead; one cut to pieces
-    // goes over as it is
-    let lying = lying.filter(|_| !flying.contains(&true)).map(|picture| {
+    // a body still whole crumples and gives way to its picture lying dead, a beheaded one to its
+    // picture lying dead without a head; one cut up otherwise goes over as it is
+    let head_off = parts.iter().zip(&flying).any(|((p, ..), f)| *f && *p == rig::Part::Head);
+    let others_off = parts.iter().zip(&flying).any(|((p, ..), f)| *f && *p != rig::Part::Head);
+    let lying = match (head_off, others_off) {
+        (false, false) => lying,
+        (true, false) => lying_headless,
+        _ => None,
+    };
+    let lying = lying.map(|picture| {
         commands
             .spawn((
                 ImageNode { color: Color::WHITE.with_alpha(0.0), ..ImageNode::new(picture) },

@@ -1091,7 +1091,8 @@ fn dying(
                 .wrapping_mul(7919)
                 .wrapping_add(lost * 104_729);
                 let lying = art.image(&assets, &format!("{stem}_dead"));
-                let swaps = gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *corpse_layer, lying, seed, weight);
+                let headless = art.image(&assets, &format!("{stem}_dead_headless"));
+                let swaps = gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *corpse_layer, lying, headless, seed, weight);
                 for c in children.iter() {
                     if let Ok((mut s, _)) = sprites.get_mut(c) {
                         s.vanish = swaps;

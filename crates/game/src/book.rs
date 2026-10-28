@@ -836,6 +836,11 @@ fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, a
     book.shown = Some(spread);
 }
 
+/// The point of the leaf the hand holds, or the one nearest it.
+fn hand_point(leaf: &Leaf, hand: Vec3) -> usize {
+    leaf.grab.map(|(p, _)| p).unwrap_or_else(|| leaf.nearest(hand))
+}
+
 /// Where the cursor's ray meets the level `y` in the scene.
 fn cursor_on(camera: &Camera, at: &GlobalTransform, cursor: Vec2, y: f32) -> Option<Vec3> {
     let ray = camera.viewport_to_world(at, cursor).ok()?;
@@ -995,15 +1000,28 @@ fn hold_leaf(
     if !down {
         // let go: past the spine the leaf is turned, and the story reads on
         let hand = book.leaf.grab.map(|(_, h)| h).unwrap_or_default();
+        let point = hand_point(&book.leaf, hand);
         tell_news(book, hand_news(hand, None), true);
         book.leaf.grab = None;
         let back = book.turn.as_ref().is_some_and(|t| t.back);
         let over = if back { book.leaf.side() > -0.15 } else { book.leaf.side() < 0.15 };
+        let side = book.leaf.side();
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
+        // let go past the spine, the leaf is carried on over by the book's own hand, so it lands
+        // where the story now is: let go short of it, it falls back and the story stays
+        let carry_on = |turn: &mut Turning, leaf: &mut Leaf| {
+            // how far over it already is, as the unseen hand's arc would have it
+            let s = side.clamp(-1.0, 1.0).acos() / PI;
+            let t = if back { 1.0 - s } else { s };
+            turn.hand = Hand::Unseen { t, point, z: hand.z };
+            // the reader let go: what tears now is no hand's doing
+            leaf.tearing = false;
+        };
         if back {
             if over {
                 turn.committed = true;
+                carry_on(turn, &mut book.leaf);
                 turned_back.write(TurnedBack);
                 play(&mut commands, &art, &assets, &mixer, "book_flip");
             }
@@ -1012,6 +1030,7 @@ fn hold_leaf(
         // a leaf peeled off a secret opens the book's own spread: the story does not read on
         if over && turn.peel.is_none() {
             turn.committed = true;
+            carry_on(turn, &mut book.leaf);
             turned.write(Turned);
             play(&mut commands, &art, &assets, &mixer, "book_flip");
         }
@@ -1163,8 +1182,10 @@ fn move_leaf(
     let dt = time.delta_secs();
     if let Hand::Unseen { t, point, z } = &mut turn.hand {
         *t = (*t + dt / AUTO_TURN).min(1.0);
-        // lifted at the corner, carried over in an arc, a little ahead of the paper
-        let a = PI * (*t * *t * (3.0 - 2.0 * *t));
+        // lifted at the corner, carried over in an arc, a little ahead of the paper; a page
+        // turned back is carried the other way, from the left over to the right
+        let eased = *t * *t * (3.0 - 2.0 * *t);
+        let a = PI * if turn.back { 1.0 - eased } else { eased };
         let reach = GUTTER + PAGE_W * book.leaf.home(*point).0 as f32 / (NX - 1) as f32;
         book.leaf.grab = Some((*point, Vec3::new(reach * a.cos(), LEAF_FLOOR.right + reach * a.sin() * 0.6, *z)));
         if *t >= 1.0 {

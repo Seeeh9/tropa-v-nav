@@ -520,6 +520,9 @@ fn notes(
                 status.map.extend(events.iter().filter(|e| matches!(e, RunEvent::Voted { .. } | RunEvent::Lot { .. })).cloned());
                 status.deck.extend(events.iter().filter(|e| match e {
                     RunEvent::CardGained { player, .. } | RunEvent::Upgraded { player, .. } | RunEvent::CardRemoved { player, .. } => *player == me,
+                    RunEvent::RelicGained { player, .. } | RunEvent::PotionGained { player, .. } => *player == me,
+                    // the hands at the chest are shaken out before anything is handed over
+                    RunEvent::Thrown { .. } => true,
                     RunEvent::CardTaken { player, card } => *player == me && card.is_some(),
                     _ => false,
                 }).cloned());

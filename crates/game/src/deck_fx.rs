@@ -1,8 +1,10 @@
 //! What happens to the deck between fights, shown as it happens, over whatever screen is up (the
 //! tale's book too): a card gained shows itself and flies into the deck, an upgraded one stands
-//! beside what it was before it goes, a card lost burns away. One at a time, in order.
+//! beside what it was before it goes, a card lost burns away; a relic or a potion shows itself
+//! and flies to its place on the bar. One at a time, in order.
 
 use crate::art::Art;
+use crate::between::BarItem;
 use crate::audio::{Mixer, Sfx};
 use crate::battle::{spawn_card, CARD_H, CARD_W};
 use crate::l10n::L10n;
@@ -21,8 +23,29 @@ const SHOW_AT: Vec2 = Vec2::new(STAGE_W / 2.0, 470.0);
 const GAP: f32 = 0.45;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, (cue, play, dim).chain());
+    app.add_systems(Update, (cue, play, fly_gains, hide_landing, dim).chain());
 }
+
+/// Size of a relic or potion while it shows itself.
+const GAIN_SIZE: f32 = 150.0;
+
+/// A relic or potion gained: shows itself with its name, then flies to its place on the bar.
+#[derive(Component)]
+struct Gain {
+    /// Its picture's stem, as the bar knows it.
+    stem: String,
+    wait: f32,
+    t: f32,
+    /// Where it flies from and to, fixed when it sets off.
+    from: Vec2,
+    to: Option<Vec2>,
+    /// The size of its place on the bar.
+    end: f32,
+}
+
+/// The name shown under a gained relic or potion, gone once it flies.
+#[derive(Component)]
+struct GainName;
 
 /// The dark laid over the screen while a card is being shown, so the eye goes to it.
 #[derive(Component)]
@@ -32,7 +55,7 @@ fn dim(
     mut commands: Commands,
     time: Res<Time<Real>>,
     canvas: Single<Entity, With<Canvas>>,
-    shown: Query<&Visibility, With<DeckFx>>,
+    shown: Query<&Visibility, Or<(With<DeckFx>, With<Gain>)>>,
     mut scrim: Query<(Entity, &mut Scrim, &mut BackgroundColor)>,
 ) {
     let busy = shown.iter().any(|v| *v == Visibility::Inherited);
@@ -145,11 +168,95 @@ fn cue(
                 sfx.play(&mut commands, "status", &mixer, 1.0);
                 1.4
             }
+            RunEvent::RelicGained { relic: id, .. } | RunEvent::PotionGained { potion: id, .. } => {
+                let relic = matches!(ev, RunEvent::RelicGained { .. });
+                let stem = format!("{}/{id}", if relic { "relics" } else { "potions" });
+                let name = l10n.t(&format!("{}-{id}", if relic { "relic" } else { "potion" }));
+                commands
+                    .spawn((
+                        Gain { stem: stem.clone(), wait: start, t: 0.0, from: SHOW_AT, to: None, end: if relic { 48.0 } else { 44.0 } },
+                        Node { position_type: PositionType::Absolute, left: px(SHOW_AT.x - GAIN_SIZE / 2.0), top: px(SHOW_AT.y - GAIN_SIZE / 2.0), width: px(GAIN_SIZE), height: px(GAIN_SIZE), ..default() },
+                        art.node(&assets, &stem, theme::CANDLE),
+                        UiTransform { scale: Vec2::splat(0.01), ..default() },
+                        Visibility::Hidden,
+                        GlobalZIndex(600),
+                        Pickable::IGNORE,
+                        ChildOf(*canvas),
+                    ))
+                    .with_child((
+                        GainName,
+                        Node { position_type: PositionType::Absolute, top: px(GAIN_SIZE + 10.0), left: px(GAIN_SIZE / 2.0 - 300.0), width: px(600), justify_content: JustifyContent::Center, ..default() },
+                        Pickable::IGNORE,
+                        children![(theme::text(name, &fonts.title, 40.0, theme::CANDLE), TextShadow { offset: Vec2::splat(3.0), color: Color::BLACK })],
+                    ));
+                sfx.play(&mut commands, if relic { "rune" } else { "potion" }, &mixer, 1.0);
+                1.3
+            }
+            // the throws at a chest are shown first, on the chest's own screen
+            RunEvent::Thrown { .. } => 0.8,
             _ => 0.0,
         };
         start += length + GAP;
     }
     *free_at = now + start;
+}
+
+fn fly_gains(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    scale: Res<UiScale>,
+    mut gains: Query<(Entity, &mut Gain, &mut Node, &mut UiTransform, &mut Visibility, &Children)>,
+    mut names: Query<&mut Visibility, (With<GainName>, Without<Gain>)>,
+    places: Query<(&BarItem, &UiGlobalTransform)>,
+) {
+    let dt = time.delta_secs();
+    for (e, mut g, mut node, mut tf, mut vis, kids) in &mut gains {
+        if g.wait > 0.0 {
+            g.wait -= dt;
+            continue;
+        }
+        if *vis != Visibility::Inherited {
+            *vis = Visibility::Inherited;
+        }
+        g.t += dt;
+        let pop = (g.t / 0.22).min(1.0);
+        let after = g.t - 0.22 - 0.75;
+        if after <= 0.0 {
+            tf.scale = Vec2::splat((1.0 + 0.15 * (pop * std::f32::consts::PI).sin()) * pop.max(0.01));
+            continue;
+        }
+        // its place on the bar, looked up as it sets off: the bar may have just been redrawn
+        if g.to.is_none() {
+            let stem = g.stem.clone();
+            g.to = Some(places.iter().filter(|(item, _)| item.0 == stem).map(|(_, t)| t.translation / scale.0).last().unwrap_or(Vec2::new(STAGE_W * 0.4, 30.0)));
+            for k in kids {
+                if let Ok(mut v) = names.get_mut(*k) {
+                    *v = Visibility::Hidden;
+                }
+            }
+        }
+        let to = g.to.unwrap_or(g.from);
+        let p = (after / 0.55).min(1.0);
+        let ease = p * p * (3.0 - 2.0 * p);
+        let at = g.from.lerp(to, ease) - Vec2::Y * 90.0 * (ease * std::f32::consts::PI).sin();
+        node.left = px(at.x - GAIN_SIZE / 2.0);
+        node.top = px(at.y - GAIN_SIZE / 2.0);
+        tf.scale = Vec2::splat(1.0 + (g.end / GAIN_SIZE - 1.0) * ease);
+        if p >= 1.0 {
+            commands.entity(e).despawn();
+        }
+    }
+}
+
+/// The place on the bar of whatever is still on its way there stays empty until it lands.
+fn hide_landing(gains: Query<&Gain>, mut places: Query<(&BarItem, &mut Visibility)>) {
+    for (item, mut vis) in &mut places {
+        let coming = gains.iter().any(|g| g.stem == item.0);
+        let want = if coming { Visibility::Hidden } else { Visibility::Inherited };
+        if *vis != want {
+            *vis = want;
+        }
+    }
 }
 
 fn play(

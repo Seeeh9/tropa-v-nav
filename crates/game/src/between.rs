@@ -62,6 +62,11 @@ struct PotionMenu;
 #[derive(Component)]
 struct DeckView;
 
+/// A relic or a flask on the bar, by its picture's stem ("relics/x", "potions/y"): where a
+/// newly gained one flies to.
+#[derive(Component)]
+pub struct BarItem(pub String);
+
 /// The pedlar's figure in the clearing.
 #[derive(Component)]
 pub struct Pedlar;
@@ -150,7 +155,7 @@ fn top_bar(
             continue;
         };
         let name = l10n.t(&format!("potion-{id}"));
-        e.insert((Button, Hovered::default(), Btn(theme::SOOT), CardHints::new(vec![(name.clone(), l10n.t(&format!("potion-{id}-desc")))])));
+        e.insert((BarItem(format!("potions/{id}")), Button, Hovered::default(), Btn(theme::SOOT), CardHints::new(vec![(name.clone(), l10n.t(&format!("potion-{id}-desc")))])));
         e.with_children(|f| {
             match art.image(&assets, &format!("potions/{id}")) {
                 Some(h) => f.spawn((Node { width: percent(100), height: percent(100), ..default() }, ImageNode::new(h), Pickable::IGNORE)),
@@ -237,6 +242,7 @@ fn top_bar(
             Button,
             Hovered::default(),
             CardHints::new(vec![(l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")))]),
+            BarItem(format!("relics/{id}")),
             Node { width: px(48), height: px(48), ..default() },
             art.node(&assets, &format!("relics/{id}"), theme::CANDLE),
             ChildOf(relics),

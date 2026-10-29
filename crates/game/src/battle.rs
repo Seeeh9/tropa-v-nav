@@ -823,7 +823,7 @@ fn swap_form_art(
     if preloaded.0.is_empty() {
         for h in &session.shown.heroes {
             for form in ["", "_beast"] {
-                for pose in ["", "_strike", "_downed"] {
+                for pose in ["", "_strike", "_cast", "_downed"] {
                     if let Some(handle) = art.image(&assets, &format!("heroes/{}{form}{pose}", h.def)) {
                         preloaded.0.push(handle);
                     }
@@ -843,6 +843,11 @@ fn swap_form_art(
         let striking = matches!(s.anim, Some((Anim::Lunge, t)) if (0.12..0.38).contains(&t));
         if striking && !h.downed && art.image(&assets, &format!("{want}_strike")).is_some() {
             want = format!("{want}_strike");
+        }
+        // and through the heart of a skill or power, calling on it
+        let casting = matches!(s.anim, Some((Anim::Cast, t)) if (0.06..0.40).contains(&t));
+        if casting && !h.downed && art.image(&assets, &format!("{want}_cast")).is_some() {
+            want = format!("{want}_cast");
         }
         if s.stem == want {
             continue;
@@ -899,7 +904,7 @@ fn animate_sprites(
         pose.nod = 0.025 * (s.t * 0.7 + 1.0).sin() + 0.012 * (s.t * 1.9).sin();
         pose.guard = 0.02 * (s.t * 0.9 + 2.0).sin();
 
-        let cut = rig::is_cut(s.stem.trim_end_matches("_strike"));
+        let cut = rig::is_cut(s.stem.trim_end_matches("_strike").trim_end_matches("_cast"));
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
             let dur = match anim {

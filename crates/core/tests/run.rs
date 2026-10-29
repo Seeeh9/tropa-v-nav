@@ -875,3 +875,82 @@ fn a_potion_thrown_at_the_pedlar_pays_once_a_visit() {
     assert_eq!((run.players[0].gold, run.players[0].potions.clone()), (gold + PELT_GOLD, vec!["mead".to_string()]));
     assert_eq!(run.apply(&c, 0, &RunAction::PeltPedlar(0)), Err(RunError::AlreadyDone));
 }
+
+#[test]
+fn a_shared_chest_is_claimed_and_fought_over_with_rock_paper_scissors() {
+    let c = content();
+    let mut run = party(&c, 3, 5, 0);
+    run.force_stage(&c, NodeKind::Chest);
+    let Stage::Chest(ch) = &run.stage else { panic!("{:?}", run.stage) };
+    assert_eq!(ch.offers.len(), 3);
+    let offers = ch.offers.clone();
+    // the first two want the same relic, the third takes the one nobody else wants
+    run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
+    run.apply(&c, 1, &RunAction::Choose(1)).unwrap();
+    run.apply(&c, 2, &RunAction::Choose(2)).unwrap();
+    let Stage::Chest(ch) = &run.stage else { panic!() };
+    assert_eq!(ch.contest, vec![0, 1]);
+    assert_eq!(run.apply(&c, 2, &RunAction::Throw(0)), Err(RunError::BadChoice));
+    assert_eq!(run.apply(&c, 0, &RunAction::Onward), Err(RunError::BadChoice));
+    // a draw is thrown again
+    run.apply(&c, 0, &RunAction::Throw(0)).unwrap();
+    let ev = run.apply(&c, 1, &RunAction::Throw(0)).unwrap();
+    assert!(ev.iter().any(|e| matches!(e, RunEvent::Thrown { .. })));
+    let Stage::Chest(ch) = &run.stage else { panic!() };
+    assert_eq!(ch.contest, vec![0, 1]);
+    // paper wraps rock
+    run.apply(&c, 0, &RunAction::Throw(0)).unwrap();
+    run.apply(&c, 1, &RunAction::Throw(1)).unwrap();
+    let Stage::Chest(ch) = &run.stage else { panic!() };
+    assert!(ch.settled);
+    assert_eq!(ch.won, vec![Some(0), Some(1), Some(2)]);
+    assert!(run.players[1].relics.contains(&offers[1]));
+    assert!(run.players[0].relics.contains(&offers[0]));
+    for p in 0..3 {
+        run.apply(&c, p, &RunAction::Onward).unwrap();
+    }
+    assert!(matches!(run.stage, Stage::Map { .. }));
+}
+
+#[test]
+fn three_at_one_chest_relic_throw_until_one_stands() {
+    let c = content();
+    let mut run = party(&c, 3, 9, 0);
+    run.force_stage(&c, NodeKind::Chest);
+    for p in 0..3 {
+        run.apply(&c, p, &RunAction::Choose(0)).unwrap();
+    }
+    // rock, rock, scissors: the scissors are out, the rocks throw again
+    run.apply(&c, 0, &RunAction::Throw(0)).unwrap();
+    run.apply(&c, 1, &RunAction::Throw(0)).unwrap();
+    run.apply(&c, 2, &RunAction::Throw(2)).unwrap();
+    let Stage::Chest(ch) = &run.stage else { panic!() };
+    assert_eq!(ch.contest, vec![0, 1]);
+    run.apply(&c, 0, &RunAction::Throw(2)).unwrap();
+    run.apply(&c, 1, &RunAction::Throw(1)).unwrap();
+    let Stage::Chest(ch) = &run.stage else { panic!() };
+    assert!(ch.settled);
+    assert_eq!(ch.won[0], Some(0));
+    let mut got: Vec<u8> = ch.won.iter().flatten().copied().collect();
+    got.sort_unstable();
+    assert_eq!(got, vec![0, 1, 2]);
+}
+
+#[test]
+fn bots_share_a_chest_out_on_their_own() {
+    let c = content();
+    let mut run = party(&c, 4, 2, 0);
+    run.force_stage(&c, NodeKind::Chest);
+    for _ in 0..200 {
+        if matches!(run.stage, Stage::Map { .. }) {
+            break;
+        }
+        for p in 0..4u8 {
+            if let Some(a) = run_bot(&c, &run, p) {
+                run.apply(&c, p, &a).unwrap();
+            }
+        }
+    }
+    assert!(matches!(run.stage, Stage::Map { .. }));
+    assert!(run.players.iter().all(|pl| pl.relics.len() >= 2));
+}

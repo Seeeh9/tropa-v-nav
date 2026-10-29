@@ -580,7 +580,7 @@ fn follow_stage(
         Stage::Reward { .. } => AppState::Reward,
         Stage::Rest { .. } => AppState::Rest,
         Stage::Shop { .. } => AppState::Shop,
-        Stage::Omen { .. } | Stage::Trophy { .. } => AppState::Omen,
+        Stage::Omen { .. } | Stage::Trophy { .. } | Stage::Chest(_) => AppState::Omen,
         Stage::Victory | Stage::Defeat => AppState::RunEnd,
     };
     let now = *state.get();

@@ -15,7 +15,10 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{observe, Activate, Button};
 use nav_core::*;
 
+mod chest;
+
 pub fn plugin(app: &mut App) {
+    app.add_plugins(chest::plugin);
     for state in [AppState::Map, AppState::Reward, AppState::Rest, AppState::Shop, AppState::Omen, AppState::RunEnd] {
         app.add_systems(OnEnter(state), |mut status: ResMut<NetStatus>, mut pick: ResMut<UpgradePick>| {
             status.run_dirty = true;

@@ -72,6 +72,39 @@ pub struct Stock {
     pub pelted: bool,
 }
 
+/// A chest with a relic for every player. Each claims one; those who claimed the same one throw
+/// rock-paper-scissors for it, and whoever loses takes one of the relics nobody claimed.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Chest {
+    pub offers: Vec<Id>,
+    /// The offer each player has claimed; `LOST` once they have lost the throw for it.
+    pub picks: Vec<Option<u8>>,
+    /// The offer each player has ended up with.
+    pub won: Vec<Option<u8>>,
+    /// Players still throwing for the contested offer `prize`.
+    pub contest: Vec<u8>,
+    pub prize: Option<u8>,
+    /// This round's throws (0 rock, 1 paper, 2 scissors), per player.
+    pub throws: Vec<Option<u8>>,
+    /// The round thrown last, `(player, shape)`, for the screen to show.
+    pub last: Vec<(u8, u8)>,
+    pub rounds: u32,
+    /// The chest is shared out and the relics handed over.
+    pub settled: bool,
+    /// Players who have looked their fill and want to go on.
+    pub done: Vec<bool>,
+}
+
+impl Chest {
+    /// The claim of a player who lost the throw for what they claimed.
+    pub const LOST: u8 = u8::MAX;
+}
+
+/// Which throw beats the other: rock blunts scissors, paper wraps rock, scissors cut paper.
+pub fn beats(a: u8, b: u8) -> bool {
+    (a + 2) % 3 == b
+}
+
 /// What the pedlar pays, flustered, for a potion broken over his head.
 pub const PELT_GOLD: i32 = 25;
 
@@ -88,6 +121,8 @@ pub enum Stage {
     Omen { id: Id, picks: Vec<Option<u8>> },
     /// A boss trophy: the party votes for one of `offers`, and every player gets it.
     Trophy { offers: Vec<Id>, picks: Vec<Option<u8>> },
+    /// A chest shared by the party: a relic for every player.
+    Chest(Chest),
     Victory,
     Defeat,
 }
@@ -189,6 +224,10 @@ pub enum RunAction {
     Choose(u8),
     /// Throw away a potion to free the slot.
     DropPotion(u8),
+    /// At a contested chest: rock (0), paper (1) or scissors (2).
+    Throw(u8),
+    /// Done looking at the shared-out chest.
+    Onward,
     /// Drink a healing potion between fights: only its healing works there.
     DrinkPotion(u8),
     /// Break a potion over the pedlar's head: he pays to be left alone (once a visit).
@@ -266,6 +305,8 @@ pub enum RunEvent {
     PotionGained { player: u8, potion: Id },
     CardGained { player: u8, card: Id },
     CardRemoved { player: u8, card: Id },
+    /// A round of rock-paper-scissors at the chest: `(player, shape)` for everyone who threw.
+    Thrown { throws: Vec<(u8, u8)> },
     Hp { player: u8, delta: i32 },
     OmenResolved { option: u8 },
     ActCleared { act: u8 },
@@ -666,6 +707,63 @@ impl Run {
                     self.to_map(c, &mut ev);
                 }
             }
+            (RunAction::Choose(choice), Stage::Chest(ch)) => {
+                if *choice as usize >= ch.offers.len() {
+                    return Err(RunError::BadChoice);
+                }
+                if ch.picks.iter().all(|v| v.is_some()) {
+                    return Err(RunError::AlreadyDone);
+                }
+                // a claim may be changed until the last one is made
+                ch.picks[p] = Some(*choice);
+                ev.push(RunEvent::Voted { player, choice: *choice });
+                if ch.picks.iter().all(|v| v.is_some()) {
+                    self.share_chest(&mut ev);
+                }
+            }
+            (RunAction::Throw(shape), Stage::Chest(ch)) => {
+                if *shape > 2 || !ch.contest.contains(&player) {
+                    return Err(RunError::BadChoice);
+                }
+                if ch.throws[p].is_some() {
+                    return Err(RunError::AlreadyDone);
+                }
+                ch.throws[p] = Some(*shape);
+                if ch.contest.iter().all(|q| ch.throws[*q as usize].is_some()) {
+                    let round: Vec<(u8, u8)> = ch.contest.iter().map(|q| (*q, ch.throws[*q as usize].unwrap_or(0))).collect();
+                    ch.rounds += 1;
+                    ch.last = round.clone();
+                    ch.throws = vec![None; ch.throws.len()];
+                    let mut shapes: Vec<u8> = round.iter().map(|(_, s)| *s).collect();
+                    shapes.sort_unstable();
+                    shapes.dedup();
+                    // one shape or all three: nobody wins, throw again
+                    if let [a, b] = shapes[..] {
+                        let best = if beats(a, b) { a } else { b };
+                        ch.contest = round.iter().filter(|(_, s)| *s == best).map(|(q, _)| *q).collect();
+                        for (q, s) in &round {
+                            if *s != best {
+                                ch.picks[*q as usize] = Some(Chest::LOST);
+                            }
+                        }
+                        if let [w] = ch.contest[..] {
+                            ch.won[w as usize] = ch.prize;
+                            ch.contest.clear();
+                        }
+                    }
+                    ev.push(RunEvent::Thrown { throws: round });
+                    self.share_chest(&mut ev);
+                }
+            }
+            (RunAction::Onward, Stage::Chest(ch)) => {
+                if !ch.settled {
+                    return Err(RunError::BadChoice);
+                }
+                ch.done[p] = true;
+                if ch.done.iter().all(|d| *d) {
+                    self.to_map(c, &mut ev);
+                }
+            }
             (RunAction::Choose(choice), Stage::Trophy { offers, picks }) => {
                 if *choice as usize >= offers.len() {
                     return Err(RunError::BadChoice);
@@ -881,7 +979,73 @@ impl Run {
                 }
             }
             NodeKind::Rest => self.stage = Stage::Rest { done: vec![false; self.players.len()] },
+            NodeKind::Chest => self.open_chest(c),
             _ => {}
+        }
+    }
+
+    fn open_chest(&mut self, c: &Content) {
+        let n = self.players.len();
+        let mut offers: Vec<Id> = Vec::new();
+        for p in 0..n {
+            // a relic for every seat, no two alike
+            for _ in 0..8 {
+                if let Some(r) = self.roll_relic(c, p).filter(|r| !offers.contains(r)) {
+                    offers.push(r);
+                    break;
+                }
+            }
+        }
+        if offers.is_empty() {
+            self.stage = Stage::Map { votes: vec![None; n] };
+            return;
+        }
+        self.stage = Stage::Chest(Chest {
+            offers,
+            picks: vec![None; n],
+            won: vec![None; n],
+            contest: vec![],
+            prize: None,
+            throws: vec![None; n],
+            last: vec![],
+            rounds: 0,
+            settled: false,
+            done: vec![false; n],
+        });
+    }
+
+    /// Shares out what can be shared: lone claims are granted, the next contested offer is thrown
+    /// for, and when nothing is left to throw for, the losers take the unclaimed relics by lot.
+    fn share_chest(&mut self, ev: &mut Vec<RunEvent>) {
+        let Stage::Chest(ch) = &mut self.stage else { return };
+        if !ch.contest.is_empty() {
+            return;
+        }
+        let m = ch.offers.len() as u8;
+        let claimants = |ch: &Chest, i: u8| (0..ch.picks.len() as u8).filter(|q| ch.picks[*q as usize] == Some(i)).collect::<Vec<u8>>();
+        for i in 0..m {
+            if let [q] = claimants(ch, i)[..] {
+                ch.won[q as usize] = Some(i);
+            }
+        }
+        if let Some(i) = (0..m).find(|i| claimants(ch, *i).len() > 1 && !ch.won.contains(&Some(*i))) {
+            ch.prize = Some(i);
+            ch.contest = claimants(ch, i);
+            return;
+        }
+        ch.prize = None;
+        let mut left: Vec<u8> = (0..m).filter(|i| !ch.won.contains(&Some(*i))).collect();
+        self.rng.shuffle(&mut left);
+        let Stage::Chest(ch) = &mut self.stage else { return };
+        // with fewer relics than seats, the last losers go without
+        for w in ch.won.iter_mut().filter(|w| w.is_none()) {
+            *w = left.pop();
+        }
+        ch.settled = true;
+        let gains: Vec<(usize, Id)> = ch.won.iter().enumerate().filter_map(|(q, w)| w.map(|i| (q, ch.offers[i as usize].clone()))).collect();
+        for (q, relic) in gains {
+            self.players[q].relics.push(relic.clone());
+            ev.push(RunEvent::RelicGained { player: q as u8, relic });
         }
     }
 
@@ -933,6 +1097,10 @@ impl Run {
         match kind {
             NodeKind::Fight | NodeKind::Elite | NodeKind::Boss => self.start_fight(c, kind, ev),
             NodeKind::Rest => self.stage = Stage::Rest { done: vec![false; self.players.len()] },
+            NodeKind::Chest if self.players.len() > 1 => {
+                self.floors_cleared += 1;
+                self.open_chest(c);
+            }
             NodeKind::Chest => {
                 self.floors_cleared += 1;
                 let rewards = (0..self.players.len()).map(|p| Reward { gold: 0, cards: vec![], relic: self.roll_relic(c, p), done: false }).collect();
@@ -1365,6 +1533,23 @@ pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
             Some(RunAction::Choose(i as u8))
         }
         Stage::Trophy { picks, .. } => picks.get(p)?.is_none().then_some(RunAction::Choose(0)),
+        Stage::Chest(ch) => {
+            if ch.settled {
+                return (!*ch.done.get(p)?).then_some(RunAction::Onward);
+            }
+            if ch.picks.iter().any(|v| v.is_none()) {
+                // the autopilot reaches for the first relic, and will fight for it
+                return ch.picks.get(p)?.is_none().then_some(RunAction::Choose(0));
+            }
+            if !ch.contest.contains(&player) || ch.throws.get(p)?.is_some() {
+                return None;
+            }
+            // a throw that looks random but is the same on every machine
+            let mut x = (p as u32 + 1).wrapping_mul(0x9E37_79B1) ^ (ch.rounds + 1).wrapping_mul(0x85EB_CA6B);
+            x ^= x >> 15;
+            x = x.wrapping_mul(0x2C1B_3C6D);
+            Some(RunAction::Throw(((x >> 16) % 3) as u8))
+        }
         Stage::Victory | Stage::Defeat => None,
     }
 }

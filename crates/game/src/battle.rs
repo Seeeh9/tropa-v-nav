@@ -2,6 +2,7 @@
 //! the bottom, party panel top-left, Ready seal bottom-right. Reads `Session`,
 //! writes only to `Outbox`.
 
+use std::collections::HashSet;
 use crate::art::Art;
 use crate::l10n::L10n;
 use crate::session::*;
@@ -808,7 +809,19 @@ fn layout_units(session: Res<Session>, time: Res<Time>, mut widgets: Query<(&mut
 /// Pictures a hero may change into mid-fight (a blow, the Edge, the other form), loaded as the
 /// fight begins: one loaded only when first wanted would come a frame or more too late.
 #[derive(Default)]
-struct Preloaded(Vec<Handle<Image>>);
+struct Preloaded {
+    handles: Vec<Handle<Image>>,
+    /// Pictures already asked for, by unit: heroes once, a foe summoned mid-fight when it comes.
+    seen: HashSet<String>,
+}
+
+/// Poses a unit is drawn in for a moment, over its own picture.
+const POSES: [&str; 3] = ["_strike", "_cast", "_hurt"];
+
+/// The unit's own picture under whatever pose it is drawn in for the moment.
+pub(crate) fn pose_base(stem: &str) -> &str {
+    POSES.iter().find_map(|p| stem.strip_suffix(p)).unwrap_or(stem)
+}
 
 fn swap_form_art(
     session: Res<Session>,
@@ -820,39 +833,46 @@ fn swap_form_art(
     mut rigs: ResMut<Assets<rig::RigMaterial>>,
 ) {
     let mut skins = skins;
-    if preloaded.0.is_empty() {
-        for h in &session.shown.heroes {
-            for form in ["", "_beast"] {
-                for pose in ["", "_strike", "_cast", "_hurt", "_downed"] {
-                    if let Some(handle) = art.image(&assets, &format!("heroes/{}{form}{pose}", h.def)) {
-                        preloaded.0.push(handle);
-                    }
+    // every picture a unit may change into is loaded before it is needed, so a first blow
+    // is not drawn in the resting pose
+    let stems = session.shown.heroes.iter().flat_map(|h| [format!("heroes/{}", h.def), format!("heroes/{}_beast", h.def)]).chain(session.shown.enemies.iter().map(|e| format!("enemies/{}", e.def)));
+    for stem in stems {
+        if preloaded.seen.insert(stem.clone()) {
+            for pose in ["", "_strike", "_cast", "_hurt", "_downed"] {
+                if let Some(handle) = art.image(&assets, &format!("{stem}{pose}")) {
+                    preloaded.handles.push(handle);
                 }
             }
         }
     }
     for (mut s, children) in &mut sprites {
-        let UnitRef::Hero(i) = s.unit else { continue };
-        let Some(h) = session.shown.hero(i) else { continue };
-        let mut want = if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) };
+        let (mut want, downed) = match s.unit {
+            UnitRef::Hero(i) => {
+                let Some(h) = session.shown.hero(i) else { continue };
+                (if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) }, h.downed)
+            }
+            UnitRef::Enemy(uid) => {
+                // a foe falling keeps the picture it fell in
+                let Some(e) = session.shown.enemy(uid).filter(|e| e.alive && !s.vanish) else { continue };
+                (format!("enemies/{}", e.def), false)
+            }
+        };
         // on the Edge a hero is drawn down on one knee, wounded, when that picture exists
-        if h.downed && art.image(&assets, &format!("{want}_downed")).is_some() {
+        if downed && art.image(&assets, &format!("{want}_downed")).is_some() {
             want = format!("{want}_downed");
         }
-        // through the heart of a lunge the hero is drawn mid-blow, when that picture exists
-        let striking = matches!(s.anim, Some((Anim::Lunge, t)) if (0.12..0.38).contains(&t));
-        if striking && !h.downed && art.image(&assets, &format!("{want}_strike")).is_some() {
-            want = format!("{want}_strike");
-        }
-        // and through the heart of a skill or power, calling on it
-        let casting = matches!(s.anim, Some((Anim::Cast, t)) if (0.06..0.40).contains(&t));
-        if casting && !h.downed && art.image(&assets, &format!("{want}_cast")).is_some() {
-            want = format!("{want}_cast");
-        }
-        // and as a blow lands, reeling from it
-        let reeling = matches!(s.anim, Some((Anim::Hit, t)) if t < 0.26);
-        if reeling && !h.downed && art.image(&assets, &format!("{want}_hurt")).is_some() {
-            want = format!("{want}_hurt");
+        // through the heart of a lunge the unit is drawn mid-blow, through a skill or power
+        // calling on it, and as a blow lands reeling from it, when those pictures exist
+        let pose = match s.anim {
+            Some((Anim::Lunge, t)) if (0.12..0.38).contains(&t) => Some("_strike"),
+            Some((Anim::Cast, t)) if (0.06..0.40).contains(&t) => Some("_cast"),
+            Some((Anim::Hit, t)) if t < 0.26 => Some("_hurt"),
+            _ => None,
+        };
+        if let Some(pose) = pose.filter(|_| !downed) {
+            if art.image(&assets, &format!("{want}{pose}")).is_some() {
+                want = format!("{want}{pose}");
+            }
         }
         if s.stem == want {
             continue;
@@ -909,7 +929,7 @@ fn animate_sprites(
         pose.nod = 0.025 * (s.t * 0.7 + 1.0).sin() + 0.012 * (s.t * 1.9).sin();
         pose.guard = 0.02 * (s.t * 0.9 + 2.0).sin();
 
-        let cut = rig::is_cut(s.stem.trim_end_matches("_strike").trim_end_matches("_cast").trim_end_matches("_hurt"));
+        let cut = rig::is_cut(pose_base(&s.stem));
         if let Some((anim, t)) = &mut s.anim {
             *t += dt;
             let dur = match anim {
@@ -1100,8 +1120,9 @@ fn dying(
                 match sprites.get(c) {
                     Ok((s, skin_children)) => {
                         draw = s.draw;
-                        stem = s.stem.clone();
-                        let cuts = rig::cuts_of(&s.stem);
+                        // a foe struck down mid-pose falls as itself
+                        stem = pose_base(&s.stem).to_string();
+                        let cuts = rig::cuts_of(&stem);
                         for (skin, part, material) in skins.iter_many(skin_children).flatten() {
                             let (Some(part), Some(m)) = (part.part, rigs.get(&material.0)) else { continue };
                             if let Some(joint) = cuts.iter().find(|(p, ..)| *p == part).map(|(_, j, _)| *j) {

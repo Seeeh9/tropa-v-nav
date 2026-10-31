@@ -96,7 +96,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                 }
             }
             for (x, n) in herbs {
-                out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, "kw-Brew") });
+                out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, &format!("herb-{x}")) });
             }
             for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter"] {
                 if let Some(n) = real.flags.get(flag) {

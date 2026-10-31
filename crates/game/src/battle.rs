@@ -2039,6 +2039,14 @@ fn cue_effects(
                 play(UnitRef::Hero(*player), Anim::Buffed);
                 float(&mut commands, UnitRef::Hero(*player), l10n.t(&format!("rune-{rune:?}")), theme::FROST, 22.0, 50.0)
             }
+            Event::RuneDischarged { player, rune } => {
+                play(UnitRef::Hero(*player), Anim::Cast);
+                float(&mut commands, UnitRef::Hero(*player), l10n.tf("rune-discharged", &[("r", l10n.t(&format!("rune-{rune:?}")).into())]), theme::CANDLE, 24.0, 90.0)
+            }
+            Event::HerbSpilled { player, herb } => {
+                play(UnitRef::Hero(*player), Anim::Cast);
+                float(&mut commands, UnitRef::Hero(*player), l10n.tf("herb-spilled", &[("h", l10n.t(&format!("herb-{herb}")).into())]), theme::ROTLIGHT, 24.0, 90.0)
+            }
             Event::RuneCarved { player, .. } | Event::HerbAdded { player, .. } | Event::MaskChanged { player, .. } | Event::Shifted { player, .. } => play(UnitRef::Hero(*player), Anim::Buffed),
             Event::Brewed { player, recipe } => {
                 play(UnitRef::Hero(*player), Anim::Cast);

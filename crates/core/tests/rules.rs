@@ -538,6 +538,20 @@ fn ally_holds_at_most_three_runes_and_they_count() {
     assert_eq!(s.enemies[0].hp, 170);
 }
 
+#[test]
+fn a_new_rune_pushes_out_the_oldest_which_discharges() {
+    let (c, mut s) = duo(&["t_rune_frost"; 4], &[], &["dummy"]);
+    for _ in 0..3 {
+        play(&c, &mut s, 0, "t_rune_frost", Some(UnitRef::Hero(1)));
+    }
+    assert_eq!(s.heroes[1].block, 0);
+    // the fourth finds no room: the oldest fires one last time and is gone
+    let ev = play(&c, &mut s, 0, "t_rune_frost", Some(UnitRef::Hero(1)));
+    assert_eq!(s.heroes[1].runes.len(), 3);
+    assert_eq!(s.heroes[1].block, 4, "the frost rune gave its block as it went");
+    assert!(ev.iter().any(|e| matches!(e, Event::RuneDischarged { player: 1, rune: RuneKind::Frost })));
+}
+
 // ---- werewolf ----
 
 #[test]

@@ -202,6 +202,22 @@ fn herbs_act_at_once_and_brew_by_recipe() {
 }
 
 #[test]
+fn a_full_cauldron_throws_out_the_oldest_herb_and_it_bites() {
+    let (c, mut s) = fight("znaharka", &["herb_wormwood", "herb_sleep", "herb_sleep", "herb_sleep", "herb_weep"], &["dummy"]);
+    let t = foe(&s, 0);
+    // her own relic gives her a cauldron of four
+    play(&c, &mut s, 0, "herb_wormwood", Some(t));
+    for _ in 0..3 {
+        play(&c, &mut s, 0, "herb_sleep", None);
+    }
+    let hp = s.enemies[0].hp;
+    let ev = play(&c, &mut s, 0, "herb_weep", None);
+    assert_eq!(s.heroes[0].cauldron, ids(&["sleep", "sleep", "sleep", "weep"]));
+    assert_eq!(s.enemies[0].hp, hp - 2, "wormwood spilled: 2 to all foes");
+    assert!(ev.iter().any(|e| matches!(e, Event::HerbSpilled { player: 0, herb } if herb == "wormwood")));
+}
+
+#[test]
 fn documented_recipes_and_the_fern() {
     let (c, mut s) = fight("znaharka", &["herb_sleep", "herb_weep", "zn_brew", "t_pain", "t_pain"], &["dummy"]);
     let t = foe(&s, 0);

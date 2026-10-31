@@ -218,6 +218,10 @@ pub enum Event {
     EnemyPhase,
     RuneCarved { player: u8, rune: RuneKind },
     RuneFired { player: u8, rune: RuneKind },
+    /// The oldest rune gave way to a new one, and fires one last time.
+    RuneDischarged { player: u8, rune: RuneKind },
+    /// The oldest herb was thrown out of a full cauldron.
+    HerbSpilled { player: u8, herb: Id },
     HerbAdded { player: u8, herb: Id },
     Brewed { player: u8, recipe: Id },
     PotionUsed { player: u8, potion: Id, target: Option<UnitRef> },

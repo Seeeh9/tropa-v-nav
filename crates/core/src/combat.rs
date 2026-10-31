@@ -1124,10 +1124,14 @@ impl<'a> Exec<'a> {
                         if let UnitRef::Hero(i) = u {
                             let cap = if u == ctx.src { 5 } else { 3 };
                             let h = self.hero(i);
-                            if h.runes.len() < cap {
-                                h.runes.push(*kind);
-                                self.ev.push(Event::RuneCarved { player: i, rune: *kind });
+                            // no room left: the oldest rune gives way, and discharges as it goes
+                            let spent = (h.runes.len() >= cap).then(|| h.runes.remove(0));
+                            h.runes.push(*kind);
+                            if let Some(old) = spent {
+                                self.ev.push(Event::RuneDischarged { player: i, rune: old });
+                                self.fire_rune(i, old);
                             }
+                            self.ev.push(Event::RuneCarved { player: i, rune: *kind });
                         }
                     }
                 }
@@ -1238,10 +1242,14 @@ impl<'a> Exec<'a> {
                     if let UnitRef::Hero(i) = ctx.src {
                         let h = self.hero(i);
                         let room = if h.flags.contains_key("big_cauldron") { 4 } else { 3 };
-                        if h.cauldron.len() < room {
-                            h.cauldron.push(herb.clone());
-                            self.ev.push(Event::HerbAdded { player: i, herb: herb.clone() });
+                        // a full cauldron boils over: the oldest herb is thrown out, and bites
+                        let spilled = (h.cauldron.len() >= room).then(|| h.cauldron.remove(0));
+                        h.cauldron.push(herb.clone());
+                        if let Some(old) = spilled {
+                            self.ev.push(Event::HerbSpilled { player: i, herb: old.clone() });
+                            self.spill(&old, ctx);
                         }
+                        self.ev.push(Event::HerbAdded { player: i, herb: herb.clone() });
                     }
                 }
                 Effect::Brew => self.brew(ctx),
@@ -1261,6 +1269,19 @@ impl<'a> Exec<'a> {
                 Effect::Hook(name) => crate::hooks::run(self, ctx, name),
             }
         }
+    }
+
+    /// What a herb thrown out of a full cauldron does: a weak taste of what it brews into.
+    fn spill(&mut self, herb: &str, ctx: &mut Ctx) {
+        let effects = match herb {
+            "wormwood" => vec![Effect::Damage(Amount::N(2), Tgt::AllFoes)],
+            "sleep" => vec![Effect::Block(Amount::N(3), Tgt::Me)],
+            "weep" => vec![Effect::Heal(Amount::N(2), Tgt::Me)],
+            "burst" => vec![Effect::Damage(Amount::N(5), Tgt::RandomFoe)],
+            "fern" => vec![Effect::Draw(Amount::N(1))],
+            _ => return,
+        };
+        self.run(&effects, ctx);
     }
 
     /// Resolves the cauldron: the first recipe whose herbs match is brewed.

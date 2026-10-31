@@ -168,6 +168,13 @@ fn show(shown: &mut Combat, truth: &Combat, e: &Event) {
                 h.runes.push(*rune);
             }
         }
+        Event::RuneDischarged { player, rune } => {
+            if let Some(h) = shown.heroes.get_mut(*player as usize) {
+                if let Some(i) = h.runes.iter().position(|r| r == rune) {
+                    h.runes.remove(i);
+                }
+            }
+        }
         Event::Shifted { player, form } => {
             if let Some(h) = shown.heroes.get_mut(*player as usize) {
                 h.form = *form;

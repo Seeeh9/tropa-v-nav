@@ -208,7 +208,7 @@ impl L10n {
                 s
             }
             Effect::Repeat(a, body) => self.tf("fx-repeat", &[("n", n(a)), ("body", self.effects(body).into())]),
-            Effect::Rune(kind, t) => self.fx("rune", Some(*t), &[("r", self.t(&format!("rune-{kind:?}")).into())]),
+            Effect::Rune(kind, t) => self.fx("rune", Some(*t), &[("r", self.t(&format!("rune-{kind:?}")).into()), ("what", self.t(&format!("rune-{kind:?}-short")).into())]),
             Effect::Invoke => self.t("fx-invoke"),
             Effect::Shift => self.t("fx-shift"),
             Effect::Mask(m) => self.tf("fx-mask", &[("m", self.t(&format!("mask-{m:?}")).into())]),
@@ -264,7 +264,10 @@ impl L10n {
                     Effect::Taunt => keys.push("kw-Taunt".into()),
                     Effect::Invoke => keys.push("kw-Invoke".into()),
                     Effect::Shift => keys.push("kw-Shift".into()),
-                    Effect::Rune(kind, _) => keys.push(format!("rune-{kind:?}")),
+                    Effect::Rune(kind, _) => {
+                        keys.push(format!("rune-{kind:?}"));
+                        keys.push("kw-Rune".into());
+                    }
                     Effect::Mask(m) => keys.push(format!("mask-{m:?}")),
                     Effect::If(Cond::Link(_), a, b) => {
                         keys.push("kw-Link".into());
@@ -278,7 +281,11 @@ impl L10n {
                     Effect::Repeat(_, a) | Effect::Once(_, a) | Effect::OncePerTurn(_, a) => walk(a, keys),
                     Effect::ConsumeCurses(_) => keys.push("kw-Curse".into()),
                     Effect::Echo(_) => keys.push("kw-Echo".into()),
-                    Effect::Herb(_) | Effect::Brew => keys.push("kw-Brew".into()),
+                    Effect::Herb(herb) => {
+                        keys.push(format!("herb-{herb}"));
+                        keys.push("kw-Brew".into());
+                    }
+                    Effect::Brew => keys.push("kw-Brew".into()),
                     _ => {}
                 }
             }

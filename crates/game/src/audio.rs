@@ -150,7 +150,7 @@ fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res
             Event::Raised { .. } => ("raised", 1.0),
             Event::Ready { ready: true, .. } => ("ready", 0.9),
             Event::RoundStart(_) => ("round", 0.7),
-            Event::RuneFired { .. } | Event::RuneCarved { .. } => ("rune", 0.8),
+            Event::RuneFired { .. } | Event::RuneCarved { .. } | Event::RuneDischarged { .. } => ("rune", 0.8),
             Event::PotionUsed { .. } | Event::Brewed { .. } => ("potion", 0.9),
             Event::GoldStolen { .. } => ("gold", 0.9),
             Event::Ended { won: true } => ("victory", 1.0),

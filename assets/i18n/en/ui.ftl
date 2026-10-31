@@ -476,3 +476,5 @@ lobby-pick = Choose a hero by the fire
 lobby-hp = Health { $n }
 lobby-relic = Starting relic
 lobby-taken = { $name }'s
+story-glue = The leaves are glued. Rub this corner back and forth to work it loose.
+story-glue-party = The leaves are glued. Take opposite corners, two of you, and pull.

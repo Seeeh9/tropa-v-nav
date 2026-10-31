@@ -57,7 +57,7 @@ const GHOST_LINGER: f32 = 1.5;
 /// How much more a pull past the paper's reach counts than the mouse moved.
 const PULL: f32 = 2.5;
 /// Stage pixels at the foot of the screen that belong to the story's buttons, not the book.
-const BUTTON_BAND: f32 = 130.0;
+const BUTTON_BAND: f32 = 90.0;
 
 pub fn plugin(app: &mut App) {
     #[cfg(feature = "dev")]
@@ -88,7 +88,7 @@ pub struct Torn {
 }
 
 /// What the open spread shows.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct Spread {
     /// Painting on the left page, an asset stem such as `story/pro_1`.
     pub picture: String,
@@ -99,8 +99,10 @@ pub struct Spread {
     /// Page numbers printed at the foot of the two pages.
     pub numbers: (u32, u32),
     /// The right-hand page is two leaves glued together, and between them lies this act's
-    /// secret spread: peeled apart slowly by hand it opens; turned by the story's button, the
-    /// glued pair turns over as one and the secret is never seen.
+    /// secret spread. Taken up like any page, the glued pair turns over as one and the secret is
+    /// never seen; only the page numbers give it away. To part them a corner must first be worked
+    /// loose: alone by rubbing at it with a nail, in a party by two readers pulling at opposite
+    /// corners together. Then a slow pull peels the leaf off the secret; a jerk tears it.
     pub secret: Option<(u8, Box<Spread>)>,
     /// This spread was glued shut: each page bears, mirrored and faint, ink torn from the other.
     pub peeled: bool,
@@ -117,7 +119,7 @@ pub struct Found {
 }
 
 /// One side of a spread.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Half {
     Left,
     Right,
@@ -157,6 +159,10 @@ struct Ghost {
     speed: Vec3,
     /// The point of the leaf it holds.
     hold: Option<usize>,
+    /// The leaf it holds is being peeled off its secret.
+    peeling: bool,
+    /// The glued corner it pulls at.
+    tug: Option<usize>,
     color: Color,
     /// Seconds since it was last heard of.
     quiet: f32,
@@ -176,6 +182,8 @@ enum Hand {
     Gone,
     /// Another reader, carrying the leaf torn loose (their seat).
     Carried(u8),
+    /// The reader, working at a corner of a glued leaf to get it loose.
+    Nail,
 }
 
 struct Turning {
@@ -194,6 +202,79 @@ struct Turning {
     peel: Option<u8>,
     /// The leaf is the left-hand page, turned back over to the right.
     back: bool,
+    /// The turn is the book's own: it goes between a page and the secret under it, and the story
+    /// knows nothing of it.
+    own: bool,
+    /// The story's page this turn leads to: `to`, except when turned back onto a secret, which
+    /// lies open in the story's page before.
+    story_to: Spread,
+}
+
+/// What came of a leaf coming to rest.
+#[derive(Default, Debug, PartialEq)]
+struct Settled {
+    /// A secret peeled open: its act, whether whole, whether this reader had a hand in it.
+    found: Option<(u8, bool, bool)>,
+    /// Paper newly lost, and whether it was in this reader's hand.
+    torn: Option<(f32, bool)>,
+}
+
+/// Strokes of a nail that work a glued corner loose, how far each must go, and how long two
+/// readers must pull at opposite corners to do the same.
+const STROKES: f32 = 6.0;
+const STROKE: f32 = 0.02;
+const TUG_TIME: f32 = 1.5;
+/// How high the worked corner has curled by the time it comes loose.
+const CURL: f32 = 0.05;
+/// How long a hand that took a glued leaf off to one side of the cursor eases onto it, seconds.
+const EASE: f32 = 0.6;
+/// Marks on the point a hand's news tells of: it is pulling at a glued corner, not turning the
+/// leaf; or it holds a leaf being peeled.
+const TUG_BIT: u16 = 0x8000;
+const PEEL_BIT: u16 = 0x4000;
+
+/// A nail rubbing back and forth: counts the strokes.
+#[derive(Default)]
+struct Rub {
+    last: Option<Vec3>,
+    heading: Vec2,
+    stroke: f32,
+}
+
+impl Rub {
+    /// The nail has moved here: was a stroke just finished, by turning back after going far enough?
+    fn to(&mut self, at: Vec3) -> bool {
+        let Some(last) = self.last else {
+            self.last = Some(at);
+            return false;
+        };
+        let d = Vec2::new(at.x - last.x, at.z - last.z);
+        if d.length() < 1e-4 {
+            return false;
+        }
+        self.last = Some(at);
+        let turned = self.heading.dot(d) < 0.0;
+        let done = turned && self.stroke >= STROKE;
+        self.stroke = if turned { d.length() } else { self.stroke + d.length() };
+        self.heading = d;
+        done
+    }
+}
+
+/// Is this place on the right-hand page one of the free corners, where a nail can get under it?
+fn at_corner(hit: Vec3) -> bool {
+    hit.x > GUTTER + PAGE_W * 0.72 && hit.x < GUTTER + PAGE_W + 0.02 && hit.z.abs() > PAGE_H * 0.3 && hit.z.abs() < PAGE_H / 2.0 + 0.02
+}
+
+/// Do two hands on a leaf (grid points) pull from different sides of it: head against foot?
+fn pulled_apart(a: (usize, usize), b: (usize, usize)) -> bool {
+    a.0.abs_diff(b.0) + a.1.abs_diff(b.1) >= leaf::NZ / 2
+}
+
+/// How far the cover has swung on its spine, 0 shut to 1 lying open.
+fn cover_turn(open: f32) -> Quat {
+    let t = open.clamp(0.0, 1.0);
+    Quat::from_rotation_z(t * t * (3.0 - 2.0 * t) * PI)
 }
 
 /// How long a let-go leaf may keep stirring before it is taken as come to rest, in seconds.
@@ -261,9 +342,244 @@ pub struct Book {
     heard: bool,
     /// The reader has lifted the cover: the book lies shut on the table until they do.
     pub lifted: bool,
+    /// Acts whose glued corner has been worked loose while this book lies open.
+    loose: Vec<u8>,
+    /// How far the corner of the glued page has been worked, 0..1.
+    worked: f32,
+    /// The nail at work.
+    rub: Rub,
+    /// This reader helped work the corner loose: what is found under it is theirs too.
+    helped: bool,
+    /// Seconds the hand is still easing onto where the cursor is: it took the paper by a point
+    /// off to one side of it, and must not snatch at it to get there.
+    easing: f32,
+    /// This reader's seat, to settle which of two hands peels a leaf they loosened together.
+    pub seat: u8,
+    /// The hand is over a glued corner, or at work on it: the story says what can be done.
+    pub over_glue: bool,
 }
 
 impl Book {
+    fn new(view: Handle<Image>, leaf: Leaf, leaf_meshes: (Handle<Mesh>, Handle<Mesh>), fringe: Handle<Mesh>) -> Self {
+        Book {
+            view,
+            wanted: false,
+            spread: Spread::default(),
+            next: None,
+            prev: None,
+            drag_ok: false,
+            shared: false,
+            news: Vec::new(),
+            ghosts: Default::default(),
+            carried: None,
+            dropped: Vec::new(),
+            shown: None,
+            followed: None,
+            opened: Vec::new(),
+            faces: Default::default(),
+            drawn: Default::default(),
+            turn: None,
+            leaf,
+            kept: false,
+            charged: 0.0,
+            leaf_clock: 0.0,
+            scraps_out: Vec::new(),
+            covered: Vec::new(),
+            leaf_meshes,
+            fringe,
+            open: 0.0,
+            heard: false,
+            lifted: false,
+            loose: Vec::new(),
+            worked: 0.0,
+            rub: Rub::default(),
+            helped: false,
+            easing: 0.0,
+            seat: 0,
+            over_glue: false,
+        }
+    }
+
+    /// Lays the book open at once, with no lifting of the cover: a scene read in the midst of a
+    /// run finds the book already open.
+    pub fn lay_open(&mut self) {
+        self.lifted = true;
+        self.heard = true;
+        self.open = 1.0;
+    }
+
+    /// The act whose glued leaf lies on the right, still shut and not worked loose.
+    fn glued_act(&self) -> Option<u8> {
+        let act = self.shown.as_ref()?.secret.as_ref()?.0;
+        (!self.opened.contains(&act) && !self.loose.contains(&act)).then_some(act)
+    }
+
+    /// Does the left-hand page lie open on a secret, with its glued page just before it?
+    pub fn on_secret(&self) -> bool {
+        self.shown.as_ref().is_some_and(|s| s.peeled)
+    }
+
+    /// The reader's nail goes to a corner of the glued leaf.
+    fn start_nail(&mut self, hit: Vec3) -> Option<usize> {
+        let shown = self.shown.clone()?;
+        let (act, secret) = shown.secret.clone()?;
+        self.fresh_leaf();
+        self.leaf.glue_down();
+        self.leaf.tearing = false;
+        self.wear(Face::LeafFront, &shown, Half::Right);
+        self.wear(Face::LeafBack, &secret, Half::Left);
+        self.wear(Face::Right, &secret, Half::Right);
+        let point = leaf::at(leaf::NX - 1, if hit.z < 0.0 { 0 } else { leaf::NZ - 1 });
+        self.leaf.grab = Some((point, self.leaf.points[point]));
+        self.rub = Rub::default();
+        let story_to = self.spread.clone();
+        self.turn = Some(Turning { from: shown, to: *secret, committed: false, hand: Hand::Nail, loose: 0.0, mine: true, peel: Some(act), back: false, own: true, story_to });
+        Some(point)
+    }
+
+    /// Is another reader pulling at the corner opposite this point?
+    fn other_tug(&self, point: usize) -> Option<u8> {
+        let here = self.leaf.home(point);
+        self.ghosts.iter().enumerate().find_map(|(seat, g)| {
+            let t = g.as_ref()?.tug.filter(|t| *t < self.leaf.points.len())?;
+            pulled_apart(here, self.leaf.home(t)).then_some(seat as u8)
+        })
+    }
+
+    /// The corner has come loose under the reader's hand. Alone they hold it and may pull at once;
+    /// of two readers the lower seat peels, and the other lets go and watches.
+    fn loosen(&mut self, act: u8, partner: Option<u8>) {
+        if !self.loose.contains(&act) {
+            self.loose.push(act);
+        }
+        self.helped = true;
+        self.worked = 1.0;
+        self.easing = EASE;
+        let peels = partner.is_none_or(|other| self.seat < other);
+        self.leaf.tearing = true;
+        let Some(turn) = self.turn.as_mut() else { return };
+        if peels {
+            turn.hand = Hand::Reader;
+        } else {
+            turn.hand = Hand::Gone;
+            self.leaf.grab = None;
+        }
+    }
+
+    /// Turns the left-hand page back over by the book's own hand, from a secret to its glued page.
+    pub fn turn_back_unseen(&mut self) -> bool {
+        if self.turn.is_some() || !self.take_up_back(Hand::Gone) {
+            return false;
+        }
+        self.leaf.tearing = false;
+        let point = self.leaf.nearest(Vec3::new(-(GUTTER + PAGE_W), LEAF_FLOOR.left, PAGE_H * 0.4));
+        let z = self.leaf.points[point].z;
+        if let Some(turn) = self.turn.as_mut() {
+            turn.committed = true;
+            turn.hand = Hand::Unseen { t: 0.0, point, z };
+        }
+        true
+    }
+
+    /// Keeps the paper in step with the story. Was a leaf set turning by the unseen hand?
+    fn follow(&mut self) -> bool {
+        if !self.wanted {
+            self.shown = None;
+            self.followed = None;
+            self.turn = None;
+            self.kept = false;
+            self.opened.clear();
+            self.loose.clear();
+            self.worked = 0.0;
+            self.helped = false;
+            return false;
+        }
+        // the story's page, not what lies open: a secret peeled open is the book's own, and the
+        // story knows nothing of it
+        let spread = self.spread.clone();
+        if self.followed.as_ref() == Some(&spread) {
+            return false;
+        }
+        self.followed = Some(spread.clone());
+        self.worked = 0.0;
+        self.helped = false;
+        // the reader has carried the leaf over, and the story has read on to what it uncovered
+        if let Some(turn) = self.turn.as_mut().filter(|t| t.story_to == spread) {
+            turn.committed = true;
+            self.shown = Some(turn.to.clone());
+            return false;
+        }
+        let mut flip = false;
+        match self.shown.take() {
+            // the book has only just opened, or a turn is under way: no time for the leaf, the pages change
+            // going back a page the unseen hand does not turn: the pages change
+            Some(from) if self.open >= 1.0 && self.turn.is_none() && spread.numbers.0 >= from.numbers.0 => {
+                self.fresh_leaf();
+                // the story's own hand is sure: it never tears what it turns
+                self.leaf.tearing = false;
+                let point = self.leaf.nearest(Vec3::new(GUTTER + PAGE_W, LEAF_FLOOR.right, PAGE_H * 0.4));
+                let z = self.leaf.points[point].z;
+                self.wear(Face::LeafFront, &from, Half::Right);
+                self.wear(Face::LeafBack, &spread, Half::Left);
+                self.wear(Face::Right, &spread, Half::Right);
+                self.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false, peel: None, back: false, own: false, story_to: spread.clone() });
+                flip = true;
+            }
+            _ => {
+                self.turn = None;
+                self.fresh_leaf();
+                self.wear(Face::Left, &spread, Half::Left);
+                self.wear(Face::Right, &spread, Half::Right);
+                // the book opened at another place: its old scraps lie somewhere far back in it
+                self.covered.push(Half::Right);
+            }
+        }
+        self.shown = Some(spread);
+        flip
+    }
+
+    /// The leaf has come to rest: on the far side it becomes the page lying there, on the near
+    /// side it was never turned; a torn leaf stays as it lies, holes and loose pieces and all, over
+    /// the page beneath.
+    fn settle(&mut self) -> Settled {
+        let mut out = Settled::default();
+        let Some(turn) = self.turn.take() else { return out };
+        let Turning { from, to, committed, mine, peel, back, own, .. } = turn;
+        let mine = mine || self.helped;
+        let side = self.leaf.side();
+        let over = if back { side > 0.0 } else { side < 0.0 };
+        // a leaf peeled over onto the left has opened its secret, whoever's hand it was in
+        if let Some(act) = peel.filter(|_| over) {
+            self.opened.push(act);
+            out.found = Some((act, !self.leaf.torn(), mine));
+        }
+        if own && over {
+            self.shown = Some(to.clone());
+        }
+        let done = (committed || own) && over;
+        if self.leaf.torn() {
+            self.kept = true;
+            // only paper newly cut loose costs: a leaf taken up torn again has paid for its old holes
+            let lost = self.leaf.lost();
+            if lost - self.charged > 0.005 {
+                out.torn = Some((lost - self.charged, mine));
+                self.charged = lost;
+            }
+        } else if back {
+            // turned back over, the leaf is the right-hand page before; fallen back, the left again
+            if done {
+                self.wear(Face::Right, &to, Half::Right);
+            } else {
+                self.wear(Face::Left, &from, Half::Left);
+            }
+        } else if done {
+            self.wear(Face::Left, &to, Half::Left);
+        } else {
+            self.wear(Face::Right, &from, Half::Right);
+        }
+        out
+    }
+
     fn wear(&mut self, face: Face, spread: &Spread, half: Half) {
         let new = Some((spread.clone(), half));
         // a leaf come down on the left lies over the scraps that lay there
@@ -308,7 +624,11 @@ impl Book {
                 Some(g) if g.quiet > 1e-3 && g.quiet < 0.5 => (at - g.at) / g.quiet,
                 _ => Vec3::ZERO,
             };
-            *slot = Some(Ghost { at, speed, hold: hold.map(usize::from), color, quiet: 0.0 });
+            // a hand at a glued corner is not turning the leaf; the marks say which it is
+            let point = hold.map(|h| usize::from(h & !(TUG_BIT | PEEL_BIT)));
+            let tugging = hold.is_some_and(|h| h & TUG_BIT != 0);
+            let peeling = hold.is_some_and(|h| h & PEEL_BIT != 0);
+            *slot = Some(Ghost { at, speed, hold: point.filter(|_| !tugging), peeling, tug: point.filter(|_| tugging), color, quiet: 0.0 });
         }
     }
 
@@ -337,15 +657,18 @@ impl Book {
     /// once, and the leaf wears this one's right side and the next one's left.
     fn take_up(&mut self, hand: Hand) -> bool {
         let Some(shown) = self.shown.clone() else { return false };
-        // a hand on a glued right-hand page lifts the top leaf off the secret beneath it
-        let peel = shown.secret.clone().filter(|(act, _)| !self.opened.contains(act));
-        let (to, peel) = match peel {
-            Some((act, secret)) => (*secret, Some(act)),
-            None => match self.next.clone() {
-                Some(next) => (next, None),
+        // a glued pair turns over as one, unless its corner has been worked loose: then the hand
+        // lifts the top leaf off the secret beneath it. Peeled open once, the secret is a page
+        // like any other, though the story has no part in it
+        let (to, peel, own) = match shown.secret.clone() {
+            Some((act, secret)) if self.opened.contains(&act) => (*secret, None, true),
+            Some((act, secret)) if self.loose.contains(&act) => (*secret, Some(act), true),
+            _ => match self.next.clone() {
+                Some(next) => (next, None, false),
                 None => return false,
             },
         };
+        let story_to = if own { self.spread.clone() } else { to.clone() };
         self.fresh_leaf();
         if peel.is_some() {
             self.leaf.glue_down();
@@ -356,7 +679,7 @@ impl Book {
         self.wear(Face::LeafBack, &to, Half::Left);
         self.wear(Face::Right, &to, Half::Right);
         let mine = matches!(hand, Hand::Reader);
-        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel, back: false });
+        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel, back: false, own, story_to });
         true
     }
 
@@ -364,7 +687,18 @@ impl Book {
     /// that spread at once, and the leaf, lying on the left, wears this one's left side up and
     /// the one before's right side under it.
     fn take_up_back(&mut self, hand: Hand) -> bool {
-        let (Some(shown), Some(to)) = (self.shown.clone(), self.prev.clone()) else { return false };
+        let Some(shown) = self.shown.clone() else { return false };
+        // from a secret back to its glued page, the book's own turn; a secret opened before lies
+        // between this page and the one before, and is what the leaf uncovers
+        let (to, story_to, own) = if shown.peeled {
+            (self.spread.clone(), self.spread.clone(), true)
+        } else {
+            let Some(prev) = self.prev.clone() else { return false };
+            match prev.secret.clone().filter(|(act, _)| self.opened.contains(act)) {
+                Some((_, secret)) => (*secret, prev, false),
+                None => (prev.clone(), prev, false),
+            }
+        };
         // a torn leaf turned over onto the left is turned back as it is, holes and all
         if !self.fresh_leaf_for(false) {
             self.leaf.lay_left();
@@ -374,7 +708,7 @@ impl Book {
         self.wear(Face::LeafFront, &to, Half::Right);
         self.wear(Face::Left, &to, Half::Left);
         let mine = matches!(hand, Hand::Reader);
-        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel: None, back: true });
+        self.turn = Some(Turning { from: shown, to, committed: false, hand, loose: 0.0, mine, peel: None, back: true, own, story_to });
         true
     }
 }
@@ -716,36 +1050,7 @@ fn setup(
         commands.spawn((PageCanvas(face), Node { width: px(PAGE_PX.x as f32), height: px(PAGE_PX.y as f32), ..default() }, UiTargetCamera(cam)));
     }
 
-    commands.insert_resource(Book {
-        view,
-        wanted: false,
-        spread: Spread::default(),
-        next: None,
-        prev: None,
-        drag_ok: false,
-        shared: false,
-        news: Vec::new(),
-        ghosts: Default::default(),
-        carried: None,
-        dropped: Vec::new(),
-        shown: None,
-        followed: None,
-        opened: Vec::new(),
-        faces: Default::default(),
-        drawn: Default::default(),
-        turn: None,
-        leaf,
-        kept: false,
-        charged: 0.0,
-        leaf_clock: 0.0,
-        scraps_out: Vec::new(),
-        covered: Vec::new(),
-        leaf_meshes: (front, back),
-        fringe,
-        open: 0.0,
-        heard: false,
-        lifted: false,
-    });
+    commands.insert_resource(Book::new(view, leaf, (front, back), fringe));
 }
 
 fn play(commands: &mut Commands, art: &Art, assets: &AssetServer, mixer: &Mixer, name: &str) {
@@ -776,6 +1081,10 @@ fn open_cover(
         book.open = 0.0;
         book.heard = false;
         book.lifted = false;
+        // put away shut: left swung open, it would be seen open next time, and snap shut at a touch
+        for mut tf in &mut cover {
+            tf.rotation = cover_turn(0.0);
+        }
         return;
     }
     // shut on the table until the reader opens it (an unattended dev run opens it at once)
@@ -794,61 +1103,16 @@ fn open_cover(
     }
     // a heavy board: slow to lift, quicker as it falls over, and it lies flat open
     book.open = (book.open + time.delta_secs() / 1.4).min(1.0);
-    let t = book.open;
-    let eased = t * t * (3.0 - 2.0 * t);
     for mut tf in &mut cover {
-        tf.rotation = Quat::from_rotation_z(eased * PI);
+        tf.rotation = cover_turn(book.open);
     }
 }
 
 /// Keeps the paper in step with the story: a new spread turns the leaf over to it.
 fn follow_story(mut commands: Commands, mut book: ResMut<Book>, art: Res<Art>, assets: Res<AssetServer>, mixer: Res<Mixer>) {
-    if !book.wanted {
-        book.shown = None;
-        book.followed = None;
-        book.turn = None;
-        book.kept = false;
-        book.opened.clear();
-        return;
+    if book.follow() {
+        play(&mut commands, &art, &assets, &mixer, "book_flip");
     }
-    // the story's page, not what lies open: a secret peeled open is the book's own, and the
-    // story knows nothing of it
-    let spread = book.spread.clone();
-    if book.followed.as_ref() == Some(&spread) {
-        return;
-    }
-    book.followed = Some(spread.clone());
-    // the reader has carried the leaf over, and the story has read on to what it uncovered
-    if let Some(turn) = book.turn.as_mut().filter(|t| t.to == spread) {
-        turn.committed = true;
-        book.shown = Some(spread);
-        return;
-    }
-    match book.shown.take() {
-        // the book has only just opened, or a turn is under way: no time for the leaf, the pages change
-        // going back a page the unseen hand does not turn: the pages change
-        Some(from) if book.open >= 1.0 && book.turn.is_none() && spread.numbers.0 >= from.numbers.0 => {
-            book.fresh_leaf();
-            // the story's own hand is sure: it never tears what it turns
-            book.leaf.tearing = false;
-            let point = book.leaf.nearest(Vec3::new(GUTTER + PAGE_W, LEAF_FLOOR.right, PAGE_H * 0.4));
-            let z = book.leaf.points[point].z;
-            book.wear(Face::LeafFront, &from, Half::Right);
-            book.wear(Face::LeafBack, &spread, Half::Left);
-            book.wear(Face::Right, &spread, Half::Right);
-            book.turn = Some(Turning { from, to: spread.clone(), committed: true, hand: Hand::Unseen { t: 0.0, point, z }, loose: 0.0, mine: false, peel: None, back: false });
-            play(&mut commands, &art, &assets, &mixer, "book_flip");
-        }
-        _ => {
-            book.turn = None;
-            book.fresh_leaf();
-            book.wear(Face::Left, &spread, Half::Left);
-            book.wear(Face::Right, &spread, Half::Right);
-            // the book opened at another place: its old scraps lie somewhere far back in it
-            book.covered.push(Half::Right);
-        }
-    }
-    book.shown = Some(spread);
 }
 
 /// The point of the leaf the hand holds, or the one nearest it.
@@ -889,6 +1153,7 @@ fn hold_leaf(
     let pressed = down && !*was_down;
     *was_down = down;
     let book = &mut *book;
+    book.over_glue = false;
     // over a page read together the others see where the hand is, a few times a second
     *since_told += time.delta_secs();
     let mut tell_news = |book: &mut Book, news: HandNews, now: bool| {
@@ -897,7 +1162,7 @@ fn hold_leaf(
             book.news.push(news);
         }
     };
-    let hand_news = |at: Vec3, hold: Option<usize>| HandNews::Hand { at: at.to_array(), hold: hold.map(|p| p as u16) };
+    let hand_news = |at: Vec3, hold: Option<u16>| HandNews::Hand { at: at.to_array(), hold };
     // torn paper carried: `piece` 0 the leaf in play, else a scrap's age
     let carry_news = |piece: u32, point: Option<usize>, at: Vec3| HandNews::Carry { piece, point: point.map(|p| p as u16), at: at.to_array() };
     // a scrap of an older leaf in the hand: it goes where the hand goes, and falls when let go
@@ -936,7 +1201,7 @@ fn hold_leaf(
                     }
                     None => {
                         let Some(shown) = book.shown.clone() else { return };
-                        book.turn = Some(Turning { from: shown.clone(), to: shown, committed: false, hand: Hand::Loose, loose: 0.0, mine: true, peel: None, back: false });
+                        book.turn = Some(Turning { from: shown.clone(), to: shown.clone(), story_to: shown, committed: false, hand: Hand::Loose, loose: 0.0, mine: true, peel: None, back: false, own: false });
                     }
                 }
                 book.leaf.grab = Some((p, book.leaf.points[p]));
@@ -962,6 +1227,14 @@ fn hold_leaf(
             return;
         }
         let Some(hit) = cursor_on(camera, at, c, LEAF_FLOOR.right) else { return };
+        // a nail to the corner of a glued leaf
+        if book.glued_act().is_some() && at_corner(hit) {
+            if let Some(point) = book.start_nail(hit) {
+                tell_news(book, hand_news(hit, Some(point as u16 | TUG_BIT)), true);
+                play(&mut commands, &art, &assets, &mixer, "book_rustle");
+            }
+            return;
+        }
         if hit.z.abs() > PAGE_H / 2.0 {
             return;
         }
@@ -980,8 +1253,46 @@ fn hold_leaf(
         let peeling = book.turn.as_ref().is_some_and(|t| t.peel.is_some());
         let point = if peeling { book.leaf.nearest_border(hit) } else { book.leaf.nearest(hit) };
         book.leaf.grab = Some((point, book.leaf.points[point]));
-        tell_news(book, hand_news(hit, Some(point)), true);
+        if peeling {
+            book.easing = EASE;
+        }
+        tell_news(book, hand_news(hit, Some(point as u16 | if peeling { PEEL_BIT } else { 0 })), true);
         play(&mut commands, &art, &assets, &mixer, "book_rustle");
+        return;
+    }
+    // a nail at a glued corner: alone it rubs the corner loose stroke by stroke, in a party it
+    // holds on while another reader pulls at the opposite corner
+    if matches!(book.turn.as_ref().map(|t| &t.hand), Some(Hand::Nail)) {
+        book.over_glue = true;
+        let Some((point, held)) = book.leaf.grab else { return };
+        if !down {
+            tell_news(book, hand_news(held, None), true);
+            book.leaf.grab = None;
+            if let Some(turn) = book.turn.as_mut() {
+                turn.hand = Hand::Gone;
+            }
+            return;
+        }
+        let Some(hit) = cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right)) else { return };
+        let partner = book.other_tug(point);
+        if book.shared {
+            if partner.is_some() {
+                book.worked += time.delta_secs() / TUG_TIME;
+            }
+        } else if book.rub.to(hit) {
+            book.worked += 1.0 / STROKES;
+            play(&mut commands, &art, &assets, &mixer, "book_scrap");
+        }
+        // the corner curls up as the glue under it gives
+        let flat = Vec3::new(GUTTER + PAGE_W, LEAF_FLOOR.right, if hit.z < 0.0 { -PAGE_H / 2.0 } else { PAGE_H / 2.0 });
+        let rest = Vec3::new(flat.x, flat.y, held.z);
+        book.leaf.grab = Some((point, rest + Vec3::Y * CURL * book.worked.min(1.0)));
+        tell_news(book, hand_news(hit, Some(point as u16 | TUG_BIT)), false);
+        let act = book.turn.as_ref().and_then(|t| t.peel);
+        if let (true, Some(act)) = (book.worked >= 1.0, act) {
+            book.loosen(act, partner);
+            play(&mut commands, &art, &assets, &mixer, "book_peel");
+        }
         return;
     }
     // a piece torn loose, carried: lifted a little over whatever it is carried across
@@ -1008,6 +1319,7 @@ fn hold_leaf(
     if !holding {
         // an empty hand hovering over the book
         if let Some(hit) = cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right)) {
+            book.over_glue = book.turn.is_none() && book.open >= 1.0 && book.glued_act().is_some() && at_corner(hit);
             tell_news(book, hand_news(hit, None), false);
         }
         return;
@@ -1037,16 +1349,21 @@ fn hold_leaf(
             if over {
                 turn.committed = true;
                 carry_on(turn, &mut book.leaf);
-                turned_back.write(TurnedBack);
+                if !turn.own {
+                    turned_back.write(TurnedBack);
+                }
                 play(&mut commands, &art, &assets, &mixer, "book_flip");
             }
             return;
         }
-        // a leaf peeled off a secret opens the book's own spread: the story does not read on
+        // a leaf peeled off a secret falls where it will; the secret itself, once open, is turned
+        // like any page, though the story does not read on
         if over && turn.peel.is_none() {
             turn.committed = true;
             carry_on(turn, &mut book.leaf);
-            turned.write(Turned);
+            if !turn.own {
+                turned.write(Turned);
+            }
             play(&mut commands, &art, &assets, &mixer, "book_flip");
         }
         return;
@@ -1068,12 +1385,20 @@ fn hold_leaf(
     let out = Vec2::new(hit.x, hit.z - rest_z);
     let beyond = (out.length() - reach).max(0.0);
     let pull = out.normalize_or_zero() * beyond * PULL;
-    let hand = Vec3::new(x + pull.x, y, z + pull.y);
+    let aim = Vec3::new(x + pull.x, y, z + pull.y);
+    // a hand that took the paper off to one side of the cursor comes to it gently: a jump of the
+    // hand counts as a jerk, and would tear what it only just got loose
+    let hand = if book.easing > 0.0 {
+        book.easing -= time.delta_secs();
+        hand.lerp(aim, 0.06)
+    } else {
+        aim
+    };
     book.leaf.grab = Some((point, hand));
     // a page turned back is told the others whole when it lands, not hand by hand: there the
     // hand would take up the right-hand page instead
-    let back = book.turn.as_ref().is_some_and(|t| t.back);
-    tell_news(book, hand_news(hand, (!back).then_some(point)), false);
+    let (back, peeling) = book.turn.as_ref().map_or((false, false), |t| (t.back, t.peel.is_some()));
+    tell_news(book, hand_news(hand, (!back).then_some(point as u16 | if peeling { PEEL_BIT } else { 0 })), false);
 }
 
 /// Dev: `TROPA_GHOST=1` plays a second reader, as their machine would tell of them: a hand that
@@ -1090,6 +1415,12 @@ fn dev_ghost(time: Res<Time>, mut book: ResMut<Book>, mut since: Local<f32>, mut
         return;
     }
     *told = 0.0;
+    // `TROPA_GHOST=tug`: they stand pulling at the head corner of a glued leaf
+    if std::env::var("TROPA_GHOST").as_deref() == Ok("tug") {
+        let color = Color::srgb(0.35, 0.6, 0.95);
+        book.remote_hand(1, color, [GUTTER + PAGE_W, LEAF_FLOOR.right, -PAGE_H / 2.0], Some(leaf::at(NX - 1, 0) as u16 | TUG_BIT));
+        return;
+    }
     let t = *since - 2.0;
     let corner = leaf::at(NX - 1, NZ - 4) as u16;
     let z = PAGE_H * ((NZ - 4) as f32 / (NZ - 1) as f32 - 0.5);
@@ -1125,8 +1456,12 @@ fn follow_ghosts(
     }
     // another reader takes hold of the page lying still
     if book.turn.is_none() && book.open >= 1.0 {
-        let holder = book.ghosts.iter().enumerate().find_map(|(seat, g)| g.as_ref().and_then(|g| g.hold.map(|p| (seat as u8, p, g.at))));
-        if let Some((seat, point, at)) = holder {
+        let holder = book.ghosts.iter().enumerate().find_map(|(seat, g)| g.as_ref().and_then(|g| g.hold.map(|p| (seat as u8, p, g.at, g.peeling))));
+        if let Some((seat, point, at, peeling)) = holder {
+            // they peel what they and another worked loose, even if this reader had no hand in it
+            if let Some(act) = book.glued_act().filter(|_| peeling) {
+                book.loose.push(act);
+            }
             if book.take_up(Hand::Remote(seat)) && point < book.leaf.points.len() {
                 book.leaf.grab = Some((point, at));
             }
@@ -1247,36 +1582,12 @@ fn move_leaf(
     if !book.leaf.still() && turn.loose < SETTLE && !landed {
         return;
     }
-    // at rest: on the left the leaf becomes the left-hand page, on the right it was never turned;
-    // a torn leaf stays as it lies, holes and loose pieces and all, over the page beneath
-    let (from, to, committed, turn_mine, peel, back) = (turn.from.clone(), turn.to.clone(), turn.committed, turn.mine, turn.peel, turn.back);
-    book.turn = None;
-    // a leaf peeled over onto the left has opened its secret, whoever's hand it was in
-    if let Some(act) = peel.filter(|_| book.leaf.side() < 0.0) {
-        book.opened.push(act);
-        book.shown = Some(to.clone());
-        found.write(Found { act, whole: !book.leaf.torn(), mine: turn_mine });
+    let settled = book.settle();
+    if let Some((act, whole, mine)) = settled.found {
+        found.write(Found { act, whole, mine });
     }
-    let committed = committed || (peel.is_some() && book.leaf.side() < 0.0);
-    if book.leaf.torn() {
-        book.kept = true;
-        // only paper newly cut loose costs: a leaf taken up torn again has paid for its old holes
-        let lost = book.leaf.lost();
-        if lost - book.charged > 0.005 {
-            torn.write(Torn { lost: lost - book.charged, mine: turn_mine });
-            book.charged = lost;
-        }
-    } else if back {
-        // turned back over, the leaf is the right-hand page before; fallen back, the left again
-        if committed && book.leaf.side() > 0.0 {
-            book.wear(Face::Right, &to, Half::Right);
-        } else {
-            book.wear(Face::Left, &from, Half::Left);
-        }
-    } else if committed && book.leaf.side() < 0.0 {
-        book.wear(Face::Left, &to, Half::Left);
-    } else {
-        book.wear(Face::Right, &from, Half::Right);
+    if let Some((lost, mine)) = settled.torn {
+        torn.write(Torn { lost, mine });
     }
 }
 
@@ -1403,7 +1714,7 @@ fn carry_remote(time: Res<Time>, mut book: ResMut<Book>, mut scraps: Query<&mut 
             }
             None => {
                 let Some(shown) = book.shown.clone() else { return };
-                book.turn = Some(Turning { from: shown.clone(), to: shown, committed: false, hand: Hand::Carried(seat), loose: 0.0, mine: false, peel: None, back: false });
+                book.turn = Some(Turning { from: shown.clone(), to: shown.clone(), story_to: shown, committed: false, hand: Hand::Carried(seat), loose: 0.0, mine: false, peel: None, back: false, own: false });
             }
         }
         // their machine tears it; here it only follows, and is told of the tears
@@ -1493,6 +1804,16 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
     }
 }
 
+/// What is printed at the foot of a page. A glued leaf covers the two pages between its numbers,
+/// and the only sign of them is its number running on past them: "3–6".
+fn number_label(spread: &Spread, half: Half) -> String {
+    match half {
+        Half::Left => spread.numbers.0.to_string(),
+        Half::Right if spread.secret.is_some() => format!("{}–{}", spread.numbers.1, spread.numbers.1 + 3),
+        Half::Right => spread.numbers.1.to_string(),
+    }
+}
+
 fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer) {
     let parchment = art.image(assets, "book/parchment");
     commands.entity(entity).despawn_children();
@@ -1504,6 +1825,7 @@ fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Ha
         Half::Left => spread.numbers.0,
         Half::Right => spread.numbers.1,
     };
+    let label = number_label(spread, half);
     let ink = Color::srgb(0.17, 0.11, 0.07);
     page.with_children(|p| {
         print_content(p, spread, half, fonts, art, assets, 1.0);
@@ -1513,7 +1835,7 @@ fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Ha
         if number > 0 {
             p.spawn((
                 Node { position_type: PositionType::Absolute, left: px(0), bottom: px(56), width: px(PAGE_PX.x as f32), justify_content: JustifyContent::Center, ..default() },
-                children![crate::theme::text(number.to_string(), &fonts.num, 40.0, ink.with_alpha(0.8))],
+                children![crate::theme::text(label, &fonts.num, 40.0, ink.with_alpha(0.8))],
             ));
         }
     });
@@ -1659,5 +1981,264 @@ fn sway_camera(window: Single<&Window>, scale: Res<UiScale>, mut cam: Query<&mut
     for mut tf in &mut cam {
         tf.translation = tf.translation.lerp(want, (time.delta_secs() * 3.0).min(1.0));
         *tf = tf.looking_at(LOOK, Vec3::Y);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spread(n: u32, secret: Option<(u8, Spread)>) -> Spread {
+        Spread { picture: format!("p{n}"), title: None, text: format!("t{n}"), numbers: (n, n + 1), secret: secret.map(|(a, s)| (a, Box::new(s))), peeled: false }
+    }
+
+    fn secret(n: u32) -> Spread {
+        Spread { peeled: true, ..spread(n, None) }
+    }
+
+    fn book_at(main: Spread) -> Book {
+        let mut b = Book::new(Handle::default(), Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR), (Handle::default(), Handle::default()), Handle::default());
+        b.wanted = true;
+        b.lay_open();
+        b.spread = main;
+        b.follow();
+        b
+    }
+
+    /// Carries the held leaf slowly over the spine, lets go, and lets it come to rest.
+    fn carry_over(b: &mut Book, point: usize, back: bool) -> Settled {
+        let z = b.leaf.points[point].z;
+        let reach = GUTTER + PAGE_W;
+        for k in 0..=360 {
+            let a = PI * k as f32 / 360.0;
+            let a = if back { PI - a } else { a };
+            b.leaf.grab = Some((point, Vec3::new(reach * a.cos(), LEAF_FLOOR.right + reach * a.sin() * 0.6, z)));
+            b.leaf.step(1.0 / 60.0);
+        }
+        b.leaf.grab = None;
+        for _ in 0..240 {
+            b.leaf.step(1.0 / 60.0);
+        }
+        b.settle()
+    }
+
+    fn corner() -> usize {
+        leaf::at(leaf::NX - 1, leaf::NZ - 1)
+    }
+
+    #[test]
+    fn a_glued_pair_taken_up_turns_as_one_past_its_secret() {
+        let mut b = book_at(spread(2, Some((1, secret(4)))));
+        b.next = Some(spread(6, None));
+        assert!(b.take_up(Hand::Reader));
+        let t = b.turn.as_ref().unwrap();
+        assert_eq!(t.to.numbers.0, 6, "went on to the next page, not to the secret");
+        assert!(t.peel.is_none() && !t.own);
+    }
+
+    #[test]
+    fn a_glued_last_page_does_not_give_way_to_a_plain_pull() {
+        let mut b = book_at(spread(2, Some((1, secret(4)))));
+        assert!(!b.take_up(Hand::Reader), "nothing to turn to, and the glue holds");
+        assert!(b.turn.is_none());
+    }
+
+    #[test]
+    fn a_nail_needs_several_strokes_back_and_forth() {
+        let mut r = Rub::default();
+        // one long drag is no rubbing
+        assert!((0..50).all(|k| !r.to(Vec3::new(k as f32 * 0.01, 0.0, 0.0))));
+        let mut strokes = 0;
+        for k in 0..12 {
+            let x = if k % 2 == 0 { 0.0 } else { 0.05 };
+            for s in 0..5 {
+                let v = if k % 2 == 0 { 0.05 - x * 0.0 - 0.01 * s as f32 } else { 0.01 * s as f32 };
+                strokes += r.to(Vec3::new(v, 0.0, 0.0)) as i32;
+            }
+        }
+        assert!(strokes >= STROKES as i32, "{strokes}");
+    }
+
+    #[test]
+    fn only_corners_take_a_nail() {
+        assert!(at_corner(Vec3::new(GUTTER + PAGE_W * 0.9, 0.0, PAGE_H * 0.45)));
+        assert!(at_corner(Vec3::new(GUTTER + PAGE_W * 0.9, 0.0, -PAGE_H * 0.45)));
+        assert!(!at_corner(Vec3::new(GUTTER + PAGE_W * 0.5, 0.0, 0.0)));
+        assert!(!at_corner(Vec3::new(GUTTER + PAGE_W * 0.9, 0.0, 0.0)));
+        assert!(!at_corner(Vec3::new(-(GUTTER + PAGE_W * 0.9), 0.0, PAGE_H * 0.45)));
+    }
+
+    #[test]
+    fn worked_loose_the_leaf_peels_slowly_onto_its_secret_and_back() {
+        let main = spread(2, Some((1, secret(4))));
+        let mut b = book_at(main.clone());
+        b.next = Some(spread(6, None));
+        assert_eq!(b.glued_act(), Some(1));
+        // the nail goes in, and the corner comes loose under it: the same hand may pull on
+        let point = b.start_nail(Vec3::new(0.9, 0.0, 0.6)).unwrap();
+        b.loosen(1, None);
+        assert!(matches!(b.turn.as_ref().unwrap().hand, Hand::Reader));
+        let s = carry_over(&mut b, point, false);
+        assert_eq!(s.found, Some((1, true, true)), "peeled whole, and it is ours");
+        assert!(b.on_secret());
+        assert_eq!(b.shown.as_ref().unwrap().numbers.0, 4);
+        assert_eq!(b.spread, main, "the story has not moved");
+        // and back from the secret to the glued page, a turn of the book's own
+        assert!(b.take_up_back(Hand::Reader));
+        assert!(b.turn.as_ref().unwrap().own);
+        let s = carry_over(&mut b, corner(), true);
+        assert_eq!(s, Settled::default());
+        assert_eq!(b.shown.as_ref(), Some(&main));
+        // forward again: no glue left to pull, the secret opens like a page
+        assert!(b.take_up(Hand::Reader));
+        let t = b.turn.as_ref().unwrap();
+        assert!(t.peel.is_none() && t.own && t.to.peeled);
+        let s = carry_over(&mut b, corner(), false);
+        assert_eq!(s.found, None, "found only once");
+        assert!(b.on_secret());
+        // on from the secret to the next page: that one the story reads on to
+        assert!(b.take_up(Hand::Reader));
+        let t = b.turn.as_ref().unwrap();
+        assert!(!t.own);
+        assert_eq!(t.to.numbers.0, 6);
+    }
+
+    #[test]
+    fn let_go_short_a_peel_falls_back_and_nothing_is_found() {
+        let main = spread(2, Some((1, secret(4))));
+        let mut b = book_at(main.clone());
+        let point = b.start_nail(Vec3::new(0.9, 0.0, 0.6)).unwrap();
+        b.leaf.grab = None;
+        for _ in 0..120 {
+            b.leaf.step(1.0 / 60.0);
+        }
+        assert_eq!(b.leaf.home(point).0, leaf::NX - 1);
+        assert_eq!(b.settle(), Settled::default());
+        assert_eq!(b.shown.as_ref(), Some(&main));
+        assert_eq!(b.glued_act(), Some(1), "still glued");
+    }
+
+    #[test]
+    fn turning_back_goes_to_the_story_page_before_and_lands_there() {
+        let (one, two) = (spread(2, None), spread(4, None));
+        let mut b = book_at(two.clone());
+        b.prev = Some(one.clone());
+        assert!(b.take_up_back(Hand::Reader));
+        let t = b.turn.as_ref().unwrap();
+        assert!(!t.own);
+        assert_eq!(t.to, one);
+        // the reader carries it over, the story goes back: the book follows, no page is doubled
+        b.turn.as_mut().unwrap().committed = true;
+        b.spread = one.clone();
+        b.prev = None;
+        assert!(!b.follow(), "the leaf in the hand is the turn, the unseen hand has no part");
+        assert_eq!(b.shown.as_ref(), Some(&one));
+        let s = carry_over(&mut b, corner(), true);
+        assert_eq!(s, Settled::default());
+        assert_eq!(b.faces[Face::Right as usize], Some((one.clone(), Half::Right)));
+        assert_eq!(b.faces[Face::Left as usize], Some((one, Half::Left)));
+        assert!(!b.take_up_back(Hand::Reader), "the first page has nothing before it");
+    }
+
+    #[test]
+    fn let_go_short_a_turn_back_falls_back() {
+        let (one, two) = (spread(2, None), spread(4, None));
+        let mut b = book_at(two.clone());
+        b.prev = Some(one);
+        assert!(b.take_up_back(Hand::Reader));
+        for _ in 0..120 {
+            b.leaf.step(1.0 / 60.0);
+        }
+        assert_eq!(b.settle(), Settled::default());
+        assert_eq!(b.shown.as_ref(), Some(&two));
+        assert_eq!(b.faces[Face::Left as usize], Some((two, Half::Left)));
+    }
+
+    #[test]
+    fn turning_back_past_an_opened_secret_lands_on_the_secret() {
+        let main = spread(2, Some((1, secret(4))));
+        let next = spread(6, None);
+        let mut b = book_at(next);
+        b.opened.push(1);
+        b.prev = Some(main.clone());
+        assert!(b.take_up_back(Hand::Reader));
+        b.turn.as_mut().unwrap().committed = true;
+        b.spread = main;
+        b.prev = None;
+        b.follow();
+        assert!(b.on_secret(), "what lay between is what the leaf uncovers");
+    }
+
+    #[test]
+    fn the_unseen_hand_turns_a_secret_back() {
+        let main = spread(2, Some((1, secret(4))));
+        let mut b = book_at(main.clone());
+        b.opened.push(1);
+        b.shown = main.secret.as_ref().map(|(_, s)| (**s).clone());
+        assert!(b.turn_back_unseen());
+        let t = b.turn.as_ref().unwrap();
+        assert!(t.own && t.back && matches!(t.hand, Hand::Unseen { .. }));
+    }
+
+    #[test]
+    fn the_story_reading_on_turns_a_leaf_and_a_new_book_starts_clean() {
+        let mut b = book_at(spread(2, Some((1, secret(4)))));
+        b.spread = spread(6, None);
+        assert!(b.follow(), "the unseen hand carries the glued pair over");
+        assert!(b.turn.as_ref().unwrap().peel.is_none());
+        b.opened.push(1);
+        b.loose.push(1);
+        b.wanted = false;
+        b.follow();
+        assert!(b.shown.is_none() && b.turn.is_none() && b.opened.is_empty() && b.loose.is_empty());
+    }
+
+    #[test]
+    fn a_corner_two_readers_pull_at() {
+        let mut b = book_at(spread(2, Some((1, secret(4)))));
+        let point = b.start_nail(Vec3::new(0.9, 0.0, 0.6)).unwrap();
+        let color = Color::WHITE;
+        assert_eq!(b.other_tug(point), None, "alone in a party nothing gives");
+        // a hand at the same corner is no help; one at the opposite corner is
+        b.remote_hand(1, color, [0.0; 3], Some(point as u16 | TUG_BIT));
+        assert_eq!(b.other_tug(point), None);
+        b.remote_hand(1, color, [0.0; 3], Some(leaf::at(leaf::NX - 1, 0) as u16 | TUG_BIT));
+        assert_eq!(b.other_tug(point), Some(1));
+        assert!(b.ghosts[1].as_ref().unwrap().hold.is_none(), "a tug is not a hand turning the leaf");
+        // the lower seat peels, the other lets go and watches
+        b.seat = 0;
+        b.loosen(1, Some(1));
+        assert!(matches!(b.turn.as_ref().unwrap().hand, Hand::Reader));
+        let mut c = book_at(spread(2, Some((1, secret(4)))));
+        c.start_nail(Vec3::new(0.9, 0.0, 0.6));
+        c.seat = 2;
+        c.loosen(1, Some(1));
+        assert!(matches!(c.turn.as_ref().unwrap().hand, Hand::Gone));
+        assert!(c.helped, "whoever helped shares what is found");
+    }
+
+    #[test]
+    fn a_peeling_hand_is_told_as_such() {
+        let mut b = book_at(spread(2, Some((1, secret(4)))));
+        b.remote_hand(1, Color::WHITE, [0.0; 3], Some(corner() as u16 | PEEL_BIT));
+        let g = b.ghosts[1].as_ref().unwrap();
+        assert_eq!(g.hold, Some(corner()));
+        assert!(g.peeling);
+    }
+
+    #[test]
+    fn the_cover_lies_shut_when_not_open_and_a_laid_open_book_stays_open() {
+        assert!(cover_turn(0.0).angle_between(Quat::IDENTITY) < 1e-3);
+        assert!((cover_turn(1.0).angle_between(Quat::IDENTITY) - PI).abs() < 1e-3);
+        let b = book_at(spread(2, None));
+        assert!(b.lifted && b.open >= 1.0 && b.heard);
+    }
+
+    #[test]
+    fn the_foot_of_a_glued_page_gives_it_away() {
+        let glued = spread(2, Some((1, secret(4))));
+        assert_eq!(number_label(&glued, Half::Left), "2");
+        assert_eq!(number_label(&glued, Half::Right), "3–6");
+        assert_eq!(number_label(&spread(6, None), Half::Right), "7");
     }
 }

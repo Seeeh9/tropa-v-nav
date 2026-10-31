@@ -33,7 +33,7 @@ const THRONE_CURSES: usize = 3;
 pub fn plugin(app: &mut App) {
     app.init_resource::<Tale>()
         .init_resource::<PendingVoice>()
-        .add_systems(Update, ((watch_run, turn_pages, tally_votes, show_page, want_book, book_hands, read_secret).chain(), speak_when_open));
+        .add_systems(Update, ((watch_run, turn_pages, tally_votes, show_page, want_book, book_hands, read_secret).chain(), speak_when_open, keep_pages_ready));
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
 }
@@ -78,6 +78,9 @@ pub struct Tale {
     skipped: bool,
     /// Pages of the scene already read, the last read last: turning back goes to them.
     past: Vec<Page>,
+    /// The scene now told opens the run: the book lies shut until the reader lifts its cover. Any
+    /// later scene finds it lying open.
+    shut: bool,
 }
 
 impl Tale {
@@ -213,6 +216,7 @@ fn watch_run(
         if fresh && !silent(&net) {
             // read together, the opening must be the same page for all: a party always hears the prologue
             let party = readers(&net).len() > 1;
+            tale.shut = true;
             match profile.last_ending.clone() {
                 _ if party => tale.tell(vec![page("pro_1"), page("pro_2"), page("pro_3")]),
                 Some(last) if profile.prologue_seen => {
@@ -265,10 +269,10 @@ fn page_button(label: String, fonts: &Fonts) -> impl Bundle {
         Button,
         Hovered::default(),
         Btn(theme::PEAT),
-        Node { width: px(300), padding: UiRect::axes(px(20), px(10)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() },
+        Node { padding: UiRect::axes(px(22), px(5)), border: UiRect::all(px(2)), justify_content: JustifyContent::Center, ..default() },
         BackgroundColor(theme::PEAT),
         BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
-        children![theme::text(label, &fonts.title, 28.0, theme::BONE)],
+        children![theme::text(label, &fonts.title, 20.0, theme::BONE)],
     )
 }
 
@@ -299,6 +303,7 @@ fn turn_pages(
     mut profile: ResMut<Profile>,
     net: Option<Res<Net>>,
     mut run_outbox: ResMut<crate::session::RunOutbox>,
+    mut book: ResMut<crate::book::Book>,
 ) {
     // a secret peeled open whole by this reader: its relic, and the chronicle remembers it
     for f in found.read() {
@@ -332,11 +337,22 @@ fn turn_pages(
         turned_back.clear();
         return;
     }
+    // the key that lifts the cover does not also turn the page under it
+    if !book.lifted {
+        return;
+    }
     // the reader turned the leaf by hand
     if turned.read().count() > 0 {
         commands.trigger(Turn::Leaf);
-    } else if turned_back.read().count() > 0 || keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::Backspace]) {
+    } else if turned_back.read().count() > 0 {
         commands.trigger(Turn::Back);
+    } else if keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::Backspace]) {
+        // back from a secret is the book's own affair: the story stays on the page it lies under
+        if !book.on_secret() {
+            commands.trigger(Turn::Back);
+        } else {
+            book.turn_back_unseen();
+        }
     } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
@@ -344,7 +360,11 @@ fn turn_pages(
     }
 }
 
-fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, net: Option<ResMut<Net>>, speaking: Query<Entity, With<Narration>>) {
+fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, net: Option<ResMut<Net>>, speaking: Query<Entity, With<Narration>>, book: Res<crate::book::Book>) {
+    // a button pressed while the book still lies shut
+    if !book.lifted && matches!(*turn, Turn::Next | Turn::Skip) {
+        return;
+    }
     let skip = matches!(*turn, Turn::Skip);
     let by_hand = matches!(*turn, Turn::Leaf | Turn::TheirLeaf);
     // back a page: for everyone, when the page is read together
@@ -453,6 +473,7 @@ fn book_hands(mut commands: Commands, tale: Res<Tale>, net: Option<ResMut<Net>>,
     let (Some(mut net), Some(mut status)) = (net, status) else { return };
     let notes = std::mem::take(&mut status.book);
     let Some(page) = tale.pages.front().map(|p| p.text.clone()) else { return };
+    book.seat = net.node.my_slot().unwrap_or(0);
     for n in news {
         match n {
             HandNews::Hand { at, hold } => net.node.book_hand(&page, at, hold),
@@ -508,12 +529,44 @@ fn read_secret(
     }
 }
 
-/// The book lies on the table while there is a tale to read.
-fn want_book(tale: Res<Tale>, mut book: ResMut<crate::book::Book>) {
-    if book.wanted != tale.open() {
-        book.wanted = tale.open();
+/// The paintings of the pages still to be read are read in ahead of the turning that shows them,
+/// and each page's secret with it; once read they are let go.
+fn keep_pages_ready(tale: Res<Tale>, art: Res<Art>, assets: Res<AssetServer>, mut held: Local<(Vec<String>, Vec<Handle<Image>>)>) {
+    let stems: Vec<String> = tale.pages.iter().flat_map(|p| std::iter::once(p.picture.clone()).chain(secret_of(p).map(|act| format!("story/secret_{act}")))).collect();
+    if stems != held.0 {
+        held.1 = stems.iter().filter_map(|s| art.image(&assets, s)).collect();
+        held.0 = stems;
     }
 }
+
+/// The book lies on the table while there is a tale to read.
+fn want_book(mut tale: ResMut<Tale>, mut book: ResMut<crate::book::Book>, mut hints: Query<(&mut Text, &mut Visibility), With<GlueHint>>, l10n: Res<L10n>) {
+    if book.wanted != tale.open() {
+        book.wanted = tale.open();
+        let shut = std::mem::take(&mut tale.shut);
+        if book.wanted && !shut {
+            book.lay_open();
+        }
+    }
+    for (mut text, mut vis) in &mut hints {
+        let want = if book.over_glue { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+            text.0 = l10n.t(if book.shared { "story-glue-party" } else { "story-glue" });
+        }
+    }
+}
+
+/// Page numbers of the spread at this place in a scene (1 the first), counting two pages hidden
+/// under each glued leaf before it. Left pages are even, as in any book.
+fn page_numbers(at: usize, glued_before: usize) -> (u32, u32) {
+    let left = 2 * (at + glued_before) as u32;
+    (left, left + 1)
+}
+
+/// What is said while the hand is over a glued corner.
+#[derive(Component)]
+struct GlueHint;
 
 fn show_page(
     mut commands: Commands,
@@ -566,31 +619,26 @@ fn show_page(
     // the book on the table, rendered in 3D; the page's painting and text are printed in it, and
     // the next page waits under the leaf for the reader to turn it. The last page of an act's
     // opening is glued over that act's secret: the only sign is the numbering, which jumps by two
-    let spread = |page: &Page, at: usize| {
-        let at = at as u32;
+    let spread = |page: &Page, at: usize, glued_before: usize| {
+        let numbers = page_numbers(at, glued_before);
         let secret = secret_of(page).map(|act| {
             let hidden = crate::book::Spread {
                 picture: format!("story/secret_{act}"),
                 title: None,
                 text: l10n.t(&format!("story-secret-{act}")),
-                numbers: (at * 2 + 1, at * 2 + 2),
+                numbers: (numbers.0 + 2, numbers.1 + 2),
                 secret: None,
                 peeled: true,
             };
             (act, Box::new(hidden))
         });
-        crate::book::Spread {
-            picture: page.picture.clone(),
-            title: page.title.as_ref().map(|t| l10n.t(t)),
-            text: l10n.t(&page.text),
-            numbers: (at * 2, if secret.is_some() { at * 2 + 3 } else { at * 2 + 1 }),
-            secret,
-            peeled: false,
-        }
+        crate::book::Spread { picture: page.picture.clone(), title: page.title.as_ref().map(|t| l10n.t(t)), text: l10n.t(&page.text), numbers, secret, peeled: false }
     };
-    book.spread = spread(page, at);
-    book.next = tale.pages.get(1).map(|p| spread(p, at + 1));
-    book.prev = tale.past.last().filter(|_| at > 1).map(|p| spread(p, at - 1));
+    let glued = |pages: &[Page]| pages.iter().filter(|p| secret_of(p).is_some()).count();
+    let before = glued(&tale.past);
+    book.spread = spread(page, at, before);
+    book.next = tale.pages.get(1).map(|p| spread(p, at + 1, before + secret_of(page).is_some() as usize));
+    book.prev = tale.past.last().filter(|_| at > 1).map(|p| spread(p, at - 1, before - secret_of(p).is_some() as usize));
     book.drag_ok = true;
     book.shared = together;
     commands.spawn((
@@ -606,7 +654,7 @@ fn show_page(
             left: px(0),
             bottom: px(0),
             width: px(STAGE_W),
-            padding: UiRect::new(px(150), px(150), px(18), px(22)),
+            padding: UiRect::new(px(150), px(150), px(8), px(10)),
             flex_direction: FlexDirection::Column,
             ..default()
         },
@@ -624,6 +672,7 @@ fn show_page(
                         children![
                             theme::text(format!("{at} / {}", tale.total.max(at)), &fonts.num, 26.0, theme::DIM),
                             (theme::text("", &fonts.body, 26.0, theme::CANDLE), VoteLabel, if together { Visibility::Inherited } else { Visibility::Hidden }),
+                            (theme::text("", &fonts.body, 22.0, theme::BONE), GlueHint, Visibility::Hidden),
                         ],
                     ),
                     (
@@ -643,4 +692,35 @@ fn show_page(
         ],
     ));
     tale.shown = Some(root);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pages_are_numbered_as_in_a_book() {
+        assert_eq!(page_numbers(1, 0), (2, 3));
+        assert_eq!(page_numbers(2, 0), (4, 5));
+        // past a glued leaf the two pages hidden under it are skipped: 3 -> 6
+        assert_eq!(page_numbers(2, 1), (6, 7));
+        assert_eq!(page_numbers(3, 1), (8, 9));
+    }
+
+    #[test]
+    fn the_last_page_of_each_act_opening_is_glued() {
+        assert_eq!(secret_of(&page("pro_3")), Some(1));
+        assert_eq!(secret_of(&page("pro_1")), None);
+        assert_eq!(secret_of(&page("act2")), Some(2));
+        assert_eq!(secret_of(&page("fall_nav_1")), None);
+    }
+
+    #[test]
+    fn a_tale_told_in_two_parts_counts_its_pages_on() {
+        let mut t = Tale::default();
+        t.tell(vec![page("pro_1")]);
+        t.tell(vec![page("pro_2")]);
+        assert_eq!((t.total, t.pages.len()), (2, 2));
+        assert!(t.open());
+    }
 }

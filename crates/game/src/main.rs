@@ -15,6 +15,7 @@ mod lobby;
 mod map_party;
 mod menu;
 mod net;
+mod preload;
 mod profile;
 mod run_ui;
 mod session;
@@ -119,7 +120,7 @@ fn main() {
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(PostStartup, menu::apply_settings)
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, map_party::plugin, between::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, map_party::plugin, between::plugin, preload::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins((dev::plugin, lan::plugin));

@@ -34,6 +34,7 @@ const DYING: f32 = 1.1;
 mod aim;
 mod fx;
 mod gore;
+mod held;
 mod impact;
 mod piles;
 mod rig;
@@ -41,7 +42,7 @@ mod stature;
 mod status_row;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((aim::plugin, fx::plugin, gore::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
+    app.add_plugins((aim::plugin, fx::plugin, gore::plugin, held::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -2039,18 +2040,12 @@ fn cue_effects(
                 float(&mut commands, *unit, format!("{} +{delta}", l10n.t(&format!("status-{status:?}"))), color, 24.0, 30.0)
             }
             Event::EnemySkipped { enemy, .. } => float(&mut commands, UnitRef::Enemy(*enemy), "…".into(), theme::BONE, 44.0, 0.0),
-            // every card, anyone's, is seen leaving its player and arriving where it lands
-            Event::CardPlayed { player, card, upgraded, target } => {
+            // a card played is seen in the hand that held it (`held`)
+            Event::CardPlayed { player, card, .. } => {
                 let who = UnitRef::Hero(*player);
                 let kind = db.0.cards.get(card).map(|d| d.kind);
                 if kind != Some(CardType::Attack) {
                     play(who, Anim::Cast);
-                }
-                if let Some(from) = body(who) {
-                    let hero = session.shown.hero(*player).map(|h| h.def.clone()).unwrap_or_default();
-                    // an aimed card flies to its target; a sweeping one to the middle of the other side
-                    let to = target.and_then(|t| body(t)).unwrap_or(Vec2::new(if kind == Some(CardType::Attack) { 1450.0 } else { from.x }, from.y - 150.0));
-                    ghost(&mut commands, from, to, l10n.card_name(card, *upgraded), theme::hero_color(&hero));
                 }
             }
             Event::Passed { from, to, card } => {

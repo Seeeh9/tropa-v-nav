@@ -68,6 +68,8 @@ pub struct NetStatus {
     pub story_votes: Vec<(u8, String, bool)>,
     /// Other players' hands on the book, tears and turns, not yet shown (`Note::Book*`).
     pub book: Vec<Note>,
+    /// Cards other players are holding.
+    pub held: Vec<Note>,
     /// What happened to this player's deck, not yet shown (see `deck_fx`).
     pub deck: Vec<RunEvent>,
     /// Votes and lots on the path map, not yet shown (see `run_ui::map_party`).
@@ -568,6 +570,7 @@ fn notes(
             }
             Note::Ping { from, kind, at } => status.pings.push((from, kind, at)),
             Note::StoryVote { from, page, skip } => status.story_votes.push((from, page, skip)),
+            note @ Note::CardHeld { .. } => status.held.push(note),
             note @ (Note::BookHand { .. } | Note::BookTear { .. } | Note::BookTurn { .. } | Note::BookCarry { .. }) => status.book.push(note),
             Note::MapPointer { from, at } => status.pointers.push((from, at)),
             Note::Nudge { from, node } => status.nudges.push((from, node)),

@@ -93,6 +93,8 @@ pub enum Msg {
     /// Everyone: my hand over the book while `page` is read together: where it is in the scene,
     /// and which point of the leaf it holds, if it holds the leaf.
     BookHand { page: String, at: [f32; 3], hold: Option<u16> },
+    /// Everyone: the card I hold, where it is on the stage and where I aim it; `None`, let go.
+    CardHeld { card: Option<(String, bool)>, at: [f32; 2], aim: Option<[f32; 2]> },
     /// Everyone: the leaf I hold on `page` tore along this edge of its grid.
     BookTear { page: String, edge: u16 },
     /// Everyone: I have turned the leaf of `page` over; read on.
@@ -137,6 +139,8 @@ pub enum Note {
     StoryVote { from: u8, page: String, skip: bool },
     /// Another player's hand over the book, the leaf they tore, the leaf they turned.
     BookHand { from: u8, page: String, at: [f32; 3], hold: Option<u16> },
+    /// The card another player holds; `None`, let go.
+    CardHeld { from: u8, card: Option<(String, bool)>, at: [f32; 2], aim: Option<[f32; 2]> },
     BookTear { from: u8, page: String, edge: u16 },
     BookTurn { from: u8, page: String },
     BookCarry { from: u8, page: String, piece: u32, point: Option<u16>, at: [f32; 3] },
@@ -392,6 +396,11 @@ impl Node {
         }
     }
 
+    /// Shows the others the card I hold.
+    pub fn card_held(&mut self, card: Option<(String, bool)>, at: [f32; 2], aim: Option<[f32; 2]>) {
+        self.out.push((To::All, Msg::CardHeld { card, at, aim }));
+    }
+
     /// Shows the others my hand over the book of the page read together.
     pub fn book_hand(&mut self, page: &str, at: [f32; 3], hold: Option<u16>) {
         self.out.push((To::All, Msg::BookHand { page: page.into(), at, hold }));
@@ -509,6 +518,11 @@ impl Node {
             Msg::StoryVote { page, skip } => {
                 if let Some(slot) = self.lobby.slot_of(from) {
                     self.notes.push(Note::StoryVote { from: slot, page, skip });
+                }
+            }
+            Msg::CardHeld { card, at, aim } => {
+                if let Some(slot) = self.lobby.slot_of(from) {
+                    self.notes.push(Note::CardHeld { from: slot, card, at, aim });
                 }
             }
             Msg::BookHand { page, at, hold } => {

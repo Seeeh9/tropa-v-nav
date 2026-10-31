@@ -323,7 +323,7 @@ fn unit_place(shown: &Combat, unit: UnitRef) -> Option<(Vec2, Vec2)> {
         UnitRef::Hero(i) => shown.hero(i).map(|_| (stands::hero(i).unwrap_or_else(|| hero_foot(i)), HERO_SIZE)),
         UnitRef::Enemy(uid) => {
             let i = shown.enemies.iter().position(|e| e.uid == uid)?;
-            Some((stands::foe(i, shown.enemies.len()).unwrap_or_else(|| enemy_foot(i, shown.enemies.len())), ENEMY_SIZE))
+            Some((stands::foe(uid, || shown.enemies.iter().map(|e| (e.uid, e.alive)).collect()).unwrap_or_else(|| enemy_foot(i, shown.enemies.len())), ENEMY_SIZE))
         }
     }
 }

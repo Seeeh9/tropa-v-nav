@@ -1094,14 +1094,14 @@ fn setup(
             ));
         });
 
-    // the seal on the cord binding the leaves beyond this one: it hangs out of the block at the
-    // fore-edge, and goes when the next act frees them
+    // the seal on the cord binding the leaves beyond this one: its cord comes out from under the
+    // book, and the wax lies on the table to the right of it
     let seal_mat = materials.add(StandardMaterial { base_color_texture: art.image(&assets, "book/seal"), base_color: Color::srgb(0.62, 0.55, 0.5), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.85, ..default() });
     commands.spawn((
         Seal,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(0.34, 0.166))),
         MeshMaterial3d(seal_mat),
-        Transform::from_xyz(GUTTER + PAGE_W + 0.03, 0.06, 0.0),
+        Transform::from_xyz(GUTTER + PAGE_W + 0.15, 0.01, 0.0),
         bevy::light::NotShadowCaster,
         bevy::light::NotShadowReceiver,
         Visibility::Hidden,

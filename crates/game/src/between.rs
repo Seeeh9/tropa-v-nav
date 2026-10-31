@@ -454,7 +454,11 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
 /// so what is laid over it stays readable.
 pub fn act_backdrop(commands: &mut Commands, root: Entity, run: &Run, art: &Art, assets: &AssetServer, tint: Color) {
     let act = run.act.clamp(1, 3);
-    let Some(stem) = [format!("bg/act{act}_battle"), "bg/act1_battle".to_string()].into_iter().find(|s| art.image(assets, s).is_some()) else { return };
+    // every fight is met in its foe's own haunt, so the act's other places are seen between them:
+    // a different one as the road goes on, the same for everyone
+    let painted: Vec<String> = ["", "_b", "_c", "_d", "_e"].iter().map(|v| format!("bg/act{act}_battle{v}")).filter(|s| art.image(assets, s).is_some()).collect();
+    let here = painted.get(run.floors_cleared as usize % painted.len().max(1)).cloned();
+    let Some(stem) = here.into_iter().chain(["bg/act1_battle".to_string()]).find(|s| art.image(assets, s).is_some()) else { return };
     let (mut image, _) = art.node(assets, &stem, theme::SOOT);
     image.color = tint;
     commands.spawn((image, Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() }, Pickable::IGNORE, ChildOf(root)));

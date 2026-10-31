@@ -79,7 +79,7 @@ fn pictures_ahead(run: &Run, c: &Content) -> Vec<String> {
                 out.push("npc/pedlar".to_string());
                 out.push("npc/counter".to_string());
             }
-            NodeKind::Rest | NodeKind::Chest | NodeKind::Event => {}
+            NodeKind::Rest | NodeKind::Chest | NodeKind::Event => out.extend(["", "_b", "_c", "_d", "_e"].iter().map(|v| format!("bg/act{act}_battle{v}"))),
         }
     }
     out.sort();

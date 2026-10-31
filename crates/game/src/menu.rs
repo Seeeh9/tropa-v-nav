@@ -90,23 +90,8 @@ fn enter_menu(
         Node { position_type: PositionType::Absolute, left: px(24), bottom: px(20), ..default() },
         ChildOf(*stage),
     ));
-    // a solo run left unfinished can be picked up again
-    if let Some(run) = profile.load_run() {
-        let label = l10n.tf("menu-continue", &[("hero", l10n.t(&format!("hero-{}", run.players[0].hero)).into()), ("act", (run.act as i32).into())]);
-        commands.spawn((
-            DespawnOnExit(AppState::Menu),
-            menu_button(label, &fonts),
-            observe(|_: On<Activate>, mut commands: Commands, profile: Res<crate::profile::Profile>, steam: Option<Res<crate::steam::Steam>>, l10n: Res<L10n>| {
-                if let Some(run) = profile.load_run() {
-                    let name = steam.map(|s| s.client.friends().name()).unwrap_or_else(|| l10n.t("lobby-wanderer"));
-                    // the stage router opens whichever screen the run was left on
-                    crate::net::resume_solo(&mut commands, &name, run);
-                }
-            }),
-            ChildOf(*stage),
-        ));
-    }
-    commands.spawn((
+    let column = commands
+        .spawn((
         screen(AppState::Menu, *stage),
         children![
             theme::text(l10n.t("game-title"), &fonts.title, 120.0, theme::BONE),
@@ -147,7 +132,27 @@ fn enter_menu(
                 }),
             ),
         ],
-    ));
+    ))
+        .id();
+    // a solo run left unfinished can be picked up again: first of the buttons, under the title.
+    // Wider than the rest, for the hero's name and the act to fit on one line
+    if let Some(run) = profile.load_run() {
+        let label = l10n.tf("menu-continue", &[("hero", l10n.t(&format!("hero-{}", run.players[0].hero)).into()), ("act", (run.act as i32).into())]);
+        let button = commands
+            .spawn((
+                menu_button(label, &fonts),
+                observe(|_: On<Activate>, mut commands: Commands, profile: Res<crate::profile::Profile>, steam: Option<Res<crate::steam::Steam>>, l10n: Res<L10n>| {
+                    if let Some(run) = profile.load_run() {
+                        let name = steam.map(|s| s.client.friends().name()).unwrap_or_else(|| l10n.t("lobby-wanderer"));
+                        // the stage router opens whichever screen the run was left on
+                        crate::net::resume_solo(&mut commands, &name, run);
+                    }
+                }),
+            ))
+            .insert(Node { width: px(760), padding: UiRect::axes(px(30), px(16)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() })
+            .id();
+        commands.entity(column).insert_children(2, &[button]);
+    }
 }
 
 /// Pushes the saved settings into the resources the game reads each frame.

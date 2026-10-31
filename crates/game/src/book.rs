@@ -58,6 +58,10 @@ const GHOST_LINGER: f32 = 1.5;
 const PULL: f32 = 2.5;
 /// How far past the paper's reach the hand goes before it pulls at the paper, in page widths.
 const SLACK: f32 = 0.9;
+/// Past this share of its paper lost, a torn leaf is no page any more.
+const WHOLE_PAGE_GONE: f32 = 0.5;
+/// A leaf lying flatter than this over one side lies there; less, it hangs in the air.
+const LIES_FLAT: f32 = 0.8;
 /// Stage pixels at the foot of the screen that belong to the story's buttons, not the book.
 const BUTTON_BAND: f32 = 90.0;
 
@@ -69,6 +73,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<Torn>()
         .add_message::<Found>()
         .add_systems(Startup, setup)
+        .add_systems(Update, keep_seal)
         .add_systems(Update, ((open_cover, follow_story, hold_leaf, follow_ghosts, carry_remote, move_leaf, redraw_pages, keep_scraps, run_scraps).chain(), flicker, sway_camera, fit_pages));
 }
 
@@ -219,6 +224,8 @@ struct Settled {
     found: Option<(u8, bool, bool)>,
     /// Paper newly lost, and whether it was in this reader's hand.
     torn: Option<(f32, bool)>,
+    /// The page was torn clean out: what lay under it is where the story now is.
+    read_on: bool,
 }
 
 /// Strokes of a nail that work a glued corner loose, how far each must go, and how long two
@@ -359,6 +366,8 @@ pub struct Book {
     pub seat: u8,
     /// The hand is over a glued corner, or at work on it: the story says what can be done.
     pub over_glue: bool,
+    /// The tale is at its end: there is nothing left to be sealed.
+    pub ending: bool,
 }
 
 /// Dev: what the book does goes to `book.log` beside the game, to read after a bug seen in play.
@@ -423,7 +432,14 @@ impl Book {
             easing: 0.0,
             seat: 0,
             over_glue: false,
+            ending: false,
         }
+    }
+
+    /// A new run: a new reading of the book, its glued leaves whole again.
+    pub fn forget_run(&mut self) {
+        self.opened.clear();
+        self.loose.clear();
     }
 
     /// Lays the book open at once, with no lifting of the cover: a scene read in the midst of a
@@ -492,6 +508,30 @@ impl Book {
         }
     }
 
+    /// A hand reaches for the book while a whole leaf is still falling: it is down at once, where
+    /// it was going, and the hand takes what it reached for. Not while the story has yet to catch
+    /// up with the turn, nor a torn leaf, which falls where it will.
+    fn land_now(&mut self) -> Option<Settled> {
+        let turn = self.turn.as_ref()?;
+        if !matches!(turn.hand, Hand::Gone | Hand::Unseen { .. }) || self.leaf.torn() {
+            return None;
+        }
+        if turn.committed && !turn.own && turn.story_to != self.spread {
+            return None;
+        }
+        let side = self.leaf.side();
+        let on_left = match (turn.back, turn.committed) {
+            (true, committed) => !committed,
+            (false, true) => true,
+            (false, false) => turn.peel.is_some() && side < 0.0,
+        };
+        self.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
+        if on_left {
+            self.leaf.lay_left();
+        }
+        Some(self.settle())
+    }
+
     /// Turns the left-hand page back over by the book's own hand, from a secret to its glued page.
     pub fn turn_back_unseen(&mut self) -> bool {
         if self.turn.is_some() || !self.take_up_back(Hand::Gone) {
@@ -514,8 +554,6 @@ impl Book {
             self.followed = None;
             self.turn = None;
             self.kept = false;
-            self.opened.clear();
-            self.loose.clear();
             self.worked = 0.0;
             self.helped = false;
             return false;
@@ -528,6 +566,10 @@ impl Book {
         }
         note(format!("follow: {}", self.state()));
         self.followed = Some(spread.clone());
+        // the book is already there: a page torn out uncovered it
+        if self.turn.is_none() && self.shown.as_ref() == Some(&spread) {
+            return false;
+        }
         self.worked = 0.0;
         self.helped = false;
         // the reader has carried the leaf over, and the story has read on to what it uncovered
@@ -592,6 +634,19 @@ impl Book {
             if lost - self.charged > 0.005 {
                 out.torn = Some((lost - self.charged, mine));
                 self.charged = lost;
+            }
+            // torn out, or left hanging: it is no page any more, only paper lying about, and the
+            // book shows one whole spread beneath it, never the halves of two
+            if lost > WHOLE_PAGE_GONE || side.abs() < LIES_FLAT || (committed && !over) {
+                out.read_on = !committed && !own && !back && lost > WHOLE_PAGE_GONE && self.next.is_some();
+                let at = if committed || done || out.read_on { &to } else { &from };
+                let at = at.clone();
+                self.kept = false;
+                self.fresh_leaf();
+                self.wear(Face::Left, &at, Half::Left);
+                self.wear(Face::Right, &at, Half::Right);
+                self.covered.extend([Half::Left, Half::Right]);
+                self.shown = Some(at);
             }
         } else if back {
             // turned back over, the leaf is the right-hand page before; fallen back, the left again
@@ -749,6 +804,12 @@ struct BookCamera;
 struct PageCamera;
 #[derive(Component)]
 struct Cover;
+/// The wax seal on the cord that binds the leaves not yet open.
+#[derive(Component)]
+struct Seal;
+/// The left half of the back cover and of the page block, this wide once the book lies open.
+#[derive(Component)]
+struct LeftHalf(f32);
 #[derive(Component)]
 struct LeafMesh;
 /// The wisp showing another reader's hand, by their seat.
@@ -952,16 +1013,16 @@ fn setup(
     // the block of pages and the back cover under it
     let edges = mat(&mut materials, tiled(&assets, &art, "book/edges"), Color::WHITE, 0.9, 1.0);
     let leather = mat(&mut materials, tiled(&assets, &art, "book/leather"), Color::WHITE, 0.7, 2.0);
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0 * PAGE_W + 0.12, 0.025, PAGE_H + 0.08))),
-        MeshMaterial3d(leather.clone()),
-        Transform::from_xyz(0.0, 0.0125, 0.0),
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0 * PAGE_W + 0.02, TOP - 0.025, PAGE_H))),
-        MeshMaterial3d(edges),
-        Transform::from_xyz(0.0, 0.025 + (TOP - 0.025) / 2.0, 0.0),
-    ));
+    // shut, it all lies on the right; the left half spreads out as the cover comes over (`open_cover`)
+    let (back_w, block_w) = (PAGE_W + 0.06, PAGE_W + 0.01);
+    let back_y = 0.0125;
+    let block_y = 0.025 + (TOP - 0.025) / 2.0;
+    let back = meshes.add(Cuboid::new(back_w, 0.025, PAGE_H + 0.08));
+    let block = meshes.add(Cuboid::new(block_w, TOP - 0.025, PAGE_H));
+    commands.spawn((Mesh3d(back.clone()), MeshMaterial3d(leather.clone()), Transform::from_xyz(back_w / 2.0, back_y, 0.0)));
+    commands.spawn((Mesh3d(block.clone()), MeshMaterial3d(edges.clone()), Transform::from_xyz(block_w / 2.0, block_y, 0.0)));
+    commands.spawn((LeftHalf(back_w), Mesh3d(back), MeshMaterial3d(leather.clone()), Transform::from_xyz(0.0, back_y, 0.0).with_scale(Vec3::new(0.0, 1.0, 1.0)), Visibility::Hidden));
+    commands.spawn((LeftHalf(block_w), Mesh3d(block), MeshMaterial3d(edges), Transform::from_xyz(0.0, block_y, 0.0).with_scale(Vec3::new(0.0, 1.0, 1.0)), Visibility::Hidden));
 
     // the faces of paper, each wearing its own rendered picture; the right-hand page lies on the
     // block, the left-hand one is the first leaf and turns over with the cover
@@ -1033,6 +1094,17 @@ fn setup(
             ));
         });
 
+    // the seal on the cord binding the leaves beyond this one: it hangs out of the block at the
+    // fore-edge, and goes when the next act frees them
+    let seal_mat = materials.add(StandardMaterial { base_color_texture: art.image(&assets, "book/seal"), alpha_mode: AlphaMode::Blend, perceptual_roughness: 0.5, ..default() });
+    commands.spawn((
+        Seal,
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(0.34, 0.166))),
+        MeshMaterial3d(seal_mat),
+        Transform::from_xyz(GUTTER + PAGE_W - 0.03, 0.06, 0.0),
+        Visibility::Hidden,
+    ));
+
     // the candle at the top right, and its light
     let wax = materials.add(StandardMaterial { base_color: Color::srgb(0.86, 0.78, 0.6), perceptual_roughness: 0.5, ..default() });
     let candle_at = Vec3::new(1.3, 0.0, -0.95);
@@ -1089,6 +1161,31 @@ fn play(commands: &mut Commands, art: &Art, assets: &AssetServer, mixer: &Mixer,
     }
 }
 
+/// The seal lies on the book while nothing lies beyond the page open on it.
+fn keep_seal(book: Res<Book>, mut seal: Query<&mut Visibility, With<Seal>>) {
+    let on = book.wanted && book.open >= 1.0 && book.next.is_none() && !book.ending && book.turn.as_ref().is_none_or(|t| !t.own);
+    for mut vis in &mut seal {
+        let want = if on { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+}
+
+/// Spreads out the book's left half: nothing until the cover has passed upright, then as it falls.
+fn spread_left(left: &mut Query<(&LeftHalf, &mut Transform, &mut Visibility), Without<Cover>>, open: f32) {
+    let t = open.clamp(0.0, 1.0);
+    let s = ((t * t * (3.0 - 2.0 * t) - 0.5) * 2.0).clamp(0.0, 1.0);
+    for (half, mut tf, mut vis) in left {
+        tf.scale.x = s.max(1e-3);
+        tf.translation.x = -half.0 * s / 2.0;
+        let want = if s > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+}
+
 /// Wakes the scene while a tale is read, and swings the cover open on its spine.
 fn open_cover(
     mut commands: Commands,
@@ -1096,6 +1193,7 @@ fn open_cover(
     mut book: ResMut<Book>,
     mut cams: Query<&mut Camera, Or<(With<BookCamera>, With<PageCamera>)>>,
     mut cover: Query<&mut Transform, With<Cover>>,
+    mut left: Query<(&LeftHalf, &mut Transform, &mut Visibility), Without<Cover>>,
     art: Res<Art>,
     assets: Res<AssetServer>,
     mixer: Res<Mixer>,
@@ -1115,8 +1213,11 @@ fn open_cover(
         for mut tf in &mut cover {
             tf.rotation = cover_turn(0.0);
         }
+        spread_left(&mut left, 0.0);
         return;
     }
+    // a book found already open lies so from the first frame
+    spread_left(&mut left, book.open);
     // shut on the table until the reader opens it (an unattended dev run opens it at once)
     if !book.lifted {
         let unattended = cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok();
@@ -1171,6 +1272,7 @@ fn hold_leaf(
     camera: Query<(&Camera, &GlobalTransform), With<BookCamera>>,
     mut turned: MessageWriter<Turned>,
     mut turned_back: MessageWriter<TurnedBack>,
+    mut found: MessageWriter<Found>,
     mut scraps: Query<(Entity, &mut ScrapLeaf)>,
     art: Res<Art>,
     assets: Res<AssetServer>,
@@ -1250,7 +1352,15 @@ fn hold_leaf(
             }
         }
     }
-    // take hold: only of a page lying still, with a page after it to uncover
+    // a leaf still falling is down the moment a hand reaches for the book
+    if pressed && book.open >= 1.0 && cursor.is_some_and(|c| c.y <= crate::STAGE_H - BUTTON_BAND) {
+        if let Some(settled) = book.land_now() {
+            if let Some((act, whole, mine)) = settled.found {
+                found.write(Found { act, whole, mine });
+            }
+        }
+    }
+    // take hold: of a page lying still, with a page after it to uncover
     if pressed && book.turn.is_none() && book.drag_ok && book.open >= 1.0 {
         let Some(c) = cursor else { return };
         if c.y > crate::STAGE_H - BUTTON_BAND {
@@ -1361,8 +1471,9 @@ fn hold_leaf(
         tell_news(book, hand_news(hand, None), true);
         book.leaf.grab = None;
         let back = book.turn.as_ref().is_some_and(|t| t.back);
-        let over = if back { book.leaf.side() > -0.15 } else { book.leaf.side() < 0.15 };
-        let side = book.leaf.side();
+        // a torn leaf goes where the hand took it: what is left at the spine may hardly stir
+        let side = if book.leaf.torn() { (hand.x / PAGE_W).clamp(-1.0, 1.0) } else { book.leaf.side() };
+        let over = if back { side > -0.15 } else { side < 0.15 };
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
         // let go past the spine, the leaf is carried on over by the book's own hand, so it lands
@@ -1415,6 +1526,9 @@ fn hold_leaf(
     // so a pull counts for more
     let out = Vec2::new(hit.x, hit.z - rest_z);
     let beyond = (out.length() - reach - SLACK).max(0.0);
+    // paper being led about never tears of itself: only a real pull, or a jerk at a glued leaf
+    let peeling = book.turn.as_ref().is_some_and(|t| t.peel.is_some());
+    book.leaf.tearing = peeling || beyond > 0.0;
     let pull = out.normalize_or_zero() * beyond * PULL;
     let aim = Vec3::new(x + pull.x, y, z + pull.y);
     // a hand that took the paper off to one side of the cursor comes to it gently: a jump of the
@@ -1546,6 +1660,7 @@ fn move_leaf(
     mut shown: Query<&mut Visibility, With<LeafMesh>>,
     mut torn: MessageWriter<Torn>,
     mut found: MessageWriter<Found>,
+    mut turned: MessageWriter<Turned>,
     mut heard_tear: Local<f32>,
     art: Res<Art>,
     assets: Res<AssetServer>,
@@ -1619,6 +1734,9 @@ fn move_leaf(
     }
     if let Some((lost, mine)) = settled.torn {
         torn.write(Torn { lost, mine });
+    }
+    if settled.read_on {
+        turned.write(Turned);
     }
 }
 
@@ -2210,7 +2328,10 @@ mod tests {
         b.loose.push(1);
         b.wanted = false;
         b.follow();
-        assert!(b.shown.is_none() && b.turn.is_none() && b.opened.is_empty() && b.loose.is_empty());
+        assert!(b.shown.is_none() && b.turn.is_none());
+        assert_eq!(b.opened, vec![1], "a secret opened stays open for the rest of the run");
+        b.forget_run();
+        assert!(b.opened.is_empty() && b.loose.is_empty());
     }
 
     #[test]
@@ -2244,6 +2365,109 @@ mod tests {
         let g = b.ghosts[1].as_ref().unwrap();
         assert_eq!(g.hold, Some(corner()));
         assert!(g.peeling);
+    }
+
+    #[test]
+    fn a_falling_leaf_lands_at_once_when_reached_for() {
+        let (one, two, three) = (spread(2, None), spread(4, None), spread(6, None));
+        let mut b = book_at(one.clone());
+        b.next = Some(two.clone());
+        assert!(b.take_up(Hand::Reader));
+        // turned, let go, and the story has read on: the leaf is in the air
+        let t = b.turn.as_mut().unwrap();
+        t.committed = true;
+        t.hand = Hand::Gone;
+        b.spread = two.clone();
+        b.follow();
+        b.next = Some(three.clone());
+        b.prev = Some(one.clone());
+        assert!(b.land_now().is_some());
+        assert!(b.turn.is_none());
+        assert_eq!(b.faces[Face::Left as usize], Some((two.clone(), Half::Left)));
+        assert!(b.take_up(Hand::Reader), "and the next page is there to take");
+        assert_eq!(b.turn.as_ref().unwrap().to, three);
+    }
+
+    #[test]
+    fn a_leaf_let_go_short_lands_where_it_was_and_the_story_stays() {
+        let one = spread(2, None);
+        let mut b = book_at(one.clone());
+        b.next = Some(spread(4, None));
+        assert!(b.take_up(Hand::Reader));
+        b.turn.as_mut().unwrap().hand = Hand::Gone;
+        assert!(b.land_now().is_some());
+        assert_eq!(b.shown, Some(one.clone()));
+        assert_eq!(b.faces[Face::Right as usize], Some((one, Half::Right)));
+    }
+
+    #[test]
+    fn a_hand_does_not_land_what_the_story_has_yet_to_catch_up_with() {
+        let mut b = book_at(spread(2, None));
+        b.next = Some(spread(4, None));
+        assert!(b.take_up(Hand::Reader));
+        let t = b.turn.as_mut().unwrap();
+        t.committed = true;
+        t.hand = Hand::Gone;
+        assert!(b.land_now().is_none());
+    }
+
+    /// Tears the leaf off along the spine, as a hard yank does.
+    fn tear_off(b: &mut Book) {
+        for e in 0..2000 {
+            if b.leaf.lost() > 0.9 {
+                break;
+            }
+            b.leaf.tear_edge(e);
+        }
+        assert!(b.leaf.lost() > 0.5);
+    }
+
+    #[test]
+    fn a_page_torn_clean_out_reads_on_and_leaves_one_whole_spread() {
+        let (one, two) = (spread(2, None), spread(4, None));
+        let mut b = book_at(one);
+        b.next = Some(two.clone());
+        assert!(b.take_up(Hand::Reader));
+        tear_off(&mut b);
+        let s = b.settle();
+        assert!(s.read_on && s.torn.is_some());
+        assert_eq!(b.faces[Face::Left as usize], Some((two.clone(), Half::Left)));
+        assert_eq!(b.faces[Face::Right as usize], Some((two.clone(), Half::Right)));
+        assert!(!b.kept && !b.leaf.torn() && b.scraps_out.len() == 1, "the paper is a scrap now");
+        // the story catches up, with no second page turning over
+        b.spread = two.clone();
+        assert!(!b.follow());
+        assert!(b.turn.is_none());
+        assert_eq!(b.shown, Some(two));
+    }
+
+    #[test]
+    fn a_torn_leaf_turned_back_and_left_hanging_shows_one_spread_not_two_halves() {
+        let (one, two) = (spread(2, None), spread(4, None));
+        let mut b = book_at(two);
+        b.prev = Some(one.clone());
+        assert!(b.take_up_back(Hand::Reader));
+        b.turn.as_mut().unwrap().committed = true;
+        b.spread = one.clone();
+        b.prev = None;
+        b.follow();
+        tear_off(&mut b);
+        b.settle();
+        assert_eq!(b.faces[Face::Left as usize], Some((one.clone(), Half::Left)));
+        assert_eq!(b.faces[Face::Right as usize], Some((one, Half::Right)));
+    }
+
+    #[test]
+    fn the_last_page_torn_out_has_nothing_to_read_on_to() {
+        let main = spread(2, None);
+        let mut b = book_at(main.clone());
+        b.next = Some(spread(4, None));
+        assert!(b.take_up(Hand::Reader));
+        b.next = None;
+        tear_off(&mut b);
+        let s = b.settle();
+        assert!(!s.read_on);
+        assert_eq!(b.shown, Some(main));
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_POTIONS=<id>,<id>     every player's belt holds these draughts
+//!   TROPA_DRIVE=<file>          steps written to this file are played as they come (also `p <png>` a shot, `q` quit)
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release),
 //!                               `s <lines>` (turn the wheel, positive up the page)
@@ -120,11 +121,40 @@ enum Step {
     Up,
     /// Wheel lines, positive away from the player (up the page).
     Wheel(f32),
+    /// A screenshot, to this file.
+    Shot(String),
+    /// Leave the game.
+    Quit,
+    /// A key pressed and let go, by its name: space, enter, left, right, esc, back.
+    Key(String),
+}
+
+fn parse_steps(text: &str) -> Vec<Step> {
+    text.split(';')
+        .filter_map(|part| {
+            let words: Vec<&str> = part.split_whitespace().collect();
+            match words.as_slice() {
+                ["w", t] => t.parse().ok().map(Step::Wait),
+                ["m", x, y] => Some(Step::Move(Vec2::new(x.parse().ok()?, y.parse().ok()?))),
+                ["d"] => Some(Step::Down),
+                ["u"] => Some(Step::Up),
+                ["s", n] => n.parse().ok().map(Step::Wheel),
+                ["p", file] => Some(Step::Shot(file.to_string())),
+                ["q"] => Some(Step::Quit),
+                ["k", name] => Some(Step::Key(name.to_string())),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// Plays `TROPA_ROBOT` into the window's own event stream, so hovering, dragging and clicking
 /// run through exactly the code a real mouse reaches. The player's cursor is never touched.
 fn robot(
+    mut commands: Commands,
+    mut exit: MessageWriter<AppExit>,
+    mut buttons: MessageWriter<bevy::input::mouse::MouseButtonInput>,
+    mut keys: MessageWriter<bevy::input::keyboard::KeyboardInput>,
     time: Res<Time>,
     window: Single<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
     mut events: MessageWriter<bevy::window::WindowEvent>,
@@ -135,22 +165,16 @@ fn robot(
     use bevy::input::mouse::MouseButtonInput;
     use bevy::input::ButtonState;
     use bevy::window::{CursorMoved, WindowEvent};
-    let steps = script.get_or_insert_with(|| {
-        let text = std::env::var("TROPA_ROBOT").unwrap_or_default();
-        text.split(';')
-            .filter_map(|part| {
-                let words: Vec<&str> = part.split_whitespace().collect();
-                match words.as_slice() {
-                    ["w", t] => t.parse().ok().map(Step::Wait),
-                    ["m", x, y] => Some(Step::Move(Vec2::new(x.parse().ok()?, y.parse().ok()?))),
-                    ["d"] => Some(Step::Down),
-                    ["u"] => Some(Step::Up),
-                    ["s", n] => n.parse().ok().map(Step::Wheel),
-                    _ => None,
-                }
-            })
-            .collect()
-    });
+    let steps = script.get_or_insert_with(|| parse_steps(&std::env::var("TROPA_ROBOT").unwrap_or_default()));
+    // `TROPA_DRIVE=<file>`: steps written to that file are taken up and played as they come, so
+    // the game can be played a look at a time
+    if let Ok(file) = std::env::var("TROPA_DRIVE") {
+        if let Ok(text) = std::fs::read_to_string(&file) {
+            if std::fs::remove_file(&file).is_ok() {
+                steps.extend(parse_steps(&text));
+            }
+        }
+    }
     let (entity, win) = *window;
     // stage pixels to window pixels: the stage is scaled to fit the window
     let k = (win.width() / crate::STAGE_W).min(win.height() / crate::STAGE_H);
@@ -173,9 +197,35 @@ fn robot(
             wheel.write(MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y: *n, window: entity, phase: bevy::input::touch::TouchPhase::Moved });
             true
         }
+        Step::Shot(file) => {
+            commands.spawn(bevy::render::view::screenshot::Screenshot::primary_window()).observe(bevy::render::view::screenshot::save_to_disk(file.clone()));
+            true
+        }
+        Step::Quit => {
+            exit.write(AppExit::Success);
+            true
+        }
         Step::Down | Step::Up => {
             let state = if matches!(step, Step::Down) { ButtonState::Pressed } else { ButtonState::Released };
+            // a real click reaches both: picking by the window's stream, and whatever reads the
+            // button itself
             events.write(WindowEvent::MouseButtonInput(MouseButtonInput { button: MouseButton::Left, state, window: entity }));
+            buttons.write(MouseButtonInput { button: MouseButton::Left, state, window: entity });
+            true
+        }
+        Step::Key(name) => {
+            use bevy::input::keyboard::{Key, KeyboardInput};
+            let (key_code, logical_key) = match name.as_str() {
+                "space" => (KeyCode::Space, Key::Space),
+                "enter" => (KeyCode::Enter, Key::Enter),
+                "left" => (KeyCode::ArrowLeft, Key::ArrowLeft),
+                "right" => (KeyCode::ArrowRight, Key::ArrowRight),
+                "esc" => (KeyCode::Escape, Key::Escape),
+                _ => (KeyCode::Backspace, Key::Backspace),
+            };
+            for state in [ButtonState::Pressed, ButtonState::Released] {
+                keys.write(KeyboardInput { key_code, logical_key: logical_key.clone(), state, text: None, repeat: false, window: entity });
+            }
             true
         }
     };

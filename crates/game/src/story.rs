@@ -36,6 +36,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, ((watch_run, turn_pages, tally_votes, show_page, want_book, book_hands, read_secret).chain(), speak_when_open, keep_pages_ready));
     #[cfg(feature = "dev")]
     app.add_systems(Startup, dev_scene);
+    #[cfg(feature = "dev")]
+    app.add_systems(Update, dev_next_act);
 }
 
 /// Dev: `TROPA_STORY=pro|again|again-<ending>|act2|act3|act4|<ending>` opens that scene at once,
@@ -45,14 +47,28 @@ fn dev_scene(mut tale: ResMut<Tale>) {
     let Ok(scene) = std::env::var("TROPA_STORY") else { return };
     let mut pages = match scene.as_str() {
         "pro" => vec![page("pro_1"), page("pro_2"), page("pro_3")],
-        "again" => vec![Page { picture: "story/again".into(), text: "story-again".into(), title: None, closes: false }],
-        s if s.starts_with("again-") => vec![Page { picture: "story/again".into(), text: format!("story-{s}"), title: None, closes: false }],
+        "again" => vec![Page { picture: "story/again".into(), text: "story-again".into(), title: None, closes: false, reread: false }],
+        s if s.starts_with("again-") => vec![Page { picture: "story/again".into(), text: format!("story-{s}"), title: None, closes: false, reread: false }],
         s if s.starts_with("act") => vec![page(s)],
         s => ending_pages(s),
     };
     let skip = std::env::var("TROPA_STORY_PAGE").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).saturating_sub(1);
     tale.total = pages.len();
     tale.pages.extend(pages.drain(skip.min(pages.len().saturating_sub(1))..));
+}
+
+/// Dev: `TROPA_TELL_ACT2=1` tells the second act's opening a little after the book is first shut,
+/// as if the party had just crossed into it.
+#[cfg(feature = "dev")]
+fn dev_next_act(mut tale: ResMut<Tale>, time: Res<Time>, mut shut: Local<f32>, mut told: Local<bool>) {
+    if *told || std::env::var("TROPA_TELL_ACT2").is_err() || tale.open() || tale.past.is_empty() {
+        return;
+    }
+    *shut += time.delta_secs();
+    if *shut > 3.0 {
+        *told = true;
+        tale.tell(vec![page("act2")]);
+    }
 }
 
 struct Page {
@@ -63,6 +79,8 @@ struct Page {
     title: Option<String>,
     /// The page belongs to an ending: its last button closes the tale rather than sends you off.
     closes: bool,
+    /// The page the book was left open on, read before: it lies there silent.
+    reread: bool,
 }
 
 /// Pages waiting to be read; the front one is on screen.
@@ -76,8 +94,11 @@ pub struct Tale {
     votes: HashMap<String, HashMap<u8, bool>>,
     /// The book was shut before the scene was read out.
     skipped: bool,
-    /// Pages of the scene already read, the last read last: turning back goes to them.
+    /// Pages of this run already read, the last read last: turning back goes to them, and the
+    /// numbering runs on past them. One book for the whole run.
     past: Vec<Page>,
+    /// A new run has begun: the book forgets what was opened in it.
+    new_run: bool,
     /// The scene now told opens the run: the book lies shut until the reader lifts its cover. Any
     /// later scene finds it lying open.
     shut: bool,
@@ -85,12 +106,15 @@ pub struct Tale {
 
 impl Tale {
     fn tell(&mut self, pages: Vec<Page>) {
+        // the book opens where it was left, on the last page read, and the new ones lie beyond it
         if self.pages.is_empty() {
-            self.total = 0;
-            self.past.clear();
+            if let Some(mut last) = self.past.pop() {
+                last.reread = true;
+                self.pages.push_back(last);
+            }
         }
-        self.total += pages.len();
         self.pages.extend(pages);
+        self.total = self.past.len() + self.pages.len();
     }
 
     pub fn open(&self) -> bool {
@@ -119,7 +143,7 @@ fn speak_when_open(mut commands: Commands, mut pending: ResMut<PendingVoice>, bo
 const BACK: &str = "<";
 
 fn page(id: &str) -> Page {
-    Page { picture: format!("story/{id}"), text: format!("story-{id}"), title: None, closes: false }
+    Page { picture: format!("story/{id}"), text: format!("story-{id}"), title: None, closes: false, reread: false }
 }
 
 /// The act whose glued secret lies under this page: the last page of each act's opening (the
@@ -211,6 +235,8 @@ fn watch_run(
     let Some(run) = net.node.state.as_ref() else { return };
     if told.seed != Some(run.seed) {
         *told = Told { seed: Some(run.seed), act: run.act, ended: false };
+        tale.past.clear();
+        tale.new_run = true;
         // a run picked up from a save has had its opening already
         let fresh = run.act <= 1 && run.floors_cleared == 0 && run.at.is_none();
         if fresh && !silent(&net) {
@@ -220,9 +246,9 @@ fn watch_run(
             match profile.last_ending.clone() {
                 _ if party => tale.tell(vec![page("pro_1"), page("pro_2"), page("pro_3")]),
                 Some(last) if profile.prologue_seen => {
-                    tale.tell(vec![Page { picture: "story/again".into(), text: format!("story-again-{last}"), title: None, closes: false }]);
+                    tale.tell(vec![Page { picture: "story/again".into(), text: format!("story-again-{last}"), title: None, closes: false, reread: false }]);
                 }
-                _ if profile.prologue_seen => tale.tell(vec![Page { picture: "story/again".into(), text: "story-again".into(), title: None, closes: false }]),
+                _ if profile.prologue_seen => tale.tell(vec![Page { picture: "story/again".into(), text: "story-again".into(), title: None, closes: false, reread: false }]),
                 _ => {
                     tale.tell(vec![page("pro_1"), page("pro_2"), page("pro_3")]);
                     if !net.ephemeral {
@@ -337,8 +363,9 @@ fn turn_pages(
         turned_back.clear();
         return;
     }
-    // the key that lifts the cover does not also turn the page under it
-    if !book.lifted {
+    // the key that lifts the cover does not also turn the page under it, whichever system hears
+    // it first: nothing turns until the book lies open
+    if book.open < 1.0 {
         return;
     }
     // the reader turned the leaf by hand
@@ -361,8 +388,8 @@ fn turn_pages(
 }
 
 fn on_turn(turn: On<Turn>, mut commands: Commands, mut tale: ResMut<Tale>, net: Option<ResMut<Net>>, speaking: Query<Entity, With<Narration>>, book: Res<crate::book::Book>) {
-    // a button pressed while the book still lies shut
-    if !book.lifted && matches!(*turn, Turn::Next | Turn::Skip) {
+    // a button pressed while the book still lies shut, or is opening
+    if book.open < 1.0 && matches!(*turn, Turn::Next | Turn::Skip) {
         return;
     }
     let skip = matches!(*turn, Turn::Skip);
@@ -417,7 +444,10 @@ fn advance(commands: &mut Commands, tale: &mut Tale, speaking: &Query<Entity, Wi
     }
     if skip {
         tale.skipped = tale.pages.len() > 1;
-        tale.pages.clear();
+        // skipped, not gone: they keep their place in the book
+        while let Some(page) = tale.pages.pop_front() {
+            tale.past.push(page);
+        }
     } else if let Some(page) = tale.pages.pop_front() {
         tale.past.push(page);
     }
@@ -541,6 +571,9 @@ fn keep_pages_ready(tale: Res<Tale>, art: Res<Art>, assets: Res<AssetServer>, mu
 
 /// The book lies on the table while there is a tale to read.
 fn want_book(mut tale: ResMut<Tale>, mut book: ResMut<crate::book::Book>, mut hints: Query<(&mut Text, &mut Visibility), With<GlueHint>>, l10n: Res<L10n>) {
+    if std::mem::take(&mut tale.new_run) {
+        book.forget_run();
+    }
     if book.wanted != tale.open() {
         book.wanted = tale.open();
         let shut = std::mem::take(&mut tale.shut);
@@ -593,7 +626,7 @@ fn show_page(
     // the page read aloud, in the language chosen for speech; a page with no recording is silent
     let spoken = format!("voice/{}/{}.wav", l10n.lang.voice(profile.settings.voice_lang).code(), page.text);
     // the storyteller waits for the book to lie open before speaking
-    if mixer.narrator > 0.0 && art.root().join(&spoken).is_file() {
+    if !page.reread && mixer.narrator > 0.0 && art.root().join(&spoken).is_file() {
         commands.insert_resource(PendingVoice(Some((assets.load::<AudioSource>(spoken), mixer.narrator))));
     }
     let together = net.as_ref().is_some_and(|n| shared(n, page));
@@ -638,8 +671,9 @@ fn show_page(
     let before = glued(&tale.past);
     book.spread = spread(page, at, before);
     book.next = tale.pages.get(1).map(|p| spread(p, at + 1, before + secret_of(page).is_some() as usize));
-    book.prev = tale.past.last().filter(|_| at > 1).map(|p| spread(p, at - 1, before - secret_of(p).is_some() as usize));
+    book.prev = tale.past.last().map(|p| spread(p, at - 1, before - secret_of(p).is_some() as usize));
     book.drag_ok = true;
+    book.ending = page.closes;
     book.shared = together;
     commands.spawn((
         Node { position_type: PositionType::Absolute, width: px(STAGE_W), height: px(STAGE_H), ..default() },
@@ -722,5 +756,18 @@ mod tests {
         t.tell(vec![page("pro_2")]);
         assert_eq!((t.total, t.pages.len()), (2, 2));
         assert!(t.open());
+    }
+
+    #[test]
+    fn the_next_act_opens_on_the_last_page_read_and_counts_on() {
+        let mut t = Tale::default();
+        t.tell(vec![page("pro_1"), page("pro_2"), page("pro_3")]);
+        while let Some(p) = t.pages.pop_front() {
+            t.past.push(p);
+        }
+        t.tell(vec![page("act2")]);
+        assert_eq!(t.pages.front().map(|p| (p.text.as_str(), p.reread)), Some(("story-pro_3", true)));
+        assert_eq!(t.pages.get(1).map(|p| p.text.as_str()), Some("story-act2"));
+        assert_eq!((t.past.len(), t.total), (2, 4));
     }
 }

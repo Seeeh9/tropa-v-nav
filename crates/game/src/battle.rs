@@ -38,6 +38,7 @@ mod held;
 mod impact;
 mod piles;
 mod rig;
+mod stands;
 mod stature;
 mod status_row;
 
@@ -319,10 +320,10 @@ fn enemy_foot(i: usize, n: usize) -> Vec2 {
 /// Feet position and sprite size of a unit on the stage.
 fn unit_place(shown: &Combat, unit: UnitRef) -> Option<(Vec2, Vec2)> {
     match unit {
-        UnitRef::Hero(i) => shown.hero(i).map(|_| (hero_foot(i), HERO_SIZE)),
+        UnitRef::Hero(i) => shown.hero(i).map(|_| (stands::hero(i).unwrap_or_else(|| hero_foot(i)), HERO_SIZE)),
         UnitRef::Enemy(uid) => {
             let i = shown.enemies.iter().position(|e| e.uid == uid)?;
-            Some((enemy_foot(i, shown.enemies.len()), ENEMY_SIZE))
+            Some((stands::foe(i, shown.enemies.len()).unwrap_or_else(|| enemy_foot(i, shown.enemies.len())), ENEMY_SIZE))
         }
     }
 }
@@ -403,6 +404,7 @@ fn enter(
             // units stand higher than that to leave room for the hand, so the picture is lifted
             // until that ground lies under their feet, and the strip it leaves is the hand's dark apron
             let lift = ground_lift(&backdrop);
+            stands::enter(&art, &backdrop, lift);
             p.spawn((
                 Node { position_type: PositionType::Absolute, left: px(0), top: px(-lift), width: px(STAGE_W), height: px(STAGE_H), ..default() },
                 art.node(&assets, &backdrop, theme::SOOT),

@@ -1,0 +1,5 @@
+// Where figures stand on each backdrop, in the picture's own pixels (1920x1080): Flow marked them
+// on a copy, the backdrop itself is untouched. Made by the mask step, one line per backdrop.
+{
+    "bg/at_upyr": (heroes: [(332.0, 836.0), (492.0, 913.0), (700.0, 837.0), (878.0, 913.0)], foes: [(1119.0, 844.0), (1308.0, 922.0), (1466.0, 825.0), (1660.0, 871.0)]),
+}

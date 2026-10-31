@@ -254,6 +254,17 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
+    // dev shortcut: TROPA_RELICS=<n> hands everyone that many relics, to see how they lie
+    if let Some(n) = std::env::var("TROPA_RELICS").ok().and_then(|n| n.parse::<usize>().ok()) {
+        let all: Vec<String> = db.relics.keys().take(n).cloned().collect();
+        for nd in std::iter::once(&mut node).chain(locals.iter_mut()) {
+            if let Some(run) = nd.state.as_mut() {
+                for pl in &mut run.players {
+                    pl.relics.extend(all.iter().cloned());
+                }
+            }
+        }
+    }
     // dev shortcut: TROPA_POTIONS=a,b fills every belt with those draughts
     if let Ok(list) = std::env::var("TROPA_POTIONS") {
         let potions: Vec<String> = list.split(',').map(|s| s.trim().to_string()).filter(|s| db.potions.contains_key(s)).collect();

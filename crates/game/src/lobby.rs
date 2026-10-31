@@ -358,27 +358,37 @@ fn draw_lobby(
                     // the shrine lets a hero start with another relic: each choice is a button
                     let shrine = profile.building("shrine").min(2) as usize;
                     let choices = std::iter::once(&def.relic).chain(def.alt_relics.iter().take(shrine));
-                    for (k, relic) in choices.enumerate() {
-                        let picked = m.starter as usize == k;
-                        let base = if picked && shrine > 0 { theme::SWAMP.with_alpha(0.9) } else { theme::SOOT.with_alpha(0.7) };
-                        let mut row = p.spawn((
-                            Node { column_gap: px(14), align_items: AlignItems::Center, padding: UiRect::all(px(6)), border: UiRect::all(px(2)), ..default() },
-                            BackgroundColor(base),
-                            BorderColor::all(if picked && shrine > 0 { theme::BONE } else { Color::NONE }),
-                        ));
-                        row.with_children(|r| {
+                    let choices: Vec<&String> = choices.collect();
+                    // however many there are, they are a row of pictures that wraps; what each does
+                    // is told on hover, and the chosen one's in full beneath them
+                    if choices.len() > 1 {
+                        p.spawn((Node { flex_wrap: FlexWrap::Wrap, column_gap: px(8), row_gap: px(8), ..default() }, Pickable::IGNORE)).with_children(|row| {
+                            for (k, relic) in choices.iter().enumerate() {
+                                let picked = m.starter as usize == k;
+                                let base = if picked { theme::SWAMP.with_alpha(0.9) } else { theme::SOOT.with_alpha(0.7) };
+                                let hint = crate::run_ui::CardHints::new(vec![(l10n.t(&format!("relic-{relic}")), l10n.t(&format!("relic-{relic}-desc")))]);
+                                let mut chip = row.spawn((
+                                    Button,
+                                    Hovered::default(),
+                                    Btn(base),
+                                    hint,
+                                    Node { width: px(72), height: px(72), padding: UiRect::all(px(4)), border: UiRect::all(px(2)), ..default() },
+                                    BackgroundColor(base),
+                                    BorderColor::all(if picked { theme::BONE } else { Color::srgb(0.42, 0.33, 0.22) }),
+                                ));
+                                chip.with_child((art.node(&assets, &format!("relics/{relic}"), theme::PEAT), Node { width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE));
+                                chip.observe(move |_: On<Activate>, mut net: ResMut<Net>| net.node.pick_starter(k as u8));
+                            }
+                        });
+                    }
+                    if let Some(relic) = choices.get(m.starter as usize).or(choices.first()) {
+                        p.spawn((Node { column_gap: px(14), align_items: AlignItems::Center, padding: UiRect::all(px(6)), ..default() }, BackgroundColor(theme::SOOT.with_alpha(0.7)), Pickable::IGNORE)).with_children(|r| {
                             r.spawn((art.node(&assets, &format!("relics/{relic}"), theme::PEAT), Node { width: px(64), height: px(64), flex_shrink: 0.0, ..default() }, Pickable::IGNORE));
-                            r.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2), ..default() }, Pickable::IGNORE)).with_children(|t| {
+                            r.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(2), flex_shrink: 1.0, ..default() }, Pickable::IGNORE)).with_children(|t| {
                                 t.spawn(theme::text(l10n.t(&format!("relic-{relic}")), &fonts.title, 22.0, theme::CANDLE));
                                 t.spawn(theme::text(l10n.t(&format!("relic-{relic}-desc")), &fonts.body, 18.0, theme::BONE));
                             });
                         });
-                        if shrine > 0 {
-                            row.insert((Button, Hovered::default(), Btn(base)));
-                            row.observe(move |_: On<Activate>, mut net: ResMut<Net>| net.node.pick_starter(k as u8));
-                        } else {
-                            row.insert(Pickable::IGNORE);
-                        }
                     }
                 });
         }

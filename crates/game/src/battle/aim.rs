@@ -158,6 +158,8 @@ fn track(
     let h = session.my_hero();
     let alone = session.truth.standing_heroes().count() == 1;
     let under = units.iter().find(|(_, hov)| hov.0).map(|(w, _)| w.unit);
+    // blind, a card gives nothing away: every card is aimed alike, and nothing lights up
+    let blind = h.flags.contains_key("blind");
     let mut next = Aim::default();
     for mut w in &mut cards {
         let lifted = w.dragging && -w.drag.y > LIFT_TO_AIM;
@@ -165,14 +167,16 @@ fn track(
         let Some(def) = db.0.cards.get(&card.def) else { continue };
         let view = def.view(card.upgraded, h.form);
         let passable = view.has(Keyword::Passable);
-        let aiming = lifted && (needs_unit(view.target, alone) || passable);
+        let aiming = lifted && (blind || needs_unit(view.target, alone) || passable);
         if w.aiming != aiming {
             w.aiming = aiming;
         }
         if !w.dragging {
             continue;
         }
-        if aiming {
+        if aiming && blind {
+            next = Aim { what: Some(Aimed::Card(w.uid)), from: AIM_SPOT + Vec2::new(CARD_W / 2.0, 0.0), to: cursor.unwrap_or_default(), target: None, action: None };
+        } else if aiming {
             let target = under.filter(|u| takes(&session, view.target, passable, *u, true));
             let action = target.map(|t| match t {
                 UnitRef::Hero(ally) if session.truth.hero(ally).is_some_and(|a| a.downed) && view.target != CardTarget::Downed => CombatAction::Raise { ally, discard: w.uid },
@@ -262,7 +266,10 @@ fn forecast(session: Res<Session>, db: Res<Db>, aim: Res<Aim>, mut labels: Query
     let mut changes: Vec<(UnitRef, String, Color)> = vec![];
     if let Some(action) = &aim.action {
         let mut copy = session.truth.clone();
-        if nav_core::apply(&db.0, &mut copy, session.me, action).is_ok() {
+        // what is left to chance is not foretold: a random target, tangled paths, a charm, fear
+        let me = session.my_hero();
+        let astray = ["blind", "confused", "charmed"].iter().any(|f| me.flags.contains_key(*f));
+        if !astray && nav_core::apply(&db.0, &mut copy, session.me, action).is_ok() && copy.rng == session.truth.rng {
             let before = &session.truth;
             for h in &before.heroes {
                 if let Some(after) = copy.hero(h.slot) {
@@ -311,6 +318,9 @@ fn diff(unit: UnitRef, (hp, block): (i32, i32), (hp2, block2): (i32, i32)) -> Ve
 
 /// While a card is aimed or held up to be played, the energy line shows what will be left.
 fn forecast_energy(session: Res<Session>, db: Res<Db>, aim: Res<Aim>, mut labels: Query<(&Label, &mut Text)>) {
+    if session.my_hero().flags.contains_key("blind") {
+        return;
+    }
     let Some(CombatAction::Play { card, .. }) = aim.action.clone().or_else(|| match aim.what {
         Some(Aimed::Card(uid)) => Some(CombatAction::Play { card: uid, target: None }),
         _ => None,

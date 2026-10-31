@@ -272,6 +272,30 @@ pub(crate) fn ground_lift(backdrop: &str) -> f32 {
     }
 }
 
+/// Where the relics run: a strip along the top of the stage, right of the party list and clear of
+/// everyone's heads.
+const RELIC_LEFT: f32 = 580.0;
+const RELIC_RIGHT: f32 = 1800.0;
+const RELIC_TOP: f32 = 12.0;
+
+/// The size of a relic's chip: full size while one row holds them all, then small enough for two.
+fn relic_side(count: usize) -> f32 {
+    let room = RELIC_RIGHT - RELIC_LEFT;
+    if count as f32 * 46.0 <= room {
+        42.0
+    } else {
+        // two rows, at least as many across as fit; past that they shrink further
+        (room / (count as f32 / 2.0).ceil() - 4.0).clamp(14.0, 34.0)
+    }
+}
+
+/// The place of the i-th of `count` relics in the strip.
+fn relic_at(i: usize, count: usize) -> Vec2 {
+    let side = relic_side(count);
+    let across = (((RELIC_RIGHT - RELIC_LEFT) / (side + 4.0)) as usize).max(1);
+    Vec2::new(RELIC_LEFT + (i % across) as f32 * (side + 4.0), RELIC_TOP + (i / across) as f32 * (side + 4.0))
+}
+
 pub(crate) fn hero_foot(slot: u8) -> Vec2 {
     // staggered front and back rows, far enough apart that every HP bar stays readable
     match slot {
@@ -431,9 +455,10 @@ fn enter(
             // what the player carries, under the party list: a picture where one is painted,
             // else the first letters of its name
             let mine = session.my_hero();
-            let row_top = 16.0 + 28.0 + session.truth.heroes.len() as f32 * 40.0 + 4.0;
+            let count = mine.relics.len();
+            let side = relic_side(count);
             for (i, id) in mine.relics.iter().enumerate() {
-                let at = Vec2::new(16.0 + (i % 8) as f32 * 46.0, row_top + (i / 8) as f32 * 46.0);
+                let at = relic_at(i, count);
                 let picture = art.image(&assets, &format!("relics/{id}"));
                 let mut chip = p.spawn((
                     RelicChip { id: id.clone(), at },
@@ -442,8 +467,8 @@ fn enter(
                         position_type: PositionType::Absolute,
                         left: px(at.x),
                         top: px(at.y),
-                        width: px(42),
-                        height: px(42),
+                        width: px(side),
+                        height: px(side),
                         border: UiRect::all(px(2)),
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::Center,
@@ -475,7 +500,7 @@ fn enter(
                     theme::panel(Node {
                         position_type: PositionType::Absolute,
                         left: px(560),
-                        top: px(16),
+                        top: px(70),
                         width: px(800),
                         padding: UiRect::all(px(14)),
                         border: UiRect::all(px(2)),
@@ -547,8 +572,8 @@ fn enter(
 
             p.spawn((
                 PotionBelt,
-                // up under the relics, out of the hand's and the piles' way
-                Node { position_type: PositionType::Absolute, left: px(18), top: px(150), column_gap: px(10), ..default() },
+                // along the top, as on the bar between fights, and the relics after it
+                Node { position_type: PositionType::Absolute, left: px(380), top: px(10), column_gap: px(10), ..default() },
                 Pickable::IGNORE,
             ));
             // the hand over every unit, bar and intent: a card held is never under anything
@@ -816,7 +841,7 @@ struct Preloaded {
 }
 
 /// Poses a unit is drawn in for a moment, over its own picture.
-const POSES: [&str; 3] = ["_strike", "_cast", "_hurt"];
+const POSES: [&str; 4] = ["_strike", "_cast", "_hurt", "_guard"];
 
 /// The unit's own picture under whatever pose it is drawn in for the moment.
 pub(crate) fn pose_base(stem: &str) -> &str {
@@ -838,7 +863,7 @@ fn swap_form_art(
     let stems = session.shown.heroes.iter().flat_map(|h| [format!("heroes/{}", h.def), format!("heroes/{}_beast", h.def)]).chain(session.shown.enemies.iter().map(|e| format!("enemies/{}", e.def)));
     for stem in stems {
         if preloaded.seen.insert(stem.clone()) {
-            for pose in ["", "_strike", "_cast", "_hurt", "_downed"] {
+            for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed"] {
                 if let Some(handle) = art.image(&assets, &format!("{stem}{pose}")) {
                     preloaded.handles.push(handle);
                 }
@@ -867,6 +892,7 @@ fn swap_form_art(
             Some((Anim::Lunge, t)) if (0.12..0.38).contains(&t) => Some("_strike"),
             Some((Anim::Cast, t)) if (0.06..0.40).contains(&t) => Some("_cast"),
             Some((Anim::Hit, t)) if t < 0.26 => Some("_hurt"),
+            Some((Anim::Guarded, t)) if t < 0.36 => Some("_guard"),
             _ => None,
         };
         if let Some(pose) = pose.filter(|_| !downed) {
@@ -1510,6 +1536,10 @@ fn sync_hand(
     }
 }
 
+/// An empty place on the belt.
+#[derive(Component)]
+struct EmptyFlask;
+
 /// Keeps the potion belt in step with the hero's potions.
 fn sync_potions(
     mut commands: Commands,
@@ -1517,6 +1547,7 @@ fn sync_potions(
     db: Res<Db>,
     belt: Single<Entity, With<PotionBelt>>,
     chips: Query<(Entity, &PotionChip)>,
+    empty: Query<Entity, With<EmptyFlask>>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     art: Res<Art>,
@@ -1524,10 +1555,13 @@ fn sync_potions(
 ) {
     let potions = &session.my_hero().potions;
     let same = chips.iter().count() == potions.len() && chips.iter().all(|(_, c)| potions.get(c.slot as usize) == Some(&c.id));
-    if same {
+    if same && !empty.is_empty() == (potions.len() < POTION_SLOTS) {
         return;
     }
     for (e, _) in &chips {
+        commands.entity(e).despawn();
+    }
+    for e in &empty {
         commands.entity(e).despawn();
     }
     for (i, id) in potions.iter().enumerate() {
@@ -1537,12 +1571,12 @@ fn sync_potions(
             PotionChip { slot, id: id.clone() },
             Button,
             Hovered::default(),
-            Btn(theme::SWAMP),
+            Btn(theme::SOOT),
             Pickable { should_block_lower: false, is_hoverable: true },
             // a flask: its picture when painted (potions/<id>), else a disc; what it does on hover
             crate::run_ui::CardHints::new(vec![(l10n.t(&format!("potion-{id}")), l10n.t(&format!("potion-{id}-desc")))]),
-            Node { width: px(68), height: px(68), padding: UiRect::all(px(4)), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
-            BackgroundColor(theme::SWAMP),
+            Node { width: px(50), height: px(50), padding: UiRect::all(px(3)), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
+            BackgroundColor(theme::SOOT),
             BorderColor::all(theme::ROTLIGHT),
             BoxShadow::new(Color::BLACK.with_alpha(0.6), px(0), px(3), px(0), px(6)),
             UiTransform::IDENTITY,
@@ -1579,6 +1613,16 @@ fn sync_potions(
                 outbox.0.push(CombatAction::UsePotion { slot: chip.slot, target: None });
             }
         });
+    }
+    for _ in potions.len()..POTION_SLOTS {
+        commands.spawn((
+            EmptyFlask,
+            Node { width: px(50), height: px(50), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
+            BackgroundColor(theme::SOOT),
+            BorderColor::all(theme::DIM.with_alpha(0.4)),
+            Pickable::IGNORE,
+            ChildOf(*belt),
+        ));
     }
 }
 
@@ -2185,5 +2229,24 @@ pub fn style_buttons(mut buttons: Query<(&Btn, &Hovered, Has<Pressed>, &mut Back
         if bg.0 != want {
             bg.0 = want;
         }
+    }
+}
+
+#[cfg(test)]
+mod relic_strip {
+    use super::*;
+
+    #[test]
+    fn relics_stay_in_their_strip_however_many() {
+        for count in [1, 8, 30, 31, 60, 100, 200] {
+            let side = relic_side(count);
+            for i in 0..count {
+                let at = relic_at(i, count);
+                assert!(at.x >= RELIC_LEFT && at.x + side <= RELIC_RIGHT + 1.0, "{count}: {at}");
+                // over everyone's heads: the tallest figure starts at about y 290
+                assert!(at.y + side < 110.0, "{count}: {at}");
+            }
+        }
+        assert_eq!(relic_side(10), 42.0, "a few relics keep their full size");
     }
 }

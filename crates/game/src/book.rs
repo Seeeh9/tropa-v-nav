@@ -56,6 +56,8 @@ const HAND_RATE: f32 = 20.0;
 const GHOST_LINGER: f32 = 1.5;
 /// How much more a pull past the paper's reach counts than the mouse moved.
 const PULL: f32 = 2.5;
+/// How far past the paper's reach the hand goes before it pulls at the paper, in page widths.
+const SLACK: f32 = 0.9;
 /// Stage pixels at the foot of the screen that belong to the story's buttons, not the book.
 const BUTTON_BAND: f32 = 90.0;
 
@@ -100,7 +102,7 @@ pub struct Spread {
     pub numbers: (u32, u32),
     /// The right-hand page is two leaves glued together, and between them lies this act's
     /// secret spread. Taken up like any page, the glued pair turns over as one and the secret is
-    /// never seen; only the page numbers give it away. To part them a corner must first be worked
+    /// never seen; the only sign is the numbers jumping, 3 then 6. To part them a corner must first be worked
     /// loose: alone by rubbing at it with a nail, in a party by two readers pulling at opposite
     /// corners together. Then a slow pull peels the leaf off the secret; a jerk tears it.
     pub secret: Option<(u8, Box<Spread>)>,
@@ -359,7 +361,31 @@ pub struct Book {
     pub over_glue: bool,
 }
 
+/// Dev: what the book does goes to `book.log` beside the game, to read after a bug seen in play.
+#[cfg(feature = "dev")]
+fn note(line: String) {
+    use std::io::Write;
+    use std::sync::Once;
+    static FRESH: Once = Once::new();
+    let path = crate::art::assets_dir().join("../book.log");
+    FRESH.call_once(|| {
+        let _ = std::fs::remove_file(&path);
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+#[cfg(not(feature = "dev"))]
+fn note(_line: String) {}
+
 impl Book {
+    fn state(&self) -> String {
+        let n = |s: &Option<Spread>| s.as_ref().map_or("-".to_string(), |s| format!("{}|{}{}", s.numbers.0, s.numbers.1, if s.peeled { " secret" } else { "" }));
+        let turn = self.turn.as_ref().map_or("none".to_string(), |t| format!("{}|{} back={} own={} peel={:?} committed={}", t.to.numbers.0, t.to.numbers.1, t.back, t.own, t.peel, t.committed));
+        format!("story {}|{} shown {} next {} prev {} turn [{turn}] side {:.2} torn {} kept {} opened {:?} loose {:?}", self.spread.numbers.0, self.spread.numbers.1, n(&self.shown), n(&self.next), n(&self.prev), self.leaf.side(), self.leaf.torn(), self.kept, self.opened, self.loose)
+    }
+
     fn new(view: Handle<Image>, leaf: Leaf, leaf_meshes: (Handle<Mesh>, Handle<Mesh>), fringe: Handle<Mesh>) -> Self {
         Book {
             view,
@@ -500,6 +526,7 @@ impl Book {
         if self.followed.as_ref() == Some(&spread) {
             return false;
         }
+        note(format!("follow: {}", self.state()));
         self.followed = Some(spread.clone());
         self.worked = 0.0;
         self.helped = false;
@@ -543,6 +570,7 @@ impl Book {
     /// the page beneath.
     fn settle(&mut self) -> Settled {
         let mut out = Settled::default();
+        note(format!("settle: {}", self.state()));
         let Some(turn) = self.turn.take() else { return out };
         let Turning { from, to, committed, mine, peel, back, own, .. } = turn;
         let mine = mine || self.helped;
@@ -673,6 +701,7 @@ impl Book {
         if peel.is_some() {
             self.leaf.glue_down();
         }
+        note(format!("take up: to {}|{} peel {peel:?} own {own}; {}", to.numbers.0, to.numbers.1, self.state()));
         // a leaf held on another machine tears there; here it only follows
         self.leaf.tearing = !matches!(hand, Hand::Remote(_));
         self.wear(Face::LeafFront, &shown, Half::Right);
@@ -699,6 +728,7 @@ impl Book {
                 None => (prev.clone(), prev, false),
             }
         };
+        note(format!("take up back: to {}|{} own {own}; {}", to.numbers.0, to.numbers.1, self.state()));
         // a torn leaf turned over onto the left is turned back as it is, holes and all
         if !self.fresh_leaf_for(false) {
             self.leaf.lay_left();
@@ -1380,10 +1410,11 @@ fn hold_leaf(
     let rest_z = book.leaf.height() * (j as f32 / (NZ - 1) as f32 - 0.5);
     let y = LEAF_FLOOR.right + (reach * reach - x * x).max(0.0).sqrt() * 0.75;
     let z = rest_z + (hit.z - rest_z) * 0.35;
-    // only a pull out past where the paper reaches from the spine strains it; within that the
-    // hand just leads the leaf about. A mouse has little room, so a pull counts for more
+    // only a pull well out past where the paper reaches from the spine strains it: a page taken
+    // by its middle and carried across the spread is only being turned. A mouse has little room,
+    // so a pull counts for more
     let out = Vec2::new(hit.x, hit.z - rest_z);
-    let beyond = (out.length() - reach).max(0.0);
+    let beyond = (out.length() - reach - SLACK).max(0.0);
     let pull = out.normalize_or_zero() * beyond * PULL;
     let aim = Vec3::new(x + pull.x, y, z + pull.y);
     // a hand that took the paper off to one side of the cursor comes to it gently: a jump of the
@@ -1804,16 +1835,6 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
     }
 }
 
-/// What is printed at the foot of a page. A glued leaf covers the two pages between its numbers,
-/// and the only sign of them is its number running on past them: "3–6".
-fn number_label(spread: &Spread, half: Half) -> String {
-    match half {
-        Half::Left => spread.numbers.0.to_string(),
-        Half::Right if spread.secret.is_some() => format!("{}–{}", spread.numbers.1, spread.numbers.1 + 3),
-        Half::Right => spread.numbers.1.to_string(),
-    }
-}
-
 fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer) {
     let parchment = art.image(assets, "book/parchment");
     commands.entity(entity).despawn_children();
@@ -1825,7 +1846,6 @@ fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Ha
         Half::Left => spread.numbers.0,
         Half::Right => spread.numbers.1,
     };
-    let label = number_label(spread, half);
     let ink = Color::srgb(0.17, 0.11, 0.07);
     page.with_children(|p| {
         print_content(p, spread, half, fonts, art, assets, 1.0);
@@ -1835,7 +1855,7 @@ fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Ha
         if number > 0 {
             p.spawn((
                 Node { position_type: PositionType::Absolute, left: px(0), bottom: px(56), width: px(PAGE_PX.x as f32), justify_content: JustifyContent::Center, ..default() },
-                children![crate::theme::text(label, &fonts.num, 40.0, ink.with_alpha(0.8))],
+                children![crate::theme::text(number.to_string(), &fonts.num, 40.0, ink.with_alpha(0.8))],
             ));
         }
     });
@@ -2234,11 +2254,4 @@ mod tests {
         assert!(b.lifted && b.open >= 1.0 && b.heard);
     }
 
-    #[test]
-    fn the_foot_of_a_glued_page_gives_it_away() {
-        let glued = spread(2, Some((1, secret(4))));
-        assert_eq!(number_label(&glued, Half::Left), "2");
-        assert_eq!(number_label(&glued, Half::Right), "3–6");
-        assert_eq!(number_label(&spread(6, None), Half::Right), "7");
-    }
 }

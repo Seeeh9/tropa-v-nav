@@ -219,7 +219,7 @@ impl L10n {
             Effect::OncePerTurn(_, body) => self.tf("fx-onceturn", &[("body", self.effects(body).into())]),
             Effect::MaxHp(a, _) => self.fx("maxhp", None, &[("n", n(a))]),
             Effect::Echo(t) => self.fx("echo", Some(*t), &[]),
-            Effect::Herb(herb) => self.tf("fx-herb", &[("h", self.t(&format!("herb-{herb}")).into())]),
+            Effect::Herb(herb) => self.tf("fx-herb", &[("h", self.t(&format!("herb-{herb}")).into()), ("spill", self.t(&format!("herb-{herb}-spill")).into())]),
             Effect::Brew => self.t("fx-brew"),
             Effect::Provoke => self.t("fx-provoke"),
             Effect::Hook(name) => self.t(&format!("hook-{name}")),

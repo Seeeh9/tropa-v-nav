@@ -18,7 +18,12 @@ pub fn plugin(app: &mut App) {
 struct Ahead {
     place: Option<(u64, u8, Option<(u8, u8)>)>,
     held: HashMap<String, Handle<Image>>,
+    /// Still to be read in, a few each frame.
+    queue: Vec<String>,
 }
+
+/// Pictures asked for in one frame.
+const PER_FRAME: usize = 2;
 
 fn keep_ahead(mut ahead: Local<Ahead>, net: Option<Res<Net>>, db: Res<Db>, art: Res<Art>, assets: Res<AssetServer>) {
     let Some(run) = net.as_ref().and_then(|n| n.node.state.as_ref()) else {
@@ -28,18 +33,18 @@ fn keep_ahead(mut ahead: Local<Ahead>, net: Option<Res<Net>>, db: Res<Db>, art: 
         }
         return;
     };
-    let place = Some((run.seed, run.act, run.at));
-    if ahead.place == place {
-        return;
+    let ahead = &mut *ahead;
+    // worked out while the party stands at the map, so nothing is being read in as a fight opens
+    if matches!(run.stage, nav_core::Stage::Map { .. }) && ahead.place != Some((run.seed, run.act, run.at)) {
+        ahead.place = Some((run.seed, run.act, run.at));
+        let wanted = pictures_ahead(run, &db.0);
+        ahead.held.retain(|stem, _| wanted.contains(stem));
+        ahead.queue = wanted.into_iter().filter(|s| !ahead.held.contains_key(s)).collect();
     }
-    ahead.place = place;
-    let wanted = pictures_ahead(run, &db.0);
-    ahead.held.retain(|stem, _| wanted.contains(stem));
-    for stem in wanted {
-        if !ahead.held.contains_key(&stem) {
-            if let Some(handle) = art.image(&assets, &stem) {
-                ahead.held.insert(stem, handle);
-            }
+    for _ in 0..PER_FRAME {
+        let Some(stem) = ahead.queue.pop() else { break };
+        if let Some(handle) = art.image(&assets, &stem) {
+            ahead.held.insert(stem, handle);
         }
     }
 }

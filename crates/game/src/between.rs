@@ -236,14 +236,20 @@ fn top_bar(
         });
     }
     // relics, each telling what it does on hover
-    let relics = commands.spawn((Node { column_gap: px(6), margin: UiRect::left(px(20)), flex_grow: 1.0, ..default() }, Pickable::IGNORE, ChildOf(bar))).id();
+    // they wrap to a second row and grow smaller rather than run under the deck
+    let side = match pl.relics.len() {
+        0..=16 => 48.0,
+        17..=44 => 28.0,
+        _ => 20.0,
+    };
+    let relics = commands.spawn((Node { column_gap: px(4), row_gap: px(2), flex_wrap: FlexWrap::Wrap, align_content: AlignContent::Center, margin: UiRect::left(px(20)), flex_grow: 1.0, flex_shrink: 1.0, flex_basis: px(0), ..default() }, Pickable::IGNORE, ChildOf(bar))).id();
     for id in &pl.relics {
         commands.spawn((
             Button,
             Hovered::default(),
             CardHints::new(vec![(l10n.t(&format!("relic-{id}")), l10n.t(&format!("relic-{id}-desc")))]),
             BarItem(format!("relics/{id}")),
-            Node { width: px(48), height: px(48), ..default() },
+            Node { width: px(side), height: px(side), ..default() },
             art.node(&assets, &format!("relics/{id}"), theme::CANDLE),
             ChildOf(relics),
         ));

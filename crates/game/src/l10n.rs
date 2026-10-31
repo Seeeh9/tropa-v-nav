@@ -222,6 +222,8 @@ impl L10n {
             Effect::Herb(herb) => self.tf("fx-herb", &[("h", self.t(&format!("herb-{herb}")).into()), ("spill", self.t(&format!("herb-{herb}-spill")).into())]),
             Effect::Brew => self.t("fx-brew"),
             Effect::Provoke => self.t("fx-provoke"),
+            // a hook with nothing to say to the player says nothing, not its key
+            Effect::Hook(name) if !self.has(&format!("hook-{name}")) => String::new(),
             Effect::Hook(name) => self.t(&format!("hook-{name}")),
         }
     }
@@ -249,7 +251,7 @@ impl L10n {
                 parts.push(format!("{}.", self.t(&format!("kw-{k:?}"))));
             }
         }
-        parts.join(" ")
+        once_at_the_end(parts.join(" "), &self.t("rune-pushed-out"))
     }
 
     /// Keywords and statuses a card mentions, for its hover tooltips.
@@ -311,5 +313,41 @@ impl L10n {
             .filter(|k| self.has(&format!("{k}-help")))
             .map(|k| (self.t(&k), self.t(&format!("{k}-help"))))
             .collect()
+    }
+}
+
+/// A sentence said of every rune on a card is said once, last of them.
+fn once_at_the_end(text: String, sentence: &str) -> String {
+    let Some(last) = text.rfind(sentence) else { return text };
+    let (before, rest) = text.split_at(last);
+    let kept = before.replace(&format!(" {sentence}"), "");
+    format!("{kept}{rest}")
+}
+
+#[cfg(test)]
+mod once_tests {
+    use super::{once_at_the_end, L10n, Lang};
+
+    #[test]
+    fn no_card_shows_a_string_key() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let c = nav_core::Content::load_dir(&root.join("data")).expect("content");
+        for lang in [Lang::Old, Lang::Ru, Lang::En] {
+            let l = L10n::load(&root, lang);
+            for def in c.cards.values() {
+                for up in [false, true] {
+                    let t = l.card_text(&def.id, def, &def.view(up, nav_core::Form::Human));
+                    assert!(!t.contains("hook-") && !t.contains("fx-") && !t.contains("trigger-"), "{}: {t}", def.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_sentence_stays_only_after_the_last_rune() {
+        let t = "A: 6. Pushed. B: 4. Pushed. Exhaust.".to_string();
+        assert_eq!(once_at_the_end(t, "Pushed."), "A: 6. B: 4. Pushed. Exhaust.");
+        assert_eq!(once_at_the_end("A: 6. Pushed.".to_string(), "Pushed."), "A: 6. Pushed.");
+        assert_eq!(once_at_the_end("Deal 6.".to_string(), "Pushed."), "Deal 6.");
     }
 }

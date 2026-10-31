@@ -113,6 +113,13 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                 if real.flags.contains_key("immortal") {
                     out.push(Chip { icon: "status/immortal".into(), n: None, good: Some(true), name: l10n.t("trait-immortal"), help: help(l10n, "trait-immortal") });
                 }
+                // what its kind does, while it can: the hare's dodge is gone once spent this round
+                for flag in ["dodge", "flying", "hiding", "enrage", "lifesteal", "piercing", "rises", "hunter"] {
+                    if real.flags.contains_key(flag) && !(flag == "dodge" && real.flags.contains_key("turn_dodged")) {
+                        let key = format!("trait-{flag}");
+                        out.push(Chip { icon: format!("status/{flag}"), n: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
+                    }
+                }
                 if let Some(n) = real.flags.get("last_breath") {
                     out.push(Chip { icon: "status/last_breath".into(), n: Some(*n), good: None, name: l10n.n("trait-last-breath", *n), help: String::new() });
                 }

@@ -142,7 +142,7 @@ fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res
             Event::Damage { lost, .. } if *lost >= 14 => ("hit_heavy", 1.0),
             Event::Damage { lost, .. } if *lost > 0 => ("hit", 0.9),
             Event::Damage { blocked, .. } if *blocked > 0 => ("block", 0.9),
-            Event::Block { .. } => ("block", 0.6),
+            Event::Block { .. } => ("block", 0.9),
             Event::Heal { .. } => ("heal", 0.9),
             Event::Status { delta, .. } if *delta > 0 => ("status", 0.7),
             Event::EnemyDied { .. } => ("death", 1.0),

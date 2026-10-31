@@ -266,7 +266,9 @@ fn forecast(session: Res<Session>, db: Res<Db>, aim: Res<Aim>, mut labels: Query
     let mut changes: Vec<(UnitRef, String, Color)> = vec![];
     if let Some(action) = &aim.action {
         let mut copy = session.truth.clone();
-        // what is left to chance is not foretold: a random target, tangled paths, a charm, fear
+        copy.foretelling = true;
+        // what is left to chance is not foretold: a random target (left out of the copy, so the
+        // card's own blow still shows beside a relic striking at random), tangled paths, a charm
         let me = session.my_hero();
         let astray = ["blind", "confused", "charmed"].iter().any(|f| me.flags.contains_key(*f));
         if !astray && nav_core::apply(&db.0, &mut copy, session.me, action).is_ok() && copy.rng == session.truth.rng {

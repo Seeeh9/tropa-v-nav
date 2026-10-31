@@ -387,3 +387,58 @@ fn every_hero_card_can_be_played() {
         }
     }
 }
+
+#[test]
+fn foretelling_leaves_out_what_falls_on_a_random_foe_and_rolls_nothing() {
+    let (c, mut s) = fight("bogatyr", &["bogatyr_strike"], &["grey_wolf", "grey_wolf"]);
+    s.heroes[0].relics.push("sheep_knuckles".into());
+    let card = s.heroes[0].hand[0].uid;
+    let foe = s.enemies[0].uid;
+    let (hp, other) = (s.enemies[0].hp, s.enemies[1].hp);
+
+    let mut copy = s.clone();
+    copy.foretelling = true;
+    apply(&c, &mut copy, 0, &CombatAction::Play { card, target: Some(UnitRef::Enemy(foe)) }).unwrap();
+    assert_eq!(copy.rng, s.rng, "no roll, so the forecast stands");
+    assert!(copy.enemies[0].hp < hp, "the card's own blow shows");
+    assert_eq!(hp - copy.enemies[0].hp, c.cards["bogatyr_strike"].view(false, s.heroes[0].form).effects.iter().find_map(|e| if let Effect::Damage(Amount::N(n), _) = e { Some(*n) } else { None }).unwrap());
+    assert_eq!(copy.enemies[1].hp, other, "the relic's stray blow does not");
+
+    // played for real, the relic does strike
+    apply(&c, &mut s, 0, &CombatAction::Play { card, target: Some(UnitRef::Enemy(foe)) }).unwrap();
+    assert_ne!(s.rng, copy.rng);
+}
+
+#[test]
+fn a_blow_goes_through_beside_a_relic_striking_at_random_and_a_wasted_one_is_told() {
+    let (c, mut s) = fight("bogatyr", &["bogatyr_strike", "bogatyr_strike"], &["kikimora"]);
+    s.heroes[0].relics.push("sheep_knuckles".into());
+    let foe = s.enemies[0].uid;
+    let hp = s.enemies[0].hp;
+    let first = s.heroes[0].hand[0].uid;
+    apply(&c, &mut s, 0, &CombatAction::Play { card: first, target: Some(UnitRef::Enemy(foe)) }).unwrap();
+    let blow = c.cards["bogatyr_strike"].view(false, s.heroes[0].form).effects.iter().find_map(|e| if let Effect::Damage(Amount::N(n), _) = e { Some(*n) } else { None }).unwrap();
+    assert_eq!(hp - s.enemies[0].hp, blow + 2, "the card's blow and the relic's");
+
+    // charmed and alone, the attack goes nowhere: the relic still strikes, and the waste is told
+    s.heroes[0].flags.insert("charmed".into(), 1);
+    let hp = s.enemies[0].hp;
+    let second = s.heroes[0].hand[0].uid;
+    let ev = apply(&c, &mut s, 0, &CombatAction::Play { card: second, target: Some(UnitRef::Enemy(foe)) }).unwrap();
+    assert_eq!(s.enemies[0].hp, hp, "once a turn, the relic is spent");
+    assert!(ev.iter().any(|e| matches!(e, Event::Missed { unit: UnitRef::Hero(0) })), "{ev:?}");
+}
+
+#[test]
+fn the_hare_dodges_once_a_turn_and_says_so() {
+    let (c, mut s) = fight("bogatyr", &["bogatyr_strike", "bogatyr_strike"], &["death_hare"]);
+    let foe = s.enemies[0].uid;
+    let hp = s.enemies[0].hp;
+    let first = s.heroes[0].hand[0].uid;
+    let ev = apply(&c, &mut s, 0, &CombatAction::Play { card: first, target: Some(UnitRef::Enemy(foe)) }).unwrap();
+    assert_eq!(s.enemies[0].hp, hp);
+    assert!(ev.iter().any(|e| matches!(e, Event::Missed { unit } if *unit == UnitRef::Enemy(foe))), "{ev:?}");
+    let second = s.heroes[0].hand[0].uid;
+    apply(&c, &mut s, 0, &CombatAction::Play { card: second, target: Some(UnitRef::Enemy(foe)) }).unwrap();
+    assert!(s.enemies[0].hp < hp, "the second one lands");
+}

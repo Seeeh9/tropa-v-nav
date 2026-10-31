@@ -670,6 +670,7 @@ fn show_page(
     let glued = |pages: &[Page]| pages.iter().filter(|p| secret_of(p).is_some()).count();
     let before = glued(&tale.past);
     book.spread = spread(page, at, before);
+    book.pages_ahead = tale.pages.len().saturating_sub(1);
     book.next = tale.pages.get(1).map(|p| spread(p, at + 1, before + secret_of(page).is_some() as usize));
     book.prev = tale.past.last().map(|p| spread(p, at - 1, before - secret_of(p).is_some() as usize));
     book.drag_ok = true;

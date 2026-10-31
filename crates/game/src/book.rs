@@ -304,6 +304,8 @@ pub struct Book {
     pub spread: Spread,
     /// The spread after this one, when there is one: what turning the leaf uncovers.
     pub next: Option<Spread>,
+    /// How many of the story's pages lie beyond `spread`.
+    pub pages_ahead: usize,
     /// The spread before this one, when the tale has one: what turning the left-hand page back
     /// over uncovers.
     pub prev: Option<Spread>,
@@ -401,6 +403,7 @@ impl Book {
             wanted: false,
             spread: Spread::default(),
             next: None,
+            pages_ahead: 0,
             prev: None,
             drag_ok: false,
             shared: false,
@@ -433,6 +436,24 @@ impl Book {
             seat: 0,
             over_glue: false,
             ending: false,
+        }
+    }
+
+    /// Is the right-hand page lying open under any leaf in the air the last one that can be
+    /// reached. A secret is never it: it lies aside from the story's pages.
+    fn right_page_is_last(&self) -> bool {
+        let lying = match &self.turn {
+            // the leaf is the left page coming over: what lies on the right stays till it lands
+            Some(t) if t.back => &t.from,
+            Some(t) => &t.to,
+            None => self.shown.as_ref().unwrap_or(&self.spread),
+        };
+        if *lying == self.spread {
+            self.pages_ahead == 0
+        } else if self.next.as_ref() == Some(lying) {
+            self.pages_ahead == 1
+        } else {
+            false
         }
     }
 
@@ -1163,9 +1184,10 @@ fn play(commands: &mut Commands, art: &Art, assets: &AssetServer, mixer: &Mixer,
     }
 }
 
-/// The seal hangs on the book all through the run: there are always leaves it has not freed yet.
+/// The seal binds the leaves not yet free, so it lies on the last page that can be reached, and
+/// only there: uncovered as the leaf above is lifted off it, covered as one comes back over it.
 fn keep_seal(book: Res<Book>, mut seal: Query<&mut Visibility, With<Seal>>) {
-    let on = book.wanted && !book.ending;
+    let on = book.wanted && !book.ending && book.right_page_is_last();
     for mut vis in &mut seal {
         let want = if on { Visibility::Inherited } else { Visibility::Hidden };
         if *vis != want {
@@ -2206,6 +2228,37 @@ mod tests {
         assert!(!at_corner(Vec3::new(GUTTER + PAGE_W * 0.5, 0.0, 0.0)));
         assert!(!at_corner(Vec3::new(GUTTER + PAGE_W * 0.9, 0.0, 0.0)));
         assert!(!at_corner(Vec3::new(-(GUTTER + PAGE_W * 0.9), 0.0, PAGE_H * 0.45)));
+    }
+
+    #[test]
+    fn the_seal_lies_only_on_the_last_page_that_can_be_reached() {
+        let mut b = book_at(spread(2, None));
+        b.spread = spread(2, None);
+        b.shown = Some(spread(2, None));
+        b.next = Some(spread(4, None));
+        b.pages_ahead = 1;
+        assert!(!b.right_page_is_last(), "pages still to come");
+        // the leaf lifted off the page before the last uncovers the seal
+        b.turn = Some(Turning { from: spread(2, None), to: spread(4, None), committed: false, hand: Hand::Loose, loose: 0.0, mine: false, peel: None, back: false, own: false, story_to: spread(4, None) });
+        assert!(b.right_page_is_last());
+        // the story has read on while it is in the air
+        b.spread = spread(4, None);
+        b.next = None;
+        b.pages_ahead = 0;
+        assert!(b.right_page_is_last());
+        b.turn = None;
+        b.shown = Some(spread(4, None));
+        assert!(b.right_page_is_last());
+        // turning back to earlier pages: it stays till the leaf has come over it, then is gone
+        b.prev = Some(spread(2, None));
+        b.turn = Some(Turning { from: spread(4, None), to: spread(2, None), committed: false, hand: Hand::Loose, loose: 0.0, mine: false, peel: None, back: true, own: false, story_to: spread(2, None) });
+        assert!(b.right_page_is_last());
+        b.turn = None;
+        b.spread = spread(2, None);
+        b.shown = Some(spread(2, None));
+        b.next = Some(spread(4, None));
+        b.pages_ahead = 1;
+        assert!(!b.right_page_is_last());
     }
 
     #[test]

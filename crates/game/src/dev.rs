@@ -7,12 +7,13 @@
 //!   TROPA_FORCE=shop|omen|rest|trophy|chest  open `run` straight at that stage
 //!   TROPA_SHRINE=<0..2>         pretend the shrine stands at this level (in memory only; never saved by a screenshot run)
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
+//!   TROPA_HAND=<id>,<id>|all    the heroes of that fight hold these cards, or every card (a text that cannot fit is logged)
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_POTIONS=<id>,<id>     every player's belt holds these draughts
 //!   TROPA_DRIVE=<file>          steps written to this file are played as they come (also `p <png>` a shot, `q` quit)
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release),
-//!                               `s <lines>` (turn the wheel, positive up the page)
+//!                               `s <lines>` (turn the wheel, positive up the page), `r` (right click)
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 //!   TROPA_SHOT_COUNT=<n>        instead a series of n frames, TROPA_SHOT_EVERY seconds apart (default 0.1), as <file>_<i>.png
 //!   TROPA_STORY=<scene>         open a story scene in the book at once (see story.rs), TROPA_STORY_PAGE=<n> on its n-th page
@@ -119,6 +120,7 @@ enum Step {
     Move(Vec2),
     Down,
     Up,
+    RightClick,
     /// Wheel lines, positive away from the player (up the page).
     Wheel(f32),
     /// A screenshot, to this file.
@@ -138,6 +140,7 @@ fn parse_steps(text: &str) -> Vec<Step> {
                 ["m", x, y] => Some(Step::Move(Vec2::new(x.parse().ok()?, y.parse().ok()?))),
                 ["d"] => Some(Step::Down),
                 ["u"] => Some(Step::Up),
+                ["r"] => Some(Step::RightClick),
                 ["s", n] => n.parse().ok().map(Step::Wheel),
                 ["p", file] => Some(Step::Shot(file.to_string())),
                 ["q"] => Some(Step::Quit),
@@ -204,6 +207,14 @@ fn robot(
         Step::Quit => {
             exit.write(AppExit::Success);
             true
+        }
+        Step::RightClick => {
+            // down one frame, up a little later, as a finger does
+            let held = *elapsed < 0.1;
+            let state = if held { ButtonState::Pressed } else { ButtonState::Released };
+            events.write(WindowEvent::MouseButtonInput(MouseButtonInput { button: MouseButton::Right, state, window: entity }));
+            buttons.write(MouseButtonInput { button: MouseButton::Right, state, window: entity });
+            !held
         }
         Step::Down | Step::Up => {
             let state = if matches!(step, Step::Down) { ButtonState::Pressed } else { ButtonState::Released };

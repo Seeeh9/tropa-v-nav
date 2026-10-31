@@ -297,6 +297,13 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
                             h.hp = h.hp.min(hp);
                         }
                     }
+                    // TROPA_HAND=a,b deals the heroes these cards, `all` every card there is
+                    if let (Ok(hand), Some(c)) = (std::env::var("TROPA_HAND"), run.combat.as_mut()) {
+                        let ids: Vec<String> = if hand == "all" { db.cards.keys().cloned().collect() } else { hand.split(',').map(|s| s.trim().to_string()).filter(|s| db.cards.contains_key(s)).collect() };
+                        for h in &mut c.heroes {
+                            h.hand = ids.iter().enumerate().map(|(i, def)| nav_core::Card { uid: 90_000 + i as u32, def: def.clone(), upgraded: false, free: false }).collect();
+                        }
+                    }
                     // TROPA_ACT=2 puts that fight on another act's backdrop
                     if let Some(act) = std::env::var("TROPA_ACT").ok().and_then(|a| a.parse().ok()) {
                         run.act = act;

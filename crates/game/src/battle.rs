@@ -21,6 +21,9 @@ pub const CARD_H: f32 = 310.0;
 const HAND_TOP: f32 = 955.0;
 /// How far the card under the cursor rises out of the hand; its neighbours rise by a share of this.
 const HAND_LIFT: f32 = 205.0;
+/// Where the top of a card in focus comes to, wherever it lay in the fan: the whole of it on the
+/// stage, its text with it, even grown and from the fan's low ends.
+const HAND_RISEN: f32 = HAND_TOP - HAND_LIFT - 5.0;
 pub(crate) const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
 const ENEMY_SIZE: Vec2 = Vec2::new(230.0, 345.0);
 /// Room above a unit's sprite for its intent.
@@ -32,6 +35,7 @@ const UNIT_W: f32 = 280.0;
 const DYING: f32 = 1.1;
 
 mod aim;
+mod fit_text;
 mod fx;
 mod gore;
 mod held;
@@ -43,7 +47,7 @@ mod stature;
 mod status_row;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((aim::plugin, fx::plugin, gore::plugin, held::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
+    app.add_plugins((aim::plugin, fit_text::plugin, fx::plugin, gore::plugin, held::plugin, impact::plugin, piles::plugin, rig::plugin, status_row::plugin));
     app.insert_resource(AnimSpeed(1.0))
         .init_resource::<Outbox>()
         .init_resource::<RunOutbox>()
@@ -626,6 +630,7 @@ fn sync_units(
     session: Res<Session>,
     layer: Single<Entity, With<UnitLayer>>,
     widgets: Query<(Entity, &UnitWidget, Has<Dying>)>,
+    corpses: Query<(Entity, &gore::Corpse)>,
     fonts: Res<Fonts>,
     l10n: Res<L10n>,
     art: Res<Art>,
@@ -643,7 +648,15 @@ fn sync_units(
     for e in &shown.enemies {
         let unit = UnitRef::Enemy(e.uid);
         match have(unit) {
-            None if e.alive => wanted.push((unit, format!("enemies/{}", e.def), l10n.t(&format!("enemy-{}", e.def)), theme::SWAMP)),
+            None if e.alive => {
+                // raised from the dead: it gets up, and its body no longer lies there
+                for (body, corpse) in &corpses {
+                    if corpse.unit == unit {
+                        corpse.clear_away(&mut commands, body);
+                    }
+                }
+                wanted.push((unit, format!("enemies/{}", e.def), l10n.t(&format!("enemy-{}", e.def)), theme::SWAMP));
+            }
             Some((entity, _, false)) if !e.alive => {
                 commands.entity(entity).insert(Dying(DYING));
             }
@@ -1180,7 +1193,7 @@ fn dying(
                 .wrapping_add(lost * 104_729);
                 let lying = art.image(&assets, &format!("{stem}_dead"));
                 let headless = art.image(&assets, &format!("{stem}_dead_headless"));
-                let swaps = gore::strike_down(&mut commands, entity, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *layers.0, *layers.1, &blood_art, lying, headless, seed, weight);
+                let swaps = gore::strike_down(&mut commands, entity, unit, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *layers.0, *layers.1, &blood_art, lying, headless, seed, weight);
                 for c in children.iter() {
                     if let Ok((mut s, _)) = sprites.get_mut(c) {
                         s.vanish = swaps;
@@ -1393,19 +1406,7 @@ pub fn spawn_card<B: Bundle>(
     assets: &AssetServer,
 ) -> Option<Entity> {
     let def = db.cards.get(&card.def)?;
-    let view = def.view(card.upgraded, form);
     let edge = if def.hero.is_empty() { theme::DIM } else { theme::hero_color(&def.hero) };
-    let cost = if hidden || view.has(Keyword::Unplayable) {
-        String::new()
-    } else if view.x_cost {
-        "X".into()
-    } else if card.free {
-        "0".into()
-    } else {
-        view.cost.to_string()
-    };
-    // a card made free this fight wears its new cost in green, glowing, as the Spire shows it
-    let (cost_ink, cost_glow) = if card.free && !view.x_cost { (FREE_INK, Some(FREE_INK)) } else { (theme::CANDLE, None) };
     let id = commands
         .spawn((
             extra,
@@ -1430,7 +1431,28 @@ pub fn spawn_card<B: Bundle>(
             ZIndex(0),
             ChildOf(parent),
         ))
-        .with_children(|c| {
+        .with_children(|c| card_face(c, card, def, form, hidden, l10n, fonts, art, assets))
+        .id();
+    Some(id)
+}
+
+/// What is drawn on a card, its frame aside.
+#[allow(clippy::too_many_arguments)]
+pub fn card_face(c: &mut ChildSpawnerCommands, card: &Card, def: &CardDef, form: Form, hidden: bool, l10n: &L10n, fonts: &Fonts, art: &Art, assets: &AssetServer) {
+    let view = def.view(card.upgraded, form);
+    let cost = if hidden || view.has(Keyword::Unplayable) {
+        String::new()
+    } else if view.x_cost {
+        "X".into()
+    } else if card.free {
+        "0".into()
+    } else {
+        view.cost.to_string()
+    };
+    // a card made free this fight wears its new cost in green, glowing, as the Spire shows it
+    let (cost_ink, cost_glow) = if card.free && !view.x_cost { (FREE_INK, Some(FREE_INK)) } else { (theme::CANDLE, None) };
+    {
+        {
             // a blinded hero sees only the backs: which card is which must be remembered
             if hidden {
                 c.spawn((theme::text("?", &fonts.title, 120.0, theme::DIM), Node { margin: UiRect::top(px(70)), ..default() }));
@@ -1452,13 +1474,15 @@ pub fn spawn_card<B: Bundle>(
                 Pickable::IGNORE,
             ));
             c.spawn((theme::text(l10n.t(&format!("type-{:?}", view.kind)), &fonts.body, 14.0, theme::DIM), Node { margin: UiRect::vertical(px(2)), ..default() }));
-            // a long text shrinks to stay on the card: about 110 letters fit at full size
+            // a long text shrinks to stay on the card: about 110 letters fit at full size, and
+            // what this guess misses is measured and brought in by `fit_text`
             let text = l10n.card_text(&card.def, def, &view);
             let size = (18.0 * (110.0 / text.chars().count().max(1) as f32).sqrt()).clamp(12.0, 18.0);
             c.spawn((
                 theme::text(text, &fonts.body, size, theme::BONE),
                 TextLayout::justify(Justify::Center),
                 Node { width: px(196), ..default() },
+                fit_text::FitText,
             ));
             if !cost.is_empty() {
                 c.spawn((
@@ -1481,9 +1505,8 @@ pub fn spawn_card<B: Bundle>(
                     children![(theme::text(cost, &fonts.num, 28.0, cost_ink), TextShadow { offset: Vec2::ZERO, color: cost_glow.unwrap_or(Color::NONE) })],
                 ));
             }
-        })
-        .id();
-    Some(id)
+        }
+    }
 }
 
 fn sync_hand(
@@ -1713,7 +1736,7 @@ let rest = hand_slot(i, n);
                 if d < 1.0 { (1.0 + (d * std::f32::consts::PI).cos()) / 2.0 } else { 0.0 }
             })
         };
-        target.y -= HAND_LIFT * pull;
+        target.y += (HAND_RISEN - rest.y) * pull;
         // neighbours lean away a little, so the card in focus is not half covered
         if let (Some(x), false) = (reach.0, lifted) {
             target.x += (centre - x).signum() * 46.0 * (pull * (1.0 - pull) * 4.0).min(1.0);
@@ -1727,7 +1750,7 @@ let rest = hand_slot(i, n);
         node.left = px(p.x);
         node.top = px(p.y);
         // how far it has actually risen drives size and tilt, so they move with it
-        let risen = ((rest.y - w.pos.y) / HAND_LIFT).clamp(0.0, 1.0);
+        let risen = ((rest.y - w.pos.y) / (rest.y - HAND_RISEN)).clamp(0.0, 1.0);
         let scale = if w.aiming { 1.08 } else if w.dragging { 0.86 } else { 1.0 + 0.10 * risen };
         tf.scale = tf.scale.lerp(Vec2::splat(scale), k);
         let mid = (n as f32 - 1.0) / 2.0;
@@ -1892,7 +1915,7 @@ fn update_tooltip(
                     let desc = format!("{key}-desc");
                     // the kind first: it names the picture over the enemy's head
                     let kind = l10n.t(&format!("intent-{:?}", mv.intent));
-                    lines.push((format!("{kind} · {}", l10n.t(&key)), if l10n.has(&desc) { l10n.t(&desc) } else { kind }));
+                    lines.push((format!("{kind} · {}", l10n.t(&key)), if l10n.has(&desc) { l10n.t(&desc) } else { String::new() }));
                 }
             }
         }
@@ -1906,7 +1929,7 @@ fn update_tooltip(
         }
         at = Vec2::new((w.pos.x + UNIT_W + 6.0).min(STAGE_W - 350.0), w.pos.y + 80.0);
     }
-    let body = lines.iter().map(|(k, v)| format!("{k} — {v}")).collect::<Vec<_>>().join("\n\n");
+    let body = lines.iter().map(|(k, v)| if v.is_empty() { k.clone() } else { format!("{k} — {v}") }).collect::<Vec<_>>().join("\n\n");
     let (node, vis) = &mut *panel;
     let want = if body.is_empty() { Visibility::Hidden } else { Visibility::Inherited };
     if **vis != want {
@@ -2022,6 +2045,7 @@ fn cue_effects(
                     float(&mut commands, *dst, format!("-{blocked}"), theme::FROST, 34.0, -70.0);
                 }
             }
+            Event::Missed { unit } => float(&mut commands, *unit, l10n.t("battle-missed"), theme::BONE, 34.0, -70.0),
             Event::Block { unit, amount, .. } => {
                 play(*unit, Anim::Guarded);
                 float(&mut commands, *unit, format!("+{amount}"), theme::NAV_BLUE.lighter(0.25), 36.0, -70.0)

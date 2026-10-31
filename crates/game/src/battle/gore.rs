@@ -25,6 +25,8 @@ pub(super) struct StainLayer;
 /// A body that has fallen: which way, how far through its fall, where its feet are.
 #[derive(Component)]
 pub(super) struct Corpse {
+    /// Who it was, should they get up again.
+    pub unit: UnitRef,
     t: f32,
     side: f32,
     /// The widget's feet, from its top-left corner.
@@ -37,6 +39,16 @@ pub(super) struct Corpse {
     lying: Option<Entity>,
     /// What runs in its veins.
     blood: Color,
+}
+
+impl Corpse {
+    /// Takes the body away, the picture of it lying included.
+    pub fn clear_away(&self, commands: &mut Commands, body: Entity) {
+        if let Some(lying) = self.lying {
+            commands.entity(lying).despawn();
+        }
+        commands.entity(body).despawn();
+    }
 }
 
 /// The bodies lying dead, over the stains and under the living.
@@ -204,6 +216,7 @@ pub(super) fn stain(commands: &mut Commands, art: &BloodArt, layer: Entity, at: 
 pub(super) fn strike_down(
     commands: &mut Commands,
     widget: Entity,
+    unit: UnitRef,
     origin: Vec2,
     foot: Vec2,
     draw: Vec2,
@@ -270,7 +283,7 @@ pub(super) fn strike_down(
     let wide = draw.y * if flying.contains(&true) { 1.3 } else { 0.9 };
     play(commands, stain_layer, &art.pool, foot + Vec2::new(side * draw.y * 0.25, 8.0), Vec2::new(wide, wide * 0.36), Vec2::splat(0.5), 0.0, blood.with_alpha(0.9), 3.0, true, side < 0.0);
     // the dead lie behind the living
-    commands.entity(widget).insert((Corpse { t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying, blood }, ZIndex(0)));
+    commands.entity(widget).insert((Corpse { unit, t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying, blood }, ZIndex(0)));
     for (k, (part, joint, picture, skin)) in parts.into_iter().enumerate() {
         if !flying[k] {
             continue;

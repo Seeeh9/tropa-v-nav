@@ -232,7 +232,11 @@ impl ShowPile<'_, '_> {
                 let slot = commands.spawn((Node { width: px(CARD_W * k), height: px(CARD_H * k), ..default() }, Pickable::IGNORE, ChildOf(row))).id();
                 let at = Vec2::new(-CARD_W * (1.0 - k) / 2.0, -CARD_H * (1.0 - k) / 2.0);
                 if let Some(e) = spawn_card(commands, slot, card, h.form, Some(at), false, (), &self.db.0, l10n, &self.fonts, &self.art, &self.assets) {
-                    commands.entity(e).insert((UiTransform { scale: Vec2::splat(k), ..default() }, Pickable::IGNORE));
+                    // hoverable to be turned over, and a click still goes through to close the view
+                    commands.entity(e).insert((UiTransform { scale: Vec2::splat(k), ..default() }, Pickable { should_block_lower: false, is_hoverable: true }));
+                    if !card.upgraded && self.db.0.cards.get(&card.def).is_some_and(|def| crate::card_flip::upgrades(def, h.form, l10n)) {
+                        commands.entity(e).insert(crate::card_flip::CardFlip::new(card.clone(), h.form));
+                    }
                 }
             }
         }

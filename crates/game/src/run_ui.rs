@@ -39,8 +39,8 @@ pub fn plugin(app: &mut App) {
 /// beside it while it is hovered, so nobody has to guess what Weak or Brew means.
 #[derive(Component)]
 pub struct CardHints {
-    lines: Vec<(String, String)>,
-    open: Option<Entity>,
+    pub lines: Vec<(String, String)>,
+    pub open: Option<Entity>,
 }
 
 impl CardHints {
@@ -555,8 +555,16 @@ fn draw_reward(
     for (i, id) in r.cards.iter().enumerate() {
         let card = Card { uid: i as u32, def: id.clone(), upgraded: false, free: false };
         let frame = db.0.cards.get(id).map(crate::battle::card_frame).unwrap_or(theme::PEAT);
-        let hints = db.0.cards.get(id).map(|def| l10n.card_glossary(&def.view(false, Form::Human))).unwrap_or_default();
+        let mut hints = db.0.cards.get(id).map(|def| l10n.card_glossary(&def.view(false, Form::Human))).unwrap_or_default();
+        if db.0.cards.get(id).is_some_and(|def| crate::card_flip::upgrades(def, Form::Human, &l10n)) {
+            hints.push((l10n.t("card-flip-hint"), String::new()));
+        }
+        let flip = crate::card_flip::CardFlip::new(card.clone(), Form::Human);
+        let turns = db.0.cards.get(id).is_some_and(|def| crate::card_flip::upgrades(def, Form::Human, &l10n));
         if let Some(e) = spawn_card(&mut commands, row, &card, Form::Human, None, false, (Button, Btn(frame), CardHints::new(hints)), &db.0, &l10n, &fonts, &art, &assets) {
+            if turns {
+                commands.entity(e).insert(flip);
+            }
             commands.entity(e).observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::TakeCard(Some(i as u8))));
         }
     }
@@ -665,9 +673,17 @@ pub fn shown_card(commands: &mut Commands, slot: Entity, uid: usize, id: &str, u
     let def = db.cards.get(id)?;
     let card = Card { uid: uid as u32, def: id.to_string(), upgraded: up, free: false };
     let at = Vec2::new(-CARD_W * (1.0 - k) / 2.0, -CARD_H * (1.0 - k) / 2.0);
-    let hints = l10n.card_glossary(&def.view(up, Form::Human));
+    let mut hints = l10n.card_glossary(&def.view(up, Form::Human));
+    let turns = !up && crate::card_flip::upgrades(def, Form::Human, l10n);
+    if turns {
+        hints.push((l10n.t("card-flip-hint"), String::new()));
+    }
+    let flip = crate::card_flip::CardFlip::new(card.clone(), Form::Human);
     let e = spawn_card(commands, slot, &card, Form::Human, Some(at), false, (Button, Btn(crate::battle::card_frame(def)), CardHints::new(hints)), db, l10n, fonts, art, assets)?;
     commands.entity(e).insert(UiTransform { scale: Vec2::splat(k), ..default() });
+    if turns {
+        commands.entity(e).insert(flip);
+    }
     Some(e)
 }
 

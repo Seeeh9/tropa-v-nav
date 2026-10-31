@@ -6,6 +6,7 @@ mod battle;
 mod between;
 mod book;
 #[cfg(feature = "dev")]
+mod card_flip;
 mod deck_fx;
 mod dev;
 #[cfg(feature = "dev")]
@@ -120,7 +121,7 @@ fn main() {
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(PostStartup, menu::apply_settings)
     .add_systems(Update, fit_stage)
-    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, map_party::plugin, between::plugin, preload::plugin));
+    .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, card_flip::plugin, map_party::plugin, between::plugin, preload::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins((dev::plugin, lan::plugin));

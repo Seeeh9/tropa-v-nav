@@ -96,6 +96,7 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
         next_uid,
         log: Vec::new(),
         raise_cost: opts.raise_cost,
+        foretelling: false,
     };
     let mut ex = Exec { s: &mut s, c, ev: Vec::new(), depth: 0 };
     for id in enemies {
@@ -354,12 +355,17 @@ impl<'a> Exec<'a> {
                 }
                 let e = &mut self.s.enemies[idx];
                 // the hare: the first attack against it each round finds only air
-                let d = if attack && e.flags.contains_key("dodge") && !e.flags.contains_key("turn_dodged") {
+                let dodged = attack && e.flags.contains_key("dodge") && !e.flags.contains_key("turn_dodged");
+                let d = if dodged {
                     e.flags.insert("turn_dodged".into(), 1);
                     0
                 } else {
                     d
                 };
+                if dodged {
+                    self.ev.push(Event::Missed { unit: dst });
+                }
+                let e = &mut self.s.enemies[idx];
                 let blocked = d.min(e.block);
                 e.block -= blocked;
                 let mut lost = (d - blocked).min(e.hp);
@@ -709,6 +715,10 @@ impl<'a> Exec<'a> {
             *h.flags.entry("free_rune".into()).or_insert(1) -= 1;
         }
         self.ev.push(Event::CardPlayed { player: p, card: card.def.clone(), upgraded: card.upgraded, target });
+        // charmed and alone: the blow has no friend to turn on, and is seen to go to waste
+        if charmed && target.is_none() {
+            self.ev.push(Event::Missed { unit: UnitRef::Hero(p) });
+        }
         let mut ctx = Ctx {
             src: UnitRef::Hero(p),
             target,
@@ -877,6 +887,8 @@ impl<'a> Exec<'a> {
                         for t in foes {
                             self.hurt(Some(me), UnitRef::Enemy(t), 6, false);
                         }
+                    } else if self.s.foretelling {
+                        // who it strikes is not known yet
                     } else if let Some(t) = self.s.rng.pick(&foes).copied() {
                         self.hurt(Some(me), UnitRef::Enemy(t), 6, false);
                     }
@@ -909,6 +921,7 @@ impl<'a> Exec<'a> {
                     heroes(self)
                 }
             }
+            Tgt::RandomFoe if self.s.foretelling => vec![],
             Tgt::RandomFoe => {
                 let all = if hero_side { enemies(self) } else { heroes(self) };
                 self.s.rng.pick(&all).copied().into_iter().collect()

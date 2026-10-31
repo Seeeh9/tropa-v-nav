@@ -123,6 +123,9 @@ pub struct Combat {
     /// Circle 10: breaking the needle also lets Koschei's shadow loose.
     #[serde(default)]
     pub shadow: bool,
+    /// A copy played out to foretell a move: what falls on a random foe is left out, with no roll.
+    #[serde(skip)]
+    pub foretelling: bool,
 }
 
 /// Per-fight rule tweaks, set by the Circle of Nav and the kind of encounter.
@@ -207,6 +210,8 @@ pub enum Event {
     Energy { player: u8, delta: i32 },
     Downed { player: u8 },
     Raised { player: u8, by: Option<u8>, hp: i32 },
+    /// A blow found only air: the unit dodged it, or it was wasted on nobody.
+    Missed { unit: UnitRef },
     CardAdded { player: u8, card: Id, pile: Pile },
     Exhausted { player: u8, card: Id },
     EnemyMove { enemy: u32, mv: usize },

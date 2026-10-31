@@ -98,7 +98,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             for (x, n) in herbs {
                 out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, &format!("herb-{x}")) });
             }
-            for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter"] {
+            for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter", "draw_less", "energy_less", "no_intents"] {
                 if let Some(n) = real.flags.get(flag) {
                     let key = format!("trait-{flag}");
                     out.push(Chip { icon: format!("status/{flag}"), n: (*n > 1).then_some(*n), good: Some(false), name: l10n.t(&key), help: help(l10n, &key) });
@@ -111,7 +111,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             // the real state carries the traits and the countdown
             if let Some(real) = session.truth.enemy(uid) {
                 if real.flags.contains_key("immortal") {
-                    out.push(Chip { icon: "status/immortal".into(), n: None, good: Some(true), name: l10n.t("trait-immortal"), help: String::new() });
+                    out.push(Chip { icon: "status/immortal".into(), n: None, good: Some(true), name: l10n.t("trait-immortal"), help: help(l10n, "trait-immortal") });
                 }
                 if let Some(n) = real.flags.get("last_breath") {
                     out.push(Chip { icon: "status/last_breath".into(), n: Some(*n), good: None, name: l10n.n("trait-last-breath", *n), help: String::new() });

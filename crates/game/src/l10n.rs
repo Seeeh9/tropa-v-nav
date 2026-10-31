@@ -286,6 +286,12 @@ impl L10n {
                         keys.push("kw-Brew".into());
                     }
                     Effect::Brew => keys.push("kw-Brew".into()),
+                    Effect::Hook(name) if name == "kolyada" => keys.push("kw-Rune".into()),
+                    Effect::Hook(name) if name == "random_herb" => keys.push("kw-Brew".into()),
+                    Effect::Damage(Amount::Runes(kind, _), _) | Effect::Block(Amount::Runes(kind, _), _) => {
+                        keys.push(format!("rune-{kind:?}"));
+                        keys.push("kw-Rune".into());
+                    }
                     _ => {}
                 }
             }

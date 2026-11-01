@@ -41,6 +41,34 @@ impl Lang {
         }
     }
     /// The next language the menu button switches to.
+    /// As `Settings::text_lang` keeps it.
+    pub fn saved(self) -> u8 {
+        match self {
+            Lang::Old => 1,
+            Lang::Ru => 2,
+            Lang::En => 3,
+        }
+    }
+
+    pub fn from_saved(n: u8) -> Option<Lang> {
+        match n {
+            1 => Some(Lang::Old),
+            2 => Some(Lang::Ru),
+            3 => Some(Lang::En),
+            _ => None,
+        }
+    }
+
+    /// From the word for it in `config.ron` and the installer's note.
+    pub fn from_word(word: &str) -> Option<Lang> {
+        match word.trim() {
+            "en" => Some(Lang::En),
+            "ru" => Some(Lang::Ru),
+            "old" => Some(Lang::Old),
+            _ => None,
+        }
+    }
+
     pub fn other(self) -> Lang {
         match self {
             Lang::Old => Lang::Ru,

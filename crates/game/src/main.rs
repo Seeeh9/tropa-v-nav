@@ -83,14 +83,17 @@ fn main() {
     let assets = art::assets_dir();
     let config = load_config(&assets);
     let steam = steam::init(config.steam_app_id);
-    let lang = match config.lang.as_deref() {
-        Some("en") => Lang::En,
-        Some("ru") => Lang::Ru,
-        Some(_) => Lang::Old,
-        None => steam.as_ref().ok().map(steam::ui_lang).unwrap_or(Lang::Old),
-    };
-    // offline dev builds share one local profile
+    // playing without Steam, everyone on this machine shares one local profile
     let account = steam.as_ref().ok().map(|c| c.user().steam_id().raw()).unwrap_or(0);
+    let profile = profile::Profile::load(account);
+    // what the player last chose in the game, else what the config says, else the language the game
+    // was installed in, else Steam's
+    let installed = std::fs::read_to_string(assets.join("install_lang.txt")).ok().and_then(|word| Lang::from_word(&word));
+    let lang = Lang::from_saved(profile.settings.text_lang)
+        .or_else(|| config.lang.as_deref().map(|word| Lang::from_word(word).unwrap_or(Lang::Old)))
+        .or(installed)
+        .or_else(|| steam.as_ref().ok().map(steam::ui_lang))
+        .unwrap_or(Lang::Old);
     let content = match nav_core::Content::load_dir(&assets.join("data")) {
         Ok(c) => c,
         Err(e) => {
@@ -120,7 +123,7 @@ fn main() {
     .insert_resource(art::Art::new(assets.clone()))
     .insert_resource(session::Db(content))
     .insert_resource(config)
-    .insert_resource(profile::Profile::load(account))
+    .insert_resource(profile)
     .init_state::<AppState>()
     .add_systems(Startup, (theme::load_fonts, setup_stage))
     .add_systems(PostStartup, menu::apply_settings)
@@ -129,7 +132,7 @@ fn main() {
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);
-    app.add_plugins(lan::plugin).add_systems(Update, logfile::note_screens);
+    app.add_plugins(lan::plugin).add_systems(Update, (logfile::note_screens, name_window));
     info!("Tropa v Nav {} ({}), language {:?}, Steam {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, config_lang, steam.is_ok());
 
     // without Steam the game still runs: alone, or with friends over a local network
@@ -144,6 +147,15 @@ fn main() {
         }
     }
     app.run();
+}
+
+/// The window goes by the game's name in the language chosen.
+fn name_window(l10n: Res<L10n>, mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>) {
+    if l10n.is_changed() {
+        for mut window in &mut windows {
+            window.title = l10n.t("game-title");
+        }
+    }
 }
 
 fn setup_stage(mut commands: Commands) {

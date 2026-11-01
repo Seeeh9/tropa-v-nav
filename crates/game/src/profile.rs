@@ -26,11 +26,14 @@ pub struct Settings {
     /// Language of the spoken word, chosen apart from the text's:
     /// 0 follows the text, 1 old Russian, 2 Russian, 3 English.
     pub voice_lang: u8,
+    /// Language of the text, once the player has chosen one in the game:
+    /// 0 not yet (see `main`), 1 old Russian, 2 Russian, 3 English.
+    pub text_lang: u8,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, voice_lang: 0 }
+        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, voice_lang: 0, text_lang: 0 }
     }
 }
 

@@ -681,6 +681,8 @@ fn sync_units(
         };
         let draw = match tall {
             Some(h) => Vec2::new(h * art.aspect(&stem).unwrap_or(size.x / size.y), h),
+            // the stove is broad: drawn as large as an elite, it would stand on its neighbours
+            None if stem == "heroes/emelya" => Vec2::splat(size.y * 1.08),
             None if wide => Vec2::splat(size.y * 1.25),
             None => size,
         };

@@ -15,7 +15,11 @@ pub fn intent_damage(c: &Content, s: &Combat, e: &Enemy) -> Option<(i32, i32)> {
             Effect::Hits(a, k, _) => (a, *k),
             _ => return None,
         };
-        let Amount::N(base) = a else { return None };
+        let base = match a {
+            Amount::N(base) => *base,
+            Amount::Pack(base, each) => base + (s.living_enemies().count() as i32 - 1) * each,
+            _ => return None,
+        };
         let mut d = base + s.status(me, StatusKind::Strength) + s.status(me, StatusKind::TempStrength);
         if s.status(me, StatusKind::Weak) > 0 {
             d = d * 3 / 4;

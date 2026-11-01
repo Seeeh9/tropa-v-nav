@@ -7,9 +7,9 @@ mod audio;
 mod battle;
 mod between;
 mod book;
-#[cfg(feature = "dev")]
 mod card_flip;
 mod deck_fx;
+#[cfg(feature = "dev")]
 mod dev;
 mod lan;
 mod logfile;

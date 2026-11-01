@@ -536,3 +536,13 @@ fn an_arm_lost_takes_what_it_did() {
     assert!(needs_lost_arm(&knife, WEAPON_ARM, "volkolak", h));
     assert!(!needs_lost_arm(&knife, WEAPON_ARM | SHIELD_ARM, "volkolak", Form::Beast));
 }
+
+#[test]
+fn the_armless_still_have_their_own_cards() {
+    use nav_core::combat::{needs_lost_arm, SHIELD_ARM, WEAPON_ARM};
+    let c = content();
+    for id in ["stump_bash", "stump_kick", "stump_shoulder", "stump_spray", "stump_bite", "stump_spite"] {
+        let v = c.cards.get(id).unwrap().view(false, Form::Human);
+        assert!(!needs_lost_arm(&v, WEAPON_ARM | SHIELD_ARM, "bogatyr", Form::Human), "{id}");
+    }
+}

@@ -19,7 +19,7 @@ data_enum!(Rarity { Starter, Common, Uncommon, Rare, Special });
 data_enum!(
     /// `Coop` cards only show up in rewards with 2+ players.
     /// `Passable` cards can be handed to an ally for 1 Energy.
-    Keyword { Exhaust, Retain, Ethereal, Unplayable, Coop, Passable }
+    Keyword { Exhaust, Retain, Ethereal, Unplayable, Coop, Passable, Armless }
 );
 data_enum!(
     /// What the player has to point a card at.

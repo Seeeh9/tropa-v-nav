@@ -61,6 +61,18 @@ pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (C
 pub const WEAPON_ARM: u8 = 1;
 pub const SHIELD_ARM: u8 = 2;
 
+/// What a body has left to fight with once this arm is gone.
+pub fn stump_cards(arm: u8) -> &'static [&'static str] {
+    if arm == WEAPON_ARM {
+        &["stump_bash", "stump_kick"]
+    } else {
+        &["stump_shoulder", "stump_spray"]
+    }
+}
+
+/// And once neither arm is left.
+pub const BOTH_ARMS_CARDS: [&str; 2] = ["stump_bite", "stump_spite"];
+
 /// Does any of these effects, however deep in a condition or a repeat, answer to this test.
 fn any_effect(effects: &[Effect], test: &dyn Fn(&Effect) -> bool) -> bool {
     effects.iter().any(|e| {
@@ -78,6 +90,9 @@ fn any_effect(effects: &[Effect], test: &dyn Fn(&Effect) -> bool) -> bool {
 /// jug, the volhv's staff, the witch's doll and bones, the jester's free hand for the masks.
 /// In beast form a werewolf bites: no arm is needed for an attack.
 pub fn needs_lost_arm(view: &CardView, lost_arms: u8, hero: &str, form: Form) -> bool {
+    if view.has(Keyword::Armless) {
+        return false;
+    }
     let weapon_gone = lost_arms & WEAPON_ARM != 0;
     let shield_gone = lost_arms & SHIELD_ARM != 0;
     let any = |test: &dyn Fn(&Effect) -> bool| any_effect(&view.effects, test);
@@ -540,6 +555,14 @@ impl<'a> Exec<'a> {
                 if self.c.cards.contains_key(part.as_str()) {
                     self.add_card(i, &part, Pile::Discard);
                     self.hero(i).new_parts.push(part.into());
+                }
+                // what is left to fight with
+                let both = limbs >= 2;
+                for card in stump_cards(arm).iter().chain(if both { BOTH_ARMS_CARDS.iter() } else { [].iter() }) {
+                    if self.c.cards.contains_key(*card) {
+                        self.add_card(i, card, Pile::Discard);
+                        self.hero(i).new_parts.push((*card).into());
+                    }
                 }
             }
         }

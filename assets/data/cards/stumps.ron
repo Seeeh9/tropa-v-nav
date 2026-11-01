@@ -1,0 +1,16 @@
+// What is left to fight with when the arms are gone: legs, teeth, spite and what still runs out of
+// the stump. Given when an arm is cut off (see combat.rs), taken back when it is sewn on.
+[
+    (id: "stump_bash", kind: Attack, rarity: Special, cost: 1, target: Enemy, keywords: [Armless],
+        effects: [Damage(N(9), Target), LoseHp(N(2), Me)]),
+    (id: "stump_kick", kind: Attack, rarity: Special, cost: 1, target: Enemy, keywords: [Armless],
+        effects: [Damage(N(6), Target), Apply(Weak, N(1), Target)]),
+    (id: "stump_shoulder", kind: Skill, rarity: Special, cost: 1, keywords: [Armless],
+        effects: [Block(N(7), Me)]),
+    (id: "stump_spray", kind: Skill, rarity: Special, cost: 0, target: Enemy, keywords: [Armless, Exhaust],
+        effects: [Apply(Vulnerable, N(2), Target), LoseHp(N(2), Me)]),
+    (id: "stump_bite", kind: Attack, rarity: Special, cost: 1, target: Enemy, keywords: [Armless],
+        effects: [Damage(N(5), Target), Heal(N(2), Me)]),
+    (id: "stump_spite", kind: Skill, rarity: Special, cost: 1, keywords: [Armless, Exhaust],
+        effects: [Apply(Strength, N(2), Me), LoseHp(N(3), Me)]),
+]

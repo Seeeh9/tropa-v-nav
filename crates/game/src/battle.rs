@@ -996,8 +996,12 @@ pub(crate) fn short_of(no_head: bool, lost_arms: u8) -> Option<&'static str> {
 }
 
 /// The unit's own picture under whatever pose it is drawn in for the moment.
-pub(crate) fn pose_base(stem: &str) -> &str {
-    POSES.iter().find_map(|p| stem.strip_suffix(p)).unwrap_or(stem)
+pub(crate) fn pose_base(mut stem: &str) -> &str {
+    // a maimed hero's pose carries two marks: `_noarms_strike`
+    while let Some(less) = POSES.iter().find_map(|p| stem.strip_suffix(p)) {
+        stem = less;
+    }
+    stem
 }
 
 fn swap_form_art(
@@ -1015,9 +1019,11 @@ fn swap_form_art(
     let stems = session.shown.heroes.iter().flat_map(|h| [format!("heroes/{}", h.def), format!("heroes/{}_beast", h.def)]).chain(session.shown.enemies.iter().map(|e| format!("enemies/{}", e.def)));
     for stem in stems {
         if preloaded.seen.insert(stem.clone()) {
-            for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed", "_headless", "_noweapon", "_noshield", "_noarms"] {
-                if let Some(handle) = art.image(&assets, &format!("{stem}{pose}")) {
-                    preloaded.handles.push(handle);
+            for mark in ["", "_headless", "_noweapon", "_noshield", "_noarms"] {
+                for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed"] {
+                    if let Some(handle) = art.image(&assets, &format!("{stem}{mark}{pose}")) {
+                        preloaded.handles.push(handle);
+                    }
                 }
             }
         }
@@ -1052,12 +1058,14 @@ fn swap_form_art(
         };
         // who is short of a part wears their own picture of it, when one was painted
         let short = if let UnitRef::Hero(i) = s.unit { session.shown.hero(i).and_then(|h| short_of(h.walks_headless, h.lost_arms)) } else { None };
+        let mut painted = whole;
         if let Some(mark) = short {
             if art.image(&assets, &format!("{want}{mark}")).is_some() {
                 want = format!("{want}{mark}");
+                painted = true;
             }
         }
-        if let Some(pose) = pose.filter(|_| !downed && whole) {
+        if let Some(pose) = pose.filter(|_| !downed && painted) {
             if art.image(&assets, &format!("{want}{pose}")).is_some() {
                 want = format!("{want}{pose}");
             }

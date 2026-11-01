@@ -1515,6 +1515,10 @@ impl Run {
                     let pl = &mut self.players[p];
                     if let Some((back, card)) = arm_to_sew(pl) {
                         take_from_deck(pl, &card);
+                        // with the arm back the makeshifts go; those for no arms at all go too
+                        for gone in crate::combat::stump_cards(back).iter().chain(crate::combat::BOTH_ARMS_CARDS.iter()) {
+                            take_from_deck(pl, gone);
+                        }
                         pl.lost_limbs -= 1;
                         pl.lost_arms &= !back;
                         pl.max_hp = (pl.max_hp - pl.max_hp * LIMB_SEAM_PCT / 100).max(LEAST_MAX_HP);

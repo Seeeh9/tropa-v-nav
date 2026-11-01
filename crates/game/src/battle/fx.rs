@@ -5,6 +5,9 @@
 
 use super::*;
 
+/// How heavy a blow must be to burst out every way.
+const HEAVY_BLOW: f32 = 0.4;
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Bursts>().add_systems(Update, (burst, fly).chain().after(cue_effects).run_if(in_state(AppState::Battle)));
 }
@@ -83,12 +86,16 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
         e.insert(p);
     };
     let mut splashes: Vec<(Vec2, f32, Color, f32)> = Vec::new();
+    let mut gushes: Vec<(Vec2, f32, Color)> = Vec::new();
     for (k, b) in bursts.0.drain(..).enumerate() {
         let r = |i: u32| scatter(seed.wrapping_add(k as u32 * 977), i);
         match b {
             Burst::Wound { at, dir, weight, blood, ground } => {
                 // the splash off the blow, frame by frame, thrown away from the attacker
                 splashes.push((at, 140.0 + 160.0 * weight, blood, dir));
+                if weight >= HEAVY_BLOW {
+                    gushes.push((at, 220.0 + 220.0 * weight, blood));
+                }
                 // the slash: one long white-hot stroke across the body
                 let angle = -0.6 + 0.35 * r(0);
                 spawn(Particle { at, vel: Vec2::from_angle(angle) * 900.0 * dir, fall: 0.0, drag: 9.0, life: 0.0, ttl: 0.22, size: 10.0 + 6.0 * weight, grow: -0.6, color: Color::srgb(1.0, 0.97, 0.88), streak: 24.0, land: None, dust: false });
@@ -202,6 +209,10 @@ fn burst(mut commands: Commands, mut bursts: ResMut<Bursts>, layer: Single<Entit
                 }
             }
         }
+    }
+    // a heavy blow bursts out every way at once
+    for (at, s, blood) in gushes {
+        gore::play(&mut commands, *layer, &art.gush, at, Vec2::splat(s), Vec2::splat(0.5), 0.0, blood, 20.0, false, false);
     }
     // the splash off each blow, frame by frame, thrown away from the attacker
     for (at, s, blood, dir) in splashes {

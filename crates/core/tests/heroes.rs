@@ -10,7 +10,7 @@ const ME: UnitRef = UnitRef::Hero(0);
 /// A real hero with a chosen deck and their starting relic.
 fn with(c: &Content, hero_id: &str, deck: &[&str]) -> HeroSetup {
     let d = &c.heroes[hero_id];
-    HeroSetup { def: hero_id.into(), hp: d.max_hp, max_hp: d.max_hp, deck: deck.iter().map(|x| (x.to_string(), false)).collect(), relics: vec![d.relic.clone()], falls: 0, potions: vec![] }
+    HeroSetup { def: hero_id.into(), hp: d.max_hp, max_hp: d.max_hp, deck: deck.iter().map(|x| (x.to_string(), false)).collect(), relics: vec![d.relic.clone()], falls: 0, potions: vec![], lost_limbs: 0, beheaded: false }
 }
 
 fn fight(hero_id: &str, deck: &[&str], enemies: &[&str]) -> (Content, Combat) {
@@ -467,4 +467,50 @@ fn strength_yemelya_leaves_unspent_is_sleep_gained_and_his_cards_spend_it() {
     let left = s.heroes[0].energy;
     end_round(&c, &mut s);
     assert_eq!(s.status(UnitRef::Hero(0), StatusKind::Drowse), left);
+}
+
+/// A foe striking one hero for `n` at its next blow.
+fn struck(hp: i32, block: i32, n: i32, seed: u64) -> (Content, Combat, Vec<Event>) {
+    let c = content();
+    let mut party = with(&c, "bogatyr", &["bogatyr_strike"]);
+    party.hp = hp;
+    party.max_hp = 100;
+    let (mut s, _) = start(&c, &[party], &ids(&["kikimora"]), seed);
+    s.heroes[0].block = block;
+    let ev = nav_core::combat::test_hit_hero(&c, &mut s, 0, n);
+    (c, s, ev)
+}
+
+#[test]
+fn a_light_blow_takes_no_limb_and_a_heavy_one_may() {
+    assert!((0..60).all(|seed| struck(100, 0, 20, seed).1.heroes[0].lost_limbs == 0));
+    let cut = (0..60).filter(|seed| struck(100, 0, 60, *seed).1.heroes[0].lost_limbs == 1).count();
+    assert!(cut > 5 && cut < 55, "a chance, not a certainty: {cut} of 60");
+    // what the shield stopped never reached the arm
+    assert!((0..60).all(|seed| struck(100, 50, 60, seed).1.heroes[0].lost_limbs == 0));
+}
+
+#[test]
+fn a_blow_far_past_what_is_left_takes_the_head_and_nothing_raises_him() {
+    let (_, s, ev) = struck(10, 0, 12, 1);
+    assert!(s.heroes[0].downed && !s.heroes[0].beheaded, "barely past: only down");
+    assert!(ev.iter().all(|e| !matches!(e, Event::Beheaded { .. })));
+    let (_, s, ev) = struck(10, 0, 70, 1);
+    assert!(s.heroes[0].downed && s.heroes[0].beheaded);
+    assert!(ev.iter().any(|e| matches!(e, Event::Beheaded { player: 0 })));
+}
+
+#[test]
+fn each_limb_gone_costs_more() {
+    let c = content();
+    let deck = ["bogatyr_strike"; 12];
+    let at = |limbs: u8| {
+        let mut party = with(&c, "bogatyr", &deck);
+        party.lost_limbs = limbs;
+        let (s, _) = start(&c, &[party], &ids(&["dummy"]), 3);
+        (s.heroes[0].hand.len(), s.heroes[0].energy)
+    };
+    let (whole, one, two) = (at(0), at(1), at(2));
+    assert_eq!(one, (whole.0 - 1, whole.1));
+    assert_eq!(two, (whole.0 - 1, whole.1 - 1));
 }

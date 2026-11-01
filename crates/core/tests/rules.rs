@@ -1204,6 +1204,9 @@ fn the_vurdalak_elder_raises_its_dead() {
 #[test]
 fn maras_winter_lasts_while_her_crown_stands() {
     let (c, mut s) = solo(&["t_hit"; 12], &["mara", "ice_crown"]);
+    // tough enough that her blows take no limb, which would cost a card of its own
+    s.heroes[0].max_hp = 1000;
+    s.heroes[0].hp = 1000;
     end_round(&c, &mut s);
     assert_eq!(s.heroes[0].flags.get("winter"), Some(&1));
     assert_eq!(s.heroes[0].flags.get("frozen"), Some(&2));

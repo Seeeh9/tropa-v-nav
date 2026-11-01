@@ -98,6 +98,10 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             for (x, n) in herbs {
                 out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, &format!("herb-{x}")) });
             }
+            if h.lost_limbs > 0 {
+                let key = if h.lost_limbs >= 2 { "trait-lost-both" } else { "trait-lost-one" };
+                out.push(Chip { icon: "status/lost_limb".into(), n: (h.lost_limbs > 1).then_some(h.lost_limbs as i32), good: Some(false), name: l10n.t(key), help: help(l10n, key) });
+            }
             for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter", "draw_less", "energy_less", "no_intents"] {
                 if let Some(n) = real.flags.get(flag) {
                     let key = format!("trait-{flag}");
@@ -114,7 +118,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                     out.push(Chip { icon: "status/immortal".into(), n: None, good: Some(true), name: l10n.t("trait-immortal"), help: help(l10n, "trait-immortal") });
                 }
                 // what its kind does, while it can: the hare's dodge is gone once spent this round
-                for flag in ["dodge", "flying", "hiding", "enrage", "lifesteal", "piercing", "rises", "hunter", "pack", "spores", "vengeful"] {
+                for flag in ["dodge", "flying", "hiding", "enrage", "lifesteal", "piercing", "rises", "hunter", "pack", "spores", "vengeful", "burning", "greedy", "hollow", "growing"] {
                     if real.flags.contains_key(flag) && !(flag == "dodge" && real.flags.contains_key("turn_dodged")) {
                         let key = format!("trait-{flag}");
                         out.push(Chip { icon: format!("status/{flag}"), n: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });

@@ -10,7 +10,8 @@ use std::f32::consts::FRAC_PI_2;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Blows>()
-        .add_systems(Update, play_frames.run_if(in_state(AppState::Battle)))
+        .init_resource::<Severed>()
+        .add_systems(Update, (play_frames, trickle_down.run_if(resource_exists::<Session>), (fly_severed, hide_lost_limbs).chain().run_if(resource_exists::<Session>)).run_if(in_state(AppState::Battle)))
         .add_systems(Startup, |mut commands: Commands, assets: Res<AssetServer>| commands.insert_resource(BloodArt::load(&assets))).add_systems(OnEnter(AppState::Battle), |mut b: ResMut<Blows>| b.0.clear()).add_systems(Update, (fall, fly_gibs, bleed).chain().after(dying).run_if(in_state(AppState::Battle)));
 }
 
@@ -101,14 +102,14 @@ pub(super) fn blood_of(comfort: &Comfort, shown: &Combat, unit: UnitRef) -> Colo
     let def = shown.enemy(uid).map(|e| e.def.as_str()).unwrap_or("");
     match def {
         // the drowned and the ghosts: a pale cold ichor
-        "nav_soul" | "weeper" | "mara" | "drowned_maiden" | "mavka" | "koschei_shadow" | "swamp_light" | "sirin" => Color::srgb(0.50, 0.60, 0.64),
+        "nav_soul" | "weeper" | "mara" | "drowned_maiden" | "mavka" | "koschei_shadow" | "swamp_light" | "sirin" | "vodyanoy" => Color::srgb(0.50, 0.60, 0.64),
         // wood and fungus bleed sap
-        "leshy" | "tree_guard" | "death_oak" | "death_oak_chest" | "mushroom_corpse" | "lesavka" => Color::srgb(0.42, 0.40, 0.10),
+        "leshy" | "tree_guard" | "death_oak" | "death_oak_chest" | "mushroom_corpse" | "lesavka" | "chuchelo" => Color::srgb(0.42, 0.40, 0.10),
         // things, not bodies: splinters and ash, meltwater, a dying glow
         "death_chest" | "death_egg" | "death_egg_solo" => Color::srgb(0.30, 0.25, 0.18),
         "ice_crown" => Color::srgb(0.62, 0.74, 0.80),
         // bone has only dust in it
-        "kostomakha" | "koschei" => Color::srgb(0.42, 0.36, 0.26),
+        "kostomakha" | "koschei" | "ovinnik" | "viy" => Color::srgb(0.42, 0.36, 0.26),
         // the swamp's things run green-black
         "bolotnik" | "kikimora" | "tinyak" | "shishiga" | "yrka" => Color::srgb(0.26, 0.32, 0.08),
         // old dead blood, black and thick
@@ -133,6 +134,122 @@ pub(super) struct BloodArt {
     pub spurt: Vec<Handle<Image>>,
     pub splash: Vec<Handle<Image>>,
     pub pool: Vec<Handle<Image>>,
+    /// A heavy blow bursting out in all directions, a mist left by a killing one, a trickle down
+    /// the badly hurt.
+    pub gush: Vec<Handle<Image>>,
+    pub mist: Vec<Handle<Image>>,
+    pub trickle: Vec<Handle<Image>>,
+}
+
+/// Limbs struck off this frame, to be sent flying.
+#[derive(Resource, Default)]
+pub(super) struct Severed(pub Vec<(UnitRef, rig::Part)>);
+
+/// A limb struck off a hero who is still standing goes flying, dripping, like any other part.
+#[allow(clippy::too_many_arguments)]
+fn fly_severed(
+    mut commands: Commands,
+    mut severed: ResMut<Severed>,
+    session: Res<Session>,
+    comfort: Res<Comfort>,
+    images: Res<Assets<Image>>,
+    rigs: Res<Assets<rig::RigMaterial>>,
+    layer: Single<Entity, With<FloatLayer>>,
+    art: Res<BloodArt>,
+    sprites: Query<(&UnitSprite, &Children)>,
+    skins: Query<(&rig::RigSkin, &MaterialNode<rig::RigMaterial>)>,
+) {
+    for (unit, part) in severed.0.drain(..) {
+        let Some((foot, _)) = unit_place(&session.shown, unit) else { continue };
+        let Some((sprite, children)) = sprites.iter().find(|(s, _)| s.unit == unit) else { continue };
+        let blood = blood_of(&comfort, &session.shown, unit);
+        let draw = sprite.draw;
+        let pic = Vec2::new(foot.x - draw.x / 2.0, foot.y - draw.y);
+        let at_body = foot - Vec2::new(0.0, draw.y * 0.5);
+        play(&mut commands, *layer, &art.gush, at_body, Vec2::splat(draw.y * 0.8), Vec2::splat(0.5), 0.0, blood, 20.0, false, false);
+        for (skin, material) in skins.iter_many(children).flatten() {
+            if skin.part != Some(part) {
+                continue;
+            }
+            let Some(m) = rigs.get(&material.0) else { continue };
+            let picture = m.picture.clone();
+            let (centre, radius) = centre_of(&images, &picture).unwrap_or((Vec2::splat(0.5), 0.08));
+            let at = pic + centre * draw;
+            commands
+                .spawn((
+                    Gib { at, vel: Vec2::new(-260.0, -820.0), angle: 0.0, spin: -9.0, ground: foot.y + 30.0, radius: radius * draw.y, weight: 0.8, blood, bleed: 3.5, smear: 0.0, still: false },
+                    Node { position_type: PositionType::Absolute, left: px(at.x), top: px(at.y), width: px(0), height: px(0), ..default() },
+                    UiTransform::IDENTITY,
+                    GlobalZIndex(15),
+                    Pickable::IGNORE,
+                    ChildOf(*layer),
+                ))
+                .with_child((
+                    ImageNode::new(picture),
+                    Node { position_type: PositionType::Absolute, left: px(-centre.x * draw.x), top: px(-centre.y * draw.y), width: px(draw.x), height: px(draw.y), ..default() },
+                    Pickable::IGNORE,
+                ));
+        }
+    }
+}
+
+/// What has been struck off stays off, for the rest of the run: the first limb is the striking
+/// arm, the second the other.
+fn hide_lost_limbs(session: Res<Session>, sprites: Query<(&UnitSprite, &Children)>, mut skins: Query<(&rig::RigSkin, &mut Visibility)>) {
+    for (sprite, children) in &sprites {
+        let UnitRef::Hero(i) = sprite.unit else { continue };
+        let limbs = session.shown.hero(i).map_or(0, |h| h.lost_limbs);
+        if limbs == 0 {
+            continue;
+        }
+        let mut iter = skins.iter_many_mut(children);
+        while let Some(Ok((skin, mut vis))) = iter.fetch_next() {
+            let gone = matches!((skin.part, limbs), (Some(rig::Part::Arm), _) | (Some(rig::Part::Shield), 2..));
+            if gone {
+                vis.set_if_neq(Visibility::Hidden);
+            }
+        }
+    }
+}
+
+/// Below this share of its health a unit bleeds on its own.
+const BADLY_HURT: f32 = 0.35;
+
+/// The badly hurt bleed: now and then a trickle runs down from a wound.
+fn trickle_down(
+    mut commands: Commands,
+    time: Res<Time>,
+    session: Res<Session>,
+    comfort: Res<Comfort>,
+    art: Res<BloodArt>,
+    layer: Single<Entity, With<FloatLayer>>,
+    units: Query<&UnitWidget, Without<Corpse>>,
+    mut clock: Local<(f32, u32)>,
+) {
+    clock.0 -= time.delta_secs();
+    if clock.0 > 0.0 {
+        return;
+    }
+    clock.1 = clock.1.wrapping_add(1);
+    // one trickle at a time over the whole field, so it stays a detail
+    clock.0 = 0.7 + (clock.1.wrapping_mul(2654435761) >> 28) as f32 * 0.09;
+    let hurt: Vec<UnitRef> = units
+        .iter()
+        .map(|w| w.unit)
+        .filter(|u| match u {
+            UnitRef::Hero(i) => session.shown.hero(*i).is_some_and(|h| !h.downed && (h.hp as f32) < h.max_hp as f32 * BADLY_HURT),
+            UnitRef::Enemy(e) => session.shown.enemy(*e).is_some_and(|e| e.alive && (e.hp as f32) < e.max_hp as f32 * BADLY_HURT),
+        })
+        .collect();
+    if hurt.is_empty() {
+        return;
+    }
+    let unit = hurt[clock.1 as usize % hurt.len()];
+    let Some((foot, size)) = unit_place(&session.shown, unit) else { return };
+    let side = ((clock.1.wrapping_mul(40503) >> 8) % 100) as f32 / 100.0 - 0.5;
+    let h = size.y * 0.3;
+    let blood = blood_of(&comfort, &session.shown, unit);
+    play(&mut commands, *layer, &art.trickle, foot - Vec2::new(size.x * 0.35 * side, size.y * 0.62), Vec2::new(h * 0.6, h), Vec2::new(0.5, 0.0), 0.0, blood, 7.0, false, false);
 }
 
 /// A blood effect played frame by frame; a pool keeps its last frame, the rest are gone after.
@@ -189,6 +306,9 @@ impl BloodArt {
             spurt: (0..8).map(|i| assets.load(format!("blood/anim/spurt_{i}.png"))).collect(),
             splash: (0..8).map(|i| assets.load(format!("blood/anim/splash_{i}.png"))).collect(),
             pool: (0..8).map(|i| assets.load(format!("blood/anim/pool_{i}.png"))).collect(),
+            gush: (0..8).map(|i| assets.load(format!("blood/anim/gush_{i}.png"))).collect(),
+            mist: (0..8).map(|i| assets.load(format!("blood/anim/mist_{i}.png"))).collect(),
+            trickle: (0..8).map(|i| assets.load(format!("blood/anim/trickle_{i}.png"))).collect(),
             dust: (0..6).map(|i| assets.load(format!("fx/wisp_{i}.png"))).chain(["fx/dust_low.png", "fx/dust_drift.png"].map(|p| assets.load(p))).collect(),
         }
     }
@@ -244,6 +364,10 @@ pub(super) fn strike_down(
         .iter()
         .enumerate()
         .map(|(k, (part, ..))| {
+            // a hero falls only to a blow that took the head, and only the head
+            if hero {
+                return *part == rig::Part::Head;
+            }
             let chance = match part {
                 rig::Part::Head => weight * 1.3 - 0.2,
                 rig::Part::Arm => weight * 1.1 - 0.25,
@@ -279,6 +403,8 @@ pub(super) fn strike_down(
             .id()
     });
     let swaps = lying.is_some();
+    // what was in the air when it fell hangs there a moment
+    play(commands, float_layer, &art.mist, foot - Vec2::new(0.0, draw.y * 0.55), Vec2::splat(draw.y * 0.9), Vec2::splat(0.5), 0.0, blood.with_alpha(0.55), 9.0, false, side < 0.0);
     // blood spreads out from under the body as it lies, the more if it was cut to pieces
     let wide = draw.y * if flying.contains(&true) { 1.3 } else { 0.9 };
     play(commands, stain_layer, &art.pool, foot + Vec2::new(side * draw.y * 0.25, 8.0), Vec2::new(wide, wide * 0.36), Vec2::splat(0.5), 0.0, blood.with_alpha(0.9), 3.0, true, side < 0.0);

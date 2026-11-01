@@ -645,7 +645,11 @@ fn sync_units(
     let have = |u: UnitRef| widgets.iter().find(|(_, w, _)| w.unit == u);
     let mut wanted: Vec<(UnitRef, String, String, Color)> = Vec::new();
     for h in &shown.heroes {
-        if have(UnitRef::Hero(h.slot)).is_none() {
+        // the head gone, he falls as a foe falls, and is not seen again
+        if let (true, Some((entity, _, false))) = (h.beheaded, have(UnitRef::Hero(h.slot))) {
+            commands.entity(entity).insert(Dying(DYING));
+        }
+        if have(UnitRef::Hero(h.slot)).is_none() && !h.beheaded {
             wanted.push((UnitRef::Hero(h.slot), format!("heroes/{}", h.def), l10n.t(&format!("hero-{}", h.def)), theme::hero_color(&h.def)));
         }
     }
@@ -871,7 +875,7 @@ struct Preloaded {
 }
 
 /// Poses a unit is drawn in for a moment, over its own picture.
-const POSES: [&str; 4] = ["_strike", "_cast", "_hurt", "_guard"];
+const POSES: [&str; 5] = ["_strike", "_cast", "_hurt", "_guard", "_downed"];
 
 /// The unit's own picture under whatever pose it is drawn in for the moment.
 pub(crate) fn pose_base(stem: &str) -> &str {
@@ -901,10 +905,13 @@ fn swap_form_art(
         }
     }
     for (mut s, children) in &mut sprites {
+        let mut whole = true;
         let (mut want, downed) = match s.unit {
             UnitRef::Hero(i) => {
                 let Some(h) = session.shown.hero(i) else { continue };
-                (if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) }, h.downed)
+                // a lost limb is on no finished picture: he stands in his cut-out parts
+                whole = h.lost_limbs == 0;
+                (if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) }, h.downed && !h.beheaded)
             }
             UnitRef::Enemy(uid) => {
                 // a foe falling keeps the picture it fell in
@@ -913,7 +920,7 @@ fn swap_form_art(
             }
         };
         // on the Edge a hero is drawn down on one knee, wounded, when that picture exists
-        if downed && art.image(&assets, &format!("{want}_downed")).is_some() {
+        if whole && downed && art.image(&assets, &format!("{want}_downed")).is_some() {
             want = format!("{want}_downed");
         }
         // through the heart of a lunge the unit is drawn mid-blow, through a skill or power
@@ -925,7 +932,7 @@ fn swap_form_art(
             Some((Anim::Guarded, t)) if t < 0.36 => Some("_guard"),
             _ => None,
         };
-        if let Some(pose) = pose.filter(|_| !downed) {
+        if let Some(pose) = pose.filter(|_| !downed && whole) {
             if art.image(&assets, &format!("{want}{pose}")).is_some() {
                 want = format!("{want}{pose}");
             }
@@ -1359,7 +1366,9 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
             }),
             Label::Team(i) => shown.hero(i).zip(truth.hero(i)).map(|(h, real)| {
                 let mut s = format!("{}  {}/{}", l10n.t(&format!("hero-{}", h.def)), h.hp, h.max_hp);
-                if h.downed {
+                if h.beheaded {
+                    s.push_str(&format!("  ·  {}", l10n.t("battle-beheaded")));
+                } else if h.downed {
                     s.push_str(&format!("  ·  {}", l10n.t("battle-downed")));
                 } else {
                     s.push_str(&format!("  ·  {} {}", l10n.t("battle-energy"), real.energy));
@@ -1980,6 +1989,7 @@ fn cue_effects(
     comfort: Res<Comfort>,
     db: Res<Db>,
     mut blows: ResMut<gore::Blows>,
+    mut severed: ResMut<gore::Severed>,
 ) {
     let float = |commands: &mut Commands, unit: UnitRef, text: String, color: Color, size: f32, dx: f32| {
         let Some((foot, sz)) = unit_place(&session.shown, unit) else { return };
@@ -2067,6 +2077,15 @@ fn cue_effects(
                 if *blocked > 0 {
                     float(&mut commands, *dst, format!("-{blocked}"), theme::FROST, 34.0, -70.0);
                 }
+            }
+            Event::Maimed { player, limbs } => {
+                let unit = UnitRef::Hero(*player);
+                severed.0.push((unit, if *limbs >= 2 { rig::Part::Shield } else { rig::Part::Arm }));
+                float(&mut commands, unit, l10n.t("battle-maimed"), comfort.blood(), 40.0, 60.0);
+            }
+            Event::Beheaded { player } => {
+                blows.0.insert(UnitRef::Hero(*player), (1.0, 999));
+                impacts.0.push(impact::Impact::Quake(0.8));
             }
             Event::Missed { unit } => float(&mut commands, *unit, l10n.t("battle-missed"), theme::BONE, 34.0, -70.0),
             Event::Block { unit, amount, .. } => {

@@ -27,6 +27,8 @@ impl HeroSetup {
             relics: vec![d.relic.clone()],
             falls: 0,
             potions: vec![],
+            lost_limbs: 0,
+            beheaded: false,
         })
     }
 }

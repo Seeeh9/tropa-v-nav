@@ -49,6 +49,12 @@ pub struct Hero {
     pub downed: bool,
     /// Falls over the whole run, carried in and out of combat.
     pub falls: u32,
+    /// Limbs struck off by heavy blows, gone for the rest of the run.
+    #[serde(default)]
+    pub lost_limbs: u8,
+    /// The head struck off: gone for good, and the player only watches from here on.
+    #[serde(default)]
+    pub beheaded: bool,
     /// Curses earned this combat, to be added to the run deck afterwards.
     pub new_curses: u32,
     /// Bogatyr slot soaking this hero's overflow damage until the round closes.
@@ -156,6 +162,10 @@ pub struct HeroSetup {
     pub falls: u32,
     #[serde(default)]
     pub potions: Vec<Id>,
+    #[serde(default)]
+    pub lost_limbs: u8,
+    #[serde(default)]
+    pub beheaded: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -210,6 +220,10 @@ pub enum Event {
     Energy { player: u8, delta: i32 },
     Downed { player: u8 },
     Raised { player: u8, by: Option<u8>, hp: i32 },
+    /// A heavy blow struck off a limb: this is how many are gone now.
+    Maimed { player: u8, limbs: u8 },
+    /// A blow far past what the hero had left struck off the head.
+    Beheaded { player: u8 },
     /// A blow found only air: the unit dodged it, or it was wasted on nobody.
     Missed { unit: UnitRef },
     CardAdded { player: u8, card: Id, pile: Pile },

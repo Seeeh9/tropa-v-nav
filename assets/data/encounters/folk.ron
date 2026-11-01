@@ -1,0 +1,10 @@
+// Встречи с народной нечистью: см. enemies/folk.ron.
+[
+    (id: "f_bannik", act: 1, kind: Normal, enemies: ["bannik"], extra3: ["grey_wolf"], extra4: ["raven"]),
+    (id: "f_ovinnik", act: 1, kind: Normal, enemies: ["ovinnik", "ovinnik"], extra3: ["raven"], extra4: ["ovinnik"]),
+    (id: "f_kladovik", act: 2, kind: Normal, enemies: ["kladovik", "anchutka"], extra3: ["anchutka"], extra4: ["anchutka"]),
+    (id: "f_vodyanoy", act: 2, kind: Normal, enemies: ["vodyanoy"], extra3: ["drowned_maiden"], extra4: ["swamp_light"]),
+    (id: "f_chuchelo", act: 3, kind: Normal, enemies: ["chuchelo", "raven_upyr"], extra4: ["raven_upyr"]),
+    (id: "f_verlioka", act: 3, kind: Normal, enemies: ["verlioka"], extra3: ["weeper"], extra4: ["nav_soul"]),
+    (id: "f_viy", act: 3, kind: Elite, enemies: ["viy"], extra4: ["nav_soul"]),
+]

@@ -996,3 +996,14 @@ fn bots_share_a_chest_out_on_their_own() {
     assert!(matches!(run.stage, Stage::Map { .. }));
     assert!(run.players.iter().all(|pl| pl.relics.len() >= 2));
 }
+
+#[test]
+fn a_headless_player_is_asked_nothing_and_the_road_goes_on() {
+    let c = content();
+    let mut run = party(&c, 2, 5, 0);
+    run.players[1].beheaded = true;
+    let Stage::Map { .. } = run.stage else { panic!() };
+    run.apply(&c, 0, &RunAction::Vote(0)).unwrap();
+    assert!(!matches!(run.stage, Stage::Map { .. }), "one living vote moves the party");
+    assert!(run.combat.as_ref().is_none_or(|f| f.heroes[1].downed));
+}

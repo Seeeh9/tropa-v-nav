@@ -27,6 +27,24 @@ impl Ctx {
     }
 }
 
+/// A blow taking this share (percent) of a hero's whole health at once may take a limb too.
+const MAIM_FROM: i32 = 30;
+const MOST_LIMBS: u8 = 2;
+/// A killing blow with this much (percent of whole health) still to spend takes the head.
+const BEHEAD_PAST: i32 = 40;
+
+/// One blow from no one in particular, for tests.
+#[doc(hidden)]
+pub fn test_hit_hero(c: &Content, s: &mut Combat, slot: u8, n: i32) -> Vec<Event> {
+    let mut ex = Exec { s, c, ev: Vec::new(), depth: 0 };
+    let foe = ex.s.enemies.first().map(|e| UnitRef::Enemy(e.uid));
+    ex.hero_take(foe, slot, n, true);
+    ex.ev
+}
+
+/// The most one blow can do to a foe of straw.
+const HOLLOW_MOST: i32 = 6;
+
 pub struct Exec<'a> {
     pub s: &'a mut Combat,
     pub c: &'a Content,
@@ -69,8 +87,10 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
             relics: h.relics.clone(),
             powers: Vec::new(),
             ready: false,
-            downed: h.hp <= 0,
+            downed: h.hp <= 0 || h.beheaded,
             falls: h.falls,
+            lost_limbs: h.lost_limbs,
+            beheaded: h.beheaded,
             new_curses: 0,
             guard_by: None,
             valor_rem: 0,
@@ -366,6 +386,8 @@ impl<'a> Exec<'a> {
                     self.ev.push(Event::Missed { unit: dst });
                 }
                 let e = &mut self.s.enemies[idx];
+                // a thing of straw: no one blow does it more than so much harm
+                let d = if e.flags.contains_key("hollow") { d.min(HOLLOW_MOST) } else { d };
                 let blocked = d.min(e.block);
                 e.block -= blocked;
                 let mut lost = (d - blocked).min(e.hp);
@@ -424,6 +446,9 @@ impl<'a> Exec<'a> {
         let blocked = if piercing { (d / 2).min(h.block) } else { d.min(h.block) };
         h.block -= blocked;
         let lost = (d - blocked).min(h.hp);
+        // what the blow had left over once there was no more hero to take it
+        let past = d - blocked - lost;
+        let max_hp = h.max_hp;
         h.hp -= lost;
         let fell = h.hp <= 0;
         let mut valor = 0;
@@ -453,7 +478,20 @@ impl<'a> Exec<'a> {
                 }
             }
         }
+        if !fell && attack && !self.s.foretelling && self.hero(i).lost_limbs < MOST_LIMBS {
+            let share = lost * 100 / max_hp.max(1);
+            if share >= MAIM_FROM && self.s.rng.chance(((share - MAIM_FROM) * 2 + 25).min(70)) {
+                let h = self.hero(i);
+                h.lost_limbs += 1;
+                let limbs = h.lost_limbs;
+                self.ev.push(Event::Maimed { player: i, limbs });
+            }
+        }
         if fell && !self.unfound(i) {
+            if attack && past * 100 >= max_hp.max(1) * BEHEAD_PAST {
+                self.hero(i).beheaded = true;
+                self.ev.push(Event::Beheaded { player: i });
+            }
             self.down(i);
         }
     }
@@ -534,7 +572,7 @@ impl<'a> Exec<'a> {
 
     fn revive(&mut self, i: u8, pct: i32, by: Option<u8>) {
         let h = self.hero(i);
-        if !h.downed {
+        if !h.downed || h.beheaded {
             return;
         }
         h.downed = false;
@@ -1428,7 +1466,10 @@ impl<'a> Exec<'a> {
             }
             // dragged under, shaken by a quake, or caught in Mara's winter
             let less_energy = h.flags.remove("energy_less").unwrap_or(0);
-            let less_draw = h.flags.remove("draw_less").unwrap_or(0) + h.flags.get("winter").copied().unwrap_or(0);
+            // one limb gone, a card less a turn; both, strength less as well
+            let maimed = h.lost_limbs as i32;
+            let less_energy = less_energy + (maimed >= 2) as i32;
+            let less_draw = h.flags.remove("draw_less").unwrap_or(0) + h.flags.get("winter").copied().unwrap_or(0) + (maimed >= 1) as i32;
             h.energy = (BASE_ENERGY - less_energy).max(0);
             h.ready = false;
             h.flags.retain(|k, _| !k.starts_with("turn_"));
@@ -1615,7 +1656,7 @@ impl<'a> Exec<'a> {
             self.s.phase = Phase::Won;
             let has_curse = self.c.cards.contains_key(NAV_MARK);
             for h in &mut self.s.heroes {
-                if h.downed {
+                if h.downed && !h.beheaded {
                     // still on the edge when the fight ends: up at 1 HP, marked
                     h.downed = false;
                     h.hp = 1;

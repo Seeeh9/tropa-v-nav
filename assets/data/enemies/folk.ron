@@ -1,0 +1,72 @@
+// Ещё семь из народных былей: у каждого свой способ мешать.
+[
+    (
+        // Банник: хлещет веником много раз и обваривает: щит тут важнее силы
+        id: "bannik", hp: (34, 36),
+        moves: [
+            (id: "whip", intent: Attack, targeted: true, effects: [Hits(N(3), 3, Target)]),
+            (id: "steam", intent: Debuff, effects: [Apply(Weak, N(1), AllFoes), Block(N(6), Me)]),
+            (id: "scald", intent: Attack, targeted: true, effects: [Damage(N(8), Target), AddCard(card: "burn", pile: Discard, to: Target)]),
+        ],
+        pattern: [1, 0, 2],
+    ),
+    (
+        // Овинник: чем больше его злишь, тем он жарче, а добитый взрывается
+        id: "ovinnik", hp: (26, 30), flags: ["burning"],
+        moves: [
+            (id: "paw", intent: Attack, targeted: true, effects: [Damage(N(7), Target)]),
+            (id: "kindle", intent: Buff, effects: [Apply(Thorns, N(2), Me), Apply(Strength, N(1), Me)]),
+        ],
+        pattern: [0, 1],
+        on_death: [Damage(N(8), AllFoes)],
+    ),
+    (
+        // Кладовик: прячется за щитом, ворует золото; убить надо быстро, пока не разорил
+        id: "kladovik", hp: (58, 62), flags: ["greedy"],
+        moves: [
+            (id: "count_coins", intent: Debuff, targeted: true, effects: [StealGold(10), Block(N(8), Me)]),
+            (id: "coin_hail", intent: Attack, targeted: true, effects: [Hits(N(4), 3, Target)]),
+            (id: "hoard", intent: Defend, effects: [Block(N(16), Me)]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+    (
+        // Водяной: топит руку: меньше карт и меньше силы на следующий ход
+        id: "vodyanoy", hp: (68, 72),
+        moves: [
+            (id: "flood", intent: Special, effects: [Hook("quake"), Block(N(10), Me)]),
+            (id: "gulp", intent: Attack, targeted: true, effects: [Damage(N(13), Target), Hook("drag_under")]),
+            (id: "river_wave", intent: AttackAll, effects: [Damage(N(7), AllFoes)]),
+        ],
+        pattern: [0, 1, 2],
+    ),
+    (
+        // Чучело: соломенное. Любой удар по нему не сильнее шести: берут числом ударов
+        id: "chuchelo", hp: (60, 64), flags: ["hollow"],
+        moves: [
+            (id: "straw_arm", intent: Attack, targeted: true, effects: [Damage(N(13), Target)]),
+            (id: "crow_call", intent: Summon, effects: [Summon("raven", 1)]),
+        ],
+        pattern: [0, 1, 0],
+    ),
+    (
+        // Верлиока: одноглазый с костылём. Каждый удар злее прежнего: долго тянуть нельзя
+        id: "verlioka", hp: (105, 115), flags: ["growing"],
+        moves: [
+            (id: "one_eye", intent: Debuff, targeted: true, effects: [Apply(Vulnerable, N(2), Target)]),
+            (id: "crutch", intent: Attack, targeted: true, effects: [Damage(N(12), Target), Apply(Strength, N(2), Me)]),
+        ],
+        pattern: [0, 1, 1],
+    ),
+    (
+        // Вий: поднимите ему веки. Взгляд видно заранее и он бьёт сквозь щит
+        id: "viy", hp: (230, 230), flags: ["piercing"],
+        moves: [
+            (id: "grave_hands", intent: Attack, targeted: true, effects: [Hits(N(6), 3, Target)]),
+            (id: "lift_lids", intent: Unknown, effects: [Apply(Strength, N(3), Me)]),
+            (id: "gaze", intent: AttackAll, effects: [Damage(N(20), AllFoes)]),
+            (id: "bring_dead", intent: Summon, effects: [Summon("nav_soul", 1)]),
+        ],
+        pattern: [0, 1, 2, 3],
+    ),
+]

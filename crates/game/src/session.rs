@@ -113,6 +113,16 @@ fn show(shown: &mut Combat, truth: &Combat, e: &Event) {
                 }
             }
         }
+        Event::Maimed { player, limbs } => {
+            if let Some(h) = shown.heroes.get_mut(*player as usize) {
+                h.lost_limbs = *limbs;
+            }
+        }
+        Event::Beheaded { player } => {
+            if let Some(h) = shown.heroes.get_mut(*player as usize) {
+                h.beheaded = true;
+            }
+        }
         Event::Downed { player } => {
             if let Some(h) = shown.heroes.get_mut(*player as usize) {
                 h.downed = true;

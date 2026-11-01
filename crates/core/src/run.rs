@@ -48,6 +48,11 @@ pub struct Player {
     pub relics: Vec<Id>,
     pub potions: Vec<Id>,
     pub falls: u32,
+    #[serde(default)]
+    pub lost_limbs: u8,
+    /// Head struck off: this seat only watches from here on.
+    #[serde(default)]
+    pub beheaded: bool,
     /// Cards removed at the shop so far; each next removal costs more.
     pub removals: u32,
 }
@@ -461,7 +466,7 @@ impl Run {
             if circle_rules.starts_with_toska() && c.cards.contains_key("toska") {
                 deck.push(("toska".into(), false));
             }
-            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, removals: 0 });
+            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, lost_limbs: 0, beheaded: false, removals: 0 });
         }
         let map = generate_map(&mut rng, circle_rules);
         let n = players.len();
@@ -535,6 +540,42 @@ impl Run {
 
     /// Applies one player's action. On `Err` the run is untouched.
     pub fn apply(&mut self, c: &Content, player: u8, action: &RunAction) -> Result<Vec<RunEvent>, RunError> {
+        let mut ev = self.apply_one(c, player, action)?;
+        self.the_headless_pass(c, &mut ev);
+        Ok(ev)
+    }
+
+    /// Whoever has lost their head chooses nothing any more: what they would have had to say is
+    /// said for them, and a road goes the way the first of the living points.
+    fn the_headless_pass(&mut self, c: &Content, ev: &mut Vec<RunEvent>) {
+        for _ in 0..32 {
+            let mut acted = false;
+            for q in 0..self.players.len() {
+                if !self.players[q].beheaded {
+                    continue;
+                }
+                let action = match &self.stage {
+                    Stage::Map { votes } if votes[q].is_none() => {
+                        let living = (0..self.players.len()).find(|o| !self.players[*o].beheaded);
+                        living.and_then(|o| votes[o]).map(RunAction::Vote)
+                    }
+                    Stage::Map { .. } | Stage::Combat => None,
+                    _ => run_bot(c, self, q as u8),
+                };
+                if let Some(action) = action {
+                    if let Ok(more) = self.apply_one(c, q as u8, &action) {
+                        ev.extend(more);
+                        acted = true;
+                    }
+                }
+            }
+            if !acted {
+                break;
+            }
+        }
+    }
+
+    fn apply_one(&mut self, c: &Content, player: u8, action: &RunAction) -> Result<Vec<RunEvent>, RunError> {
         let p = player as usize;
         if p >= self.players.len() {
             return Err(RunError::NoSuchPlayer);
@@ -1142,7 +1183,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, potions: p.potions.clone() })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, potions: p.potions.clone() })
             .collect();
         let rules = Circle(self.circle);
         let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind), shadow: rules.koschei_shadow() };
@@ -1171,7 +1212,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, potions: p.potions.clone() })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, potions: p.potions.clone() })
             .collect();
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
         let (combat, _) = combat::start_with(c, &party, enemies, seed, CombatOpts::default());
@@ -1188,6 +1229,8 @@ impl Run {
             pl.hp = h.hp.max(1);
             pl.max_hp = h.max_hp;
             pl.falls = h.falls;
+            pl.lost_limbs = h.lost_limbs;
+            pl.beheaded = h.beheaded;
             pl.potions = h.potions.clone();
             pl.gold = (pl.gold - h.gold_lost).max(0);
             for _ in 0..h.new_curses {

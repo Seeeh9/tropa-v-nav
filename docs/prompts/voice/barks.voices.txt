@@ -8,6 +8,7 @@ volhv = Orus | An old pagan priest of the thunder god in battle. Grave, resonant
 volkolak = Fenrir | A man half turned into a wolf, mid-fight. Rough, hungry, growling voice through bared teeth, panting between words, barely holding back the beast. Every word still understandable.
 znaharka = Sulafat | A woman: a kindly but grim old village healer, about seventy. Strictly a female voice, never male. Warm, cracked, folksy grandmother's voice; dry black humour; brisk and practical.
 skomoroh = Puck | A wandering Slavic jester and buffoon performing even in battle. Quick, nasal, mocking, theatrical showman's voice; he laughs at death; loud and bright.
+emelya = Umbriel | A lazy, sleepy young village fool lying on a warm stove. Slow, drawling, yawning, good-natured voice, thick with sleep; he mumbles and never hurries; even in pain he sounds mostly put out, not afraid.
 leshy = Algieba | The ancient forest spirit Leshy. Enormous, slow, creaking, deep voice like an old tree groaning in the wind; inhuman and patient.
 bolotnik = Enceladus | The swamp master Bolotnik. Thick, wet, gurgling, drawling voice rising from under black water; slow and hungry.
 mara = Kore | A woman: Mara, the goddess of winter and death. Strictly a female voice, never male. Cold, flat, clear, icy woman's voice; utterly calm and merciless; every word like frost.

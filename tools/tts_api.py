@@ -71,7 +71,7 @@ def speak(key, model, voice, prompt):
 MODELS = ["gemini-3.1-flash-tts-preview", "gemini-3.8-flash-tts", "gemini-2.5-pro-preview-tts", "gemini-2.5-flash-preview-tts", "gemini-3.8-flash-lite-tts"]
 # the 3.8 models read a plain prompt aloud, style and all; they take it as "## Style:" over "## Transcript:"
 MARKDOWN = {"gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"}
-SPEAKERS = ["volhv", "bogatyr", "vorozheya", "volkolak", "znaharka", "skomoroh", "leshy", "bolotnik", "mara", "koschei"]
+SPEAKERS = ["volhv", "bogatyr", "vorozheya", "volkolak", "znaharka", "skomoroh", "emelya", "leshy", "bolotnik", "mara", "koschei"]
 
 
 def main():

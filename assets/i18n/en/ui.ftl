@@ -493,3 +493,4 @@ coop-error-host-gone = The host has disconnected.
 settings-logs = Log folder
 coop-join-lan = Join
 lobby-address = IP for friends: { $code }
+error-NoArm = You have no arm for this card

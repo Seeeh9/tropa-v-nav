@@ -493,3 +493,4 @@ coop-error-host-gone = Хозяин отряда отключился.
 settings-logs = Папка с журналом
 coop-join-lan = Войти
 lobby-address = IP для друзей: { $code }
+error-NoArm = Нет руки для этой карты

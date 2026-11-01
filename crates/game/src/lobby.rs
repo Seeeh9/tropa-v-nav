@@ -22,7 +22,10 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_lobby.run_if(in_state(AppState::Lobby)));
 }
 
-/// The join code being typed.
+/// The most that can be typed: a Steam code is six letters, an address with its port more.
+const MOST_TYPED: usize = 24;
+
+/// The join code being typed, or the host's address.
 #[derive(Resource, Default)]
 struct CodeEntry(String);
 
@@ -63,23 +66,35 @@ fn enter_coop(
     assets: Res<AssetServer>,
     mut entry: ResMut<CodeEntry>,
     mut status: ResMut<NetStatus>,
+    steam: Option<Res<Steam>>,
 ) {
     entry.0.clear();
-    status.error = None;
+    status.error = std::mem::take(&mut status.host_gone).then(|| "coop-error-host-gone".into());
     status.busy = false;
+    let has_steam = steam.is_some();
     commands.spawn(column(AppState::Coop, *stage)).with_children(|p| {
         p.spawn(crate::menu::backdrop(&art, &assets, "bg/coop", 0.7));
         p.spawn(theme::text(l10n.t("coop-title"), &fonts.title, 72.0, theme::BONE));
+        if has_steam {
+            p.spawn((
+                menu_button(l10n.t("coop-create"), &fonts),
+                observe(|_: On<Activate>, steam: Option<Res<Steam>>, inbox: Option<Res<Inbox>>, mut status: ResMut<NetStatus>| {
+                    match (steam, inbox) {
+                        (Some(steam), Some(inbox)) => net::create_lobby(&steam, &mut status, &inbox),
+                        _ => status.error = Some("coop-error-steam".into()),
+                    }
+                }),
+            ));
+        }
         p.spawn((
-            menu_button(l10n.t("coop-create"), &fonts),
-            observe(|_: On<Activate>, steam: Option<Res<Steam>>, inbox: Option<Res<Inbox>>, mut status: ResMut<NetStatus>| {
-                match (steam, inbox) {
-                    (Some(steam), Some(inbox)) => net::create_lobby(&steam, &mut status, &inbox),
-                    _ => status.error = Some("coop-error-steam".into()),
+            menu_button(l10n.t("coop-create-lan"), &fonts),
+            observe(|_: On<Activate>, mut commands: Commands, mut status: ResMut<NetStatus>, mut next: ResMut<NextState<AppState>>| {
+                if crate::lan::host(&mut commands, &mut status) {
+                    next.set(AppState::Lobby);
                 }
             }),
         ));
-        p.spawn((theme::text(l10n.t("coop-join-hint"), &fonts.body, 24.0, theme::DIM), Node { margin: UiRect::top(px(24)), ..default() }));
+        p.spawn((theme::text(l10n.t(if has_steam { "coop-join-hint" } else { "coop-join-hint-lan" }), &fonts.body, 24.0, theme::DIM), Node { margin: UiRect::top(px(24)), ..default() }));
         p.spawn((
             theme::panel(Node {
                 width: px(520),
@@ -92,8 +107,13 @@ fn enter_coop(
             children![(CoopLabel::Code, theme::text("", &fonts.num, 52.0, theme::CANDLE))],
         ));
         p.spawn((
-            menu_button(l10n.t("coop-join"), &fonts),
-            observe(|_: On<Activate>, steam: Option<Res<Steam>>, inbox: Option<Res<Inbox>>, entry: Res<CodeEntry>, mut status: ResMut<NetStatus>| {
+            menu_button(l10n.t(if has_steam { "coop-join" } else { "coop-join-lan" }), &fonts),
+            observe(|_: On<Activate>, mut commands: Commands, steam: Option<Res<Steam>>, inbox: Option<Res<Inbox>>, entry: Res<CodeEntry>, mut status: ResMut<NetStatus>| {
+                // an address has dots in it; a Steam code never does
+                if entry.0.contains(['.', ':']) {
+                    crate::lan::dial(&mut commands, &entry.0, &mut status);
+                    return;
+                }
                 if entry.0.len() != 6 {
                     status.error = Some("coop-error-code".into());
                     return;
@@ -130,8 +150,8 @@ fn type_code(mut keys: MessageReader<KeyboardInput>, mut entry: ResMut<CodeEntry
                 entry.0.pop();
             }
             Key::Character(s) => {
-                for ch in s.chars().filter(|c| c.is_ascii_alphanumeric()) {
-                    if entry.0.len() < 6 {
+                for ch in s.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-')) {
+                    if entry.0.len() < MOST_TYPED {
                         entry.0.push(ch.to_ascii_uppercase());
                     }
                 }
@@ -246,6 +266,16 @@ fn draw_lobby(
             p.spawn(theme::text(l10n.tf("lobby-code", &[("code", net.code.clone().into())]), &fonts.num, 34.0, theme::CANDLE));
         }
     });
+
+    // where friends can reach a party over the local network: under the seats, in plain sight
+    if net.lobby.is_none() && net.code != "LAN" && !net.code.is_empty() {
+        commands.spawn((
+            Node { position_type: PositionType::Absolute, left: px(0), top: px(240), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
+            Pickable::IGNORE,
+            ChildOf(root),
+            children![theme::text(l10n.tf("lobby-address", &[("code", net.code.clone().into())]), &fonts.num, 34.0, theme::CANDLE)],
+        ));
+    }
 
     // seats: each player's face, name, hero and readiness
     let seats_top = if net.lobby.is_some() { 132.0 } else { 104.0 };

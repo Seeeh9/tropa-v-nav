@@ -55,6 +55,8 @@ impl Net {
 /// What the lobby screens show while Steam is working on a request.
 #[derive(Resource, Default)]
 pub struct NetStatus {
+    /// The host of a party over the local network has gone: the party screen says so.
+    pub host_gone: bool,
     pub busy: bool,
     /// A message key or ready text to show the player.
     pub error: Option<String>,
@@ -557,7 +559,7 @@ fn notes(
 ) {
     let notes = net.node.take_notes();
     // a lone player's run is kept on disk as it goes; the autopilot's dev runs are not
-    let solo = net.lobby.is_none() && net.locals.is_empty() && !net.bot_me && !net.ephemeral;
+    let solo = net.lobby.is_none() && net.locals.is_empty() && !net.bot_me && !net.ephemeral && net.code.is_empty();
     if solo && notes.iter().any(|n| matches!(n, Note::Applied { .. } | Note::Started)) {
         match net.node.state.as_ref() {
             Some(run) if matches!(run.stage, Stage::Victory | Stage::Defeat) => profile.clear_run(),
@@ -572,6 +574,9 @@ fn notes(
             Note::Applied { events, .. } => {
                 status.run_dirty = true;
                 let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { continue };
+                for e in events.iter() {
+                    debug!("run: {e:?}");
+                }
                 status.map.extend(events.iter().filter(|e| matches!(e, RunEvent::Voted { .. } | RunEvent::Lot { .. })).cloned());
                 status.deck.extend(events.iter().filter(|e| match e {
                     RunEvent::CardGained { player, .. } | RunEvent::Upgraded { player, .. } | RunEvent::CardRemoved { player, .. } => *player == me,

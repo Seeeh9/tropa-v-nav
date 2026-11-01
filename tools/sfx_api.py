@@ -68,6 +68,78 @@ BOOK = {
 }
 SOUNDS.update(BOOK)
 
+# limbs and heads
+SOUNDS.update({
+    "limb_off": ("A cleaver hacking through an arm, wet crunch of bone and a splatter of blood on the ground, single hit, no speech, no music", 1.2),
+    "head_off": ("A head chopped off: wet heavy chop, a long squelching spurt of blood, then the head thudding on the ground, no speech, no music", 2.2),
+})
+# what comes out of a body that walks with no head, in place of its words
+for i, (what, seconds) in enumerate([
+    ("Wet gurgling from an open throat, thick bubbling blood, no voice, no words", 1.5),
+    ("A slow wet squelching gasp of air through a severed windpipe", 1.5),
+    ("Bubbling, sputtering spray of blood from a stump, a short burst", 1.0),
+    ("A long liquid rattling gurgle that rises and sinks, horror", 2.0),
+    ("Short sticky squelch and a spit of blood", 0.8),
+    ("A choking hiss of air through blood, wet and slow", 1.5),
+    ("Three wet glugging pulses of blood from a neck", 1.5),
+    ("A low wet moan of air with no mouth to shape it, bubbling, no words", 2.0),
+], 1):
+    SOUNDS[f"gurgle_{i}"] = (what + ", no music, no speech", seconds)
+# each foe dies its own way: assets/sfx/death_<foe>-flow.wav, the plain "death" for any without one
+SOUNDS.update({
+    "death_grey_wolf": ("Big wolf dying, a pained yelp fading into a wet whimper, single sound, no music, no speech", 2.0),
+    "death_kikimora": ("Hunched swamp hag dying, a shrill rasping shriek that chokes off, single sound, no music, no speech", 2.0),
+    "death_lesavka": ("Small forest girl spirit dying, a thin childlike wail turning into rustling dry leaves, single sound, no music, no speech", 2.0),
+    "death_auka": ("Forest echo spirit dying, a hollow far-off cry repeating fainter and fainter, single sound, no music, no speech", 2.0),
+    "death_shishiga": ("Wet water imp dying, a gurgling squeal and a splash, single sound, no music, no speech", 2.0),
+    "death_mushroom_corpse": ("Rotten corpse overgrown with mushrooms collapsing, soft squelch and a puff of spores, single sound, no music, no speech", 2.0),
+    "death_raven": ("Raven killed, one harsh croak cut short and a flutter of falling feathers, single sound, no music, no speech", 2.0),
+    "death_likho": ("One-eyed old crone dying, a long bitter croaking groan, single sound, no music, no speech", 2.0),
+    "death_shatun": ("Huge bear dying, a deep rumbling roar breaking into a wet last breath, single sound, no music, no speech", 2.0),
+    "death_poloz": ("Giant serpent dying, a long hiss fading out with a heavy coil slumping, single sound, no music, no speech", 2.0),
+    "death_tree_guard": ("Living tree falling, deep wood cracking and a heavy thud with rustling branches, single sound, no music, no speech", 2.0),
+    "death_leshy": ("Ancient forest giant dying, a deep creaking groan of old wood splitting apart, single sound, no music, no speech", 2.0),
+    "death_upyr": ("Vampire corpse dying, a choking gurgle of blood and a dry rattling hiss, single sound, no music, no speech", 2.0),
+    "death_drowned_maiden": ("Drowned woman dying, a bubbling underwater sigh and water pouring down, single sound, no music, no speech", 2.0),
+    "death_igosha": ("Dead infant spirit fading away, a thin eerie whimper, ghostly, single sound, no music, no speech", 2.0),
+    "death_anchutka": ("Tiny imp dying, a quick squeaky shriek and a small pop, single sound, no music, no speech", 2.0),
+    "death_swamp_light": ("Will-o-the-wisp going out, a soft ghostly hiss and a faint glassy fizz, single sound, no music, no speech", 2.0),
+    "death_tinyak": ("Slimy mud creature dying, a thick wet squelching collapse, single sound, no music, no speech", 2.0),
+    "death_yrka": ("Night ghoul dying, a hoarse hungry snarl falling into a rattle, single sound, no music, no speech", 2.0),
+    "death_vurdalak_elder": ("Old ghoul lord dying, a long guttural moan with a wet crunch of bones, single sound, no music, no speech", 2.0),
+    "death_poludnitsa": ("Noon witch dying, a sharp dry woman's scream fading into hot wind, single sound, no music, no speech", 2.0),
+    "death_tryasovitsa": ("Fever hag dying, a shuddering teeth-chattering moan dying out, single sound, no music, no speech", 2.0),
+    "death_bolotnik": ("Huge swamp lord dying, a deep drowning roar sinking into bubbling mud, single sound, no music, no speech", 2.0),
+    "death_nav_soul": ("Lost soul dissolving, a soft ghostly exhale fading into nothing, single sound, no music, no speech", 2.0),
+    "death_kostomakha": ("Skeletal hag falling apart, bones clattering to the ground and a dry sigh, single sound, no music, no speech", 2.0),
+    "death_mavka": ("Forest nymph dying, a sad high sigh with branches rustling away, single sound, no music, no speech", 2.0),
+    "death_koschei_guard": ("Undead armoured guard falling, rusty armour crashing down and a hollow moan, single sound, no music, no speech", 2.0),
+    "death_volot": ("Stone giant falling, a low bellow and a heavy rumbling crash, single sound, no music, no speech", 2.0),
+    "death_weeper": ("Weeping ghost dying, sobbing that breaks and goes silent, single sound, no music, no speech", 2.0),
+    "death_raven_upyr": ("Vampire raven killed, a wet croak and a heavy flapping thud, single sound, no music, no speech", 2.0),
+    "death_sirin": ("Bird woman dying, a beautiful sung note breaking into a harsh shriek, single sound, no music, no speech", 2.0),
+    "death_black_rider": ("Black horseman falling, a horse's dying snort and armour hitting the ground, single sound, no music, no speech", 2.0),
+    "death_volot_giant": ("Colossal giant falling, a mighty groan and a huge earth-shaking crash, single sound, no music, no speech", 2.0),
+    "death_ice_crown": ("Crown of ice shattering, sharp cracking and tinkling shards falling, single sound, no music, no speech", 2.0),
+    "death_mara": ("Death goddess of winter dying, a long icy woman's wail and ice cracking, single sound, no music, no speech", 2.0),
+    "death_bannik": ("Old bathhouse spirit dying, a scalded wheezing cry and a burst of hissing steam, single sound, no music, no speech", 2.0),
+    "death_ovinnik": ("Huge black cat demon dying, a furious yowl fading into crackling embers, single sound, no music, no speech", 2.0),
+    "death_kladovik": ("Greedy old hoarder spirit dying, a choking wheeze and gold coins spilling on the floor, single sound, no music, no speech", 2.0),
+    "death_vodyanoy": ("Fat water spirit dying, a bubbling frog-like groan and a heavy splash, single sound, no music, no speech", 2.0),
+    "death_chuchelo": ("Straw scarecrow collapsing, dry straw rustling and old sticks snapping, single sound, no music, no speech", 2.0),
+    "death_verlioka": ("One-eyed giant old man dying, a hoarse bellow and a heavy body hitting the ground, single sound, no music, no speech", 2.0),
+    "death_viy": ("Ancient earth demon dying, a deep subterranean groan and earth cracking open, single sound, no music, no speech", 2.0),
+    "death_koschei": ("Deathless sorcerer king dying, a long dry rasping scream and bones crumbling to dust, single sound, no music, no speech", 2.0),
+    "death_death_oak": ("Great cursed oak falling, massive wood splitting and a long crash, single sound, no music, no speech", 2.0),
+    "death_death_chest": ("Iron bound chest bursting open, chains snapping and metal clanging, single sound, no music, no speech", 2.0),
+    "death_death_hare": ("Hare killed, one short high squeal, single sound, no music, no speech", 2.0),
+    "death_death_duck": ("Duck killed, a short strangled quack and a flutter of wings, single sound, no music, no speech", 2.0),
+    "death_death_egg": ("Egg crushed, a brittle crack and a wet squish, single sound, no music, no speech", 2.0),
+    "death_koschei_shadow": ("Shadow dissolving, a cold whispering hiss fading out, single sound, no music, no speech", 2.0),
+    "death_death_oak_chest": ("Cursed oak and iron chest breaking together, wood splitting and chains snapping, single sound, no music, no speech", 2.0),
+    "death_death_egg_solo": ("Egg crushed, a brittle crack and a wet squish, then a faint needle snapping, single sound, no music, no speech", 2.0),
+})
+
 # battle ambience under the music, one seamless loop per act: assets/ambience/<name>-flow.wav
 AMBIENCE = {
     "act1": "Dark Slavic forest at night: wind in old pines, creaking branches, a distant owl, faint unseen rustling, eerie, no music",

@@ -1,3 +1,5 @@
+// a released game opens no console; its log goes to a file (see `logfile`)
+#![cfg_attr(not(feature = "dev"), windows_subsystem = "windows")]
 //! «Тропа в Навь» — Bevy client. Rules live in `nav_core`; this crate only draws and sends actions.
 
 mod art;
@@ -9,8 +11,8 @@ mod book;
 mod card_flip;
 mod deck_fx;
 mod dev;
-#[cfg(feature = "dev")]
 mod lan;
+mod logfile;
 mod l10n;
 mod lobby;
 mod map_party;
@@ -36,7 +38,6 @@ pub const STAGE_H: f32 = 1080.0;
 pub enum AppState {
     #[default]
     Boot,
-    NoSteam,
     Menu,
     Settings,
     /// The last stockade: spend village currency between runs.
@@ -98,9 +99,12 @@ fn main() {
         }
     };
 
+    let config_lang = lang;
+    logfile::catch_panics();
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            .set(bevy::log::LogPlugin { custom_layer: logfile::layer, ..default() })
             .set(WindowPlugin {
                 primary_window: Some(test_window(Window {
                     title: "Тропа в Навь".into(),
@@ -124,22 +128,19 @@ fn main() {
     .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, card_flip::plugin, map_party::plugin, between::plugin, preload::plugin));
 
     #[cfg(feature = "dev")]
-    app.add_plugins((dev::plugin, lan::plugin));
+    app.add_plugins(dev::plugin);
+    app.add_plugins(lan::plugin).add_systems(Update, logfile::note_screens);
+    info!("Tropa v Nav {} ({}), language {:?}, Steam {}", env!("CARGO_PKG_VERSION"), std::env::consts::OS, config_lang, steam.is_ok());
 
-    // Without Steam there is no game: only the "start Steam" screen. The `dev` build may run offline.
-    let offline_ok = cfg!(feature = "dev");
+    // without Steam the game still runs: alone, or with friends over a local network
     match steam {
         Ok(client) => {
             steam::install(&mut app, client);
             app.add_systems(PostStartup, |mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu));
         }
-        Err(e) if offline_ok => {
-            warn!("Steam unavailable ({e}); running offline because this is a dev build");
-            app.add_systems(PostStartup, |mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu));
-        }
         Err(e) => {
-            error!("Steam unavailable: {e}");
-            app.add_systems(PostStartup, |mut next: ResMut<NextState<AppState>>| next.set(AppState::NoSteam));
+            warn!("Steam unavailable ({e}); running without it");
+            app.add_systems(PostStartup, |mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu));
         }
     }
     app.run();

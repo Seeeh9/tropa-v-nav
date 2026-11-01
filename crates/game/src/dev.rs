@@ -133,6 +133,8 @@ enum Step {
     Quit,
     /// A key pressed and let go, by its name: space, enter, left, right, esc, back.
     Key(String),
+    /// Types these characters, one key at a time.
+    Type(String),
 }
 
 fn parse_steps(text: &str) -> Vec<Step> {
@@ -149,6 +151,7 @@ fn parse_steps(text: &str) -> Vec<Step> {
                 ["p", file] => Some(Step::Shot(file.to_string())),
                 ["q"] => Some(Step::Quit),
                 ["k", name] => Some(Step::Key(name.to_string())),
+                ["t", text] => Some(Step::Type(text.to_string())),
                 _ => None,
             }
         })
@@ -226,6 +229,16 @@ fn robot(
             // button itself
             events.write(WindowEvent::MouseButtonInput(MouseButtonInput { button: MouseButton::Left, state, window: entity }));
             buttons.write(MouseButtonInput { button: MouseButton::Left, state, window: entity });
+            true
+        }
+        Step::Type(text) => {
+            use bevy::input::keyboard::{Key, KeyboardInput};
+            for ch in text.chars() {
+                let logical_key = Key::Character(ch.to_string().into());
+                for state in [ButtonState::Pressed, ButtonState::Released] {
+                    keys.write(KeyboardInput { key_code: KeyCode::KeyA, logical_key: logical_key.clone(), state, text: None, repeat: false, window: entity });
+                }
+            }
             true
         }
         Step::Key(name) => {

@@ -13,8 +13,11 @@ use std::collections::HashMap;
 
 const SFX: &[&str] = &[
     "card_play", "card_draw", "hit", "hit_heavy", "block", "heal", "status", "death", "downed", "raised", "click", "ready", "round", "rune", "potion", "gold", "victory",
-    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain", "card_shuffle",
+    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain", "card_shuffle", "limb_off", "head_off",
 ];
+
+/// How many ways a body with no head has of saying something.
+const GURGLES: u32 = 8;
 
 pub fn plugin(app: &mut App) {
     // unattended screenshot runs (dev) stay silent
@@ -109,7 +112,7 @@ fn duck_music(time: Res<Time>, mut mixer: ResMut<Mixer>, speaking: Query<(), Wit
 }
 
 #[derive(Resource, Default)]
-pub struct Sfx(HashMap<&'static str, Handle<AudioSource>>);
+pub struct Sfx(HashMap<String, Handle<AudioSource>>);
 
 impl Sfx {
     pub fn play(&self, commands: &mut Commands, name: &str, mixer: &Mixer, gain: f32) {
@@ -119,24 +122,39 @@ impl Sfx {
     }
 }
 
-fn load(mut commands: Commands, art: Res<Art>, assets: Res<AssetServer>) {
+fn load(mut commands: Commands, art: Res<Art>, assets: Res<AssetServer>, db: Res<crate::session::Db>) {
     let mut sfx = Sfx::default();
-    for name in SFX {
+    let foes = db.0.enemies.keys().map(|foe| format!("death_{foe}"));
+    let gurgles = (1..=GURGLES).map(|k| format!("gurgle_{k}"));
+    for name in SFX.iter().map(|n| n.to_string()).chain(foes).chain(gurgles) {
         let stem = format!("sfx/{name}");
         // generated audio first, synthesised stand-in second
         let path = art.find(&stem, "ogg", "flow").filter(|p| p.ends_with("-flow.ogg")).or_else(|| art.find(&stem, "wav", "flow"));
         if let Some(path) = path {
-            sfx.0.insert(*name, assets.load(path));
+            sfx.0.insert(name, assets.load(path));
         }
     }
     commands.insert_resource(sfx);
 }
 
-fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res<Mixer>) {
+fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res<Mixer>, session: Res<Session>) {
     // one sound of a kind per frame: an area attack is one crash, not six
-    let mut played: Vec<&str> = Vec::new();
+    let mut played: Vec<String> = Vec::new();
     for e in &cues.0 {
+        // each foe dies its own way, when it has one
+        if let Event::EnemyDied { enemy } = e {
+            let own = session.shown.enemy(*enemy).map(|f| format!("death_{}", f.def)).filter(|n| sfx.0.contains_key(n));
+            if let Some(own) = own {
+                if !played.contains(&own) {
+                    sfx.play(&mut commands, &own, &mixer, 1.0);
+                    played.push(own);
+                }
+                continue;
+            }
+        }
         let (name, gain) = match e {
+            Event::Maimed { .. } => ("limb_off", 1.0),
+            Event::Beheaded { .. } => ("head_off", 1.0),
             Event::CardPlayed { .. } => ("card_play", 1.0),
             Event::Drawn { .. } => ("card_draw", 0.8),
             Event::Damage { lost, .. } if *lost >= 14 => ("hit_heavy", 1.0),
@@ -157,8 +175,8 @@ fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res
             Event::Ended { won: false } => ("defeat", 1.0),
             _ => continue,
         };
-        if !played.contains(&name) {
-            played.push(name);
+        if !played.iter().any(|p| p == name) {
+            played.push(name.to_string());
             sfx.play(&mut commands, name, &mixer, gain);
         }
     }
@@ -287,6 +305,7 @@ fn line_for(e: &Event, shown: &nav_core::Combat, db: &nav_core::Content, me: u8,
             hero(slot).map(|h| (h, "hex", false))
         }
         Event::Raised { player, .. } => hero(*player).map(|h| (h, "raise", true)),
+        Event::Maimed { player, .. } => hero(*player).map(|h| (h, "maim", true)),
         Event::Ended { won: true } => hero(me).map(|h| (h, "win", true)),
         _ => None,
     }
@@ -304,6 +323,7 @@ fn speak_lines(
     profile: Res<crate::profile::Profile>,
     db: Res<crate::session::Db>,
     talking: Query<(), Or<(With<Line>, With<Narration>)>>,
+    sfx: Res<Sfx>,
     mut st: Local<Lines>,
 ) {
     st.quiet = (st.quiet - time.delta_secs()).max(0.0);
@@ -312,6 +332,16 @@ fn speak_lines(
     for e in &cues.0 {
         let Some((who, what, always)) = line_for(e, &session.shown, &db.0, session.me, &mut st) else { continue };
         if busy || mixer.voices <= 0.0 || (!always && st.quiet > 0.0) {
+            continue;
+        }
+        // no head, no words: whatever they had to say comes out as a wet noise, never the same twice running
+        if session.shown.heroes.iter().any(|h| h.def.as_str() == who && h.walks_headless) {
+            let k = st.roll(GURGLES as usize) as u32 + 1;
+            if let Some(handle) = sfx.0.get(&format!("gurgle_{k}")) {
+                commands.spawn((Line, AudioPlayer::new(handle.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.voices))));
+                busy = true;
+                st.quiet = BETWEEN_LINES;
+            }
             continue;
         }
         let Some(file) = st.pick(&art, lang, &who, what) else { continue };

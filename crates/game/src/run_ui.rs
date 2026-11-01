@@ -54,7 +54,8 @@ fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHint
         match (hovered.get(), hints.open) {
             (true, None) if !hints.lines.is_empty() => {
                 // a card shown small still explains itself at full size
-                let k = 1.0 / shrunk.map(|t| t.scale.x).filter(|s| *s > 0.0).unwrap_or(1.0);
+                // (by its height: a card turning over narrows, but only in width)
+                let k = 1.0 / shrunk.map(|t| t.scale.y).filter(|s| *s > 0.0).unwrap_or(1.0);
                 let panel = commands
                     .spawn((
                         theme::panel(Node {

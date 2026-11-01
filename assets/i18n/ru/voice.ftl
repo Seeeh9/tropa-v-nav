@@ -379,3 +379,32 @@ bark-emelya-rare-2 = По моему хотению!
 bark-emelya-rare-3 = Щука, кусай!
 bark-emelya-rare-4 = Ну, раз просите…
 bark-emelya-rare-5 = Печь, пошла!
+
+# More takes (-2 .. -5) and the lines for rare cards, gifts and gloating.
+bark-bogatyr-maim = Рука! Ничего, второй убью.
+bark-bogatyr-maim-2 = А-а-а! Моя рука!
+bark-bogatyr-maim-3 = Руби, руби… Мне и одной хватит.
+
+bark-vorozheya-maim = Рука! Этого в картах не было!
+bark-vorozheya-maim-2 = А-а! Отдай, отдай руку!
+bark-vorozheya-maim-3 = Кровь… моя кровь на костях.
+
+bark-volhv-maim = Рука моя! Перун, за что?
+bark-volhv-maim-2 = А-а-а! Чем же я теперь чертить буду?
+bark-volhv-maim-3 = Отсекли. Запомню.
+
+bark-volkolak-maim = Р-р-ра! Лапа! Моя лапа!
+bark-volkolak-maim-2 = Отгрызу за это голову!
+bark-volkolak-maim-3 = Волк и на трёх уйдёт!
+
+bark-znaharka-maim = Ох, рука! Такого не зашьёшь!
+bark-znaharka-maim-2 = А-а! Подорожник тут не поможет.
+bark-znaharka-maim-3 = Милые мои, рука-то где?
+
+bark-skomoroh-maim = Ай! А как же я теперь в бубен?
+bark-skomoroh-maim-2 = Рука! Вот это шутка!
+bark-skomoroh-maim-3 = Похлопайте мне. Я уже не могу!
+
+bark-emelya-maim = Ой, рука! А чем калач брать?
+bark-emelya-maim-2 = Щука! Руку отрубили!
+bark-emelya-maim-3 = Ай-ай-ай! Лежал же, никого не трогал!

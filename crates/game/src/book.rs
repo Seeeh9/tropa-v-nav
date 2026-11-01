@@ -402,7 +402,9 @@ fn note(line: String) {
 }
 
 #[cfg(not(feature = "dev"))]
-fn note(_line: String) {}
+fn note(line: String) {
+    debug!("book: {line}");
+}
 
 impl Book {
     fn state(&self) -> String {

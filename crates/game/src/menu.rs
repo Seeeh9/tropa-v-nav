@@ -12,7 +12,6 @@ use bevy::ui_widgets::{observe, Activate, Button};
 
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), enter_menu)
-        .add_systems(OnEnter(AppState::NoSteam), enter_no_steam)
         .add_systems(OnEnter(AppState::Settings), enter_settings)
         .add_systems(OnEnter(AppState::Village), enter_village)
         .add_systems(OnEnter(AppState::Chronicle), enter_chronicle)
@@ -222,6 +221,14 @@ fn enter_settings(
             menu_button(l10n.t("coop-back"), &fonts),
             observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu)),
         ));
+        // off to the side, or the rows would not fit: where to find what to send with a bug report
+        p.spawn((
+            Node { position_type: PositionType::Absolute, right: px(40), bottom: px(40), ..default() },
+            children![(
+                menu_button(l10n.t("settings-logs"), &fonts),
+                observe(|_: On<Activate>| crate::logfile::show_folder()),
+            )],
+        ));
     });
 }
 
@@ -396,24 +403,4 @@ fn enter_chronicle(
             observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Village)),
         ));
     });
-}
-
-fn enter_no_steam(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>) {
-    commands.spawn((
-        screen(AppState::NoSteam, *stage),
-        children![
-            theme::text(l10n.t("steam-required-title"), &fonts.title, 96.0, theme::FRESH_BLOOD),
-            (
-                theme::text(l10n.t("steam-required-body"), &fonts.body, 30.0, theme::BONE),
-                TextLayout::justify(Justify::Center),
-                Node { max_width: px(1100), margin: UiRect::vertical(px(30)), ..default() },
-            ),
-            (
-                menu_button(l10n.t("steam-required-quit"), &fonts),
-                observe(|_: On<Activate>, mut exit: MessageWriter<AppExit>| {
-                    exit.write(AppExit::Success);
-                }),
-            ),
-        ],
-    ));
 }

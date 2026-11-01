@@ -1,7 +1,8 @@
-//! Dev only: a co-op transport over TCP, so two copies of the game on one machine (or a LAN) can
-//! play together without Steam. The protocol node does not care how its messages travel; here
-//! they go as frames over sockets, the host in the middle passing on what is meant for others,
-//! as Steam would deliver it.
+//! A co-op transport over TCP, for friends on one local network or a VPN like Radmin, without
+//! Steam. The protocol node does not care how its messages travel; here they go as frames over
+//! sockets, the host in the middle passing on what is meant for others, as Steam would deliver it.
+//!
+//! The party screen starts it. In a dev build it can also be started from the environment:
 //!
 //!   TROPA_LAN=host:<port>          host a party on that port
 //!   TROPA_LAN=join:<addr>:<port>   join it
@@ -14,23 +15,144 @@
 //! A frame is its length (u32), the sender (u64), the addressee (u64, 0 for everyone) and the
 //! message as `Msg::encode` writes it, all big-endian.
 
-use crate::net::Net;
+use crate::net::{Net, NetStatus};
 use crate::session::Db;
 use crate::AppState;
 use bevy::prelude::*;
 use nav_net::{Msg, Node, Peer, To};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+/// The port a party is gathered on; an address typed without one means this.
+pub const PORT: u16 = 47771;
+/// No message in the game comes near this: a longer frame is someone else's traffic.
+const MOST_FRAME: usize = 64 * 1024 * 1024;
+/// How long a peer may keep a send waiting before it counts as gone, and how long a knock takes.
+const SEND_WAIT: Duration = Duration::from_secs(3);
+const DIAL_WAIT: Duration = Duration::from_secs(6);
 
 const HOST: Peer = 1;
 const EVERYONE: Peer = 0;
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Menu), open)
-        .add_systems(PreUpdate, receive.run_if(resource_exists::<Lan>))
-        .add_systems(Update, (auto_lobby, open_on_fight).chain().run_if(resource_exists::<Lan>))
+    app.add_systems(PreUpdate, receive.run_if(resource_exists::<Lan>))
+        .add_systems(Update, (answered.run_if(resource_exists::<Dial>), hang_up.run_if(resource_exists::<Lan>)))
         .add_systems(PostUpdate, transmit.run_if(resource_exists::<Lan>).before(crate::net::send));
+    #[cfg(feature = "dev")]
+    app.add_systems(OnEnter(AppState::Menu), open).add_systems(Update, (auto_lobby, open_on_fight).chain().run_if(resource_exists::<Lan>));
+}
+
+/// A knock at a host's door, waited for off to the side so the game does not freeze on it.
+#[derive(Resource)]
+struct Dial(Mutex<Receiver<std::io::Result<TcpStream>>>);
+
+fn net_of(node: Node, code: String, ephemeral: bool) -> Net {
+    Net { node, lobby: None, code, locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral }
+}
+
+/// Gathers a party on this machine, open on every network it is on. False if it cannot be done.
+pub fn host(commands: &mut Commands, status: &mut NetStatus) -> bool {
+    let listener = match TcpListener::bind(("0.0.0.0", PORT)) {
+        Ok(l) => l,
+        Err(e) => {
+            warn!("LAN: cannot host on {PORT}: {e}");
+            status.error = Some("coop-error-lan-port".into());
+            return false;
+        }
+    };
+    let _ = listener.set_nonblocking(true);
+    let code = my_addresses().join("  /  ");
+    info!("LAN: hosting on {PORT}, at {code}");
+    commands.insert_resource(net_of(Node::host(HOST, &String::from("host")), code, false));
+    commands.insert_resource(Lan { listener: Some(listener), links: vec![], me: HOST });
+    status.error = None;
+    status.dirty = true;
+    true
+}
+
+/// Knocks at the door of the host at this address.
+pub fn dial(commands: &mut Commands, typed: &str, status: &mut NetStatus) {
+    let addr = if typed.contains(':') { typed.to_string() } else { format!("{typed}:{PORT}") };
+    let (tx, rx) = channel();
+    info!("LAN: calling {addr}");
+    std::thread::spawn(move || {
+        let reached = addr.to_lowercase().to_socket_addrs().and_then(|mut found| found.next().ok_or_else(|| ErrorKind::NotFound.into())).and_then(|at| TcpStream::connect_timeout(&at, DIAL_WAIT));
+        let _ = tx.send(reached);
+    });
+    commands.insert_resource(Dial(Mutex::new(rx)));
+    status.busy = true;
+    status.error = None;
+}
+
+fn answered(mut commands: Commands, dial: Res<Dial>, state: Res<State<AppState>>, mut status: ResMut<NetStatus>, mut next: ResMut<NextState<AppState>>) {
+    let Ok(rx) = dial.0.lock() else { return };
+    let Ok(reached) = rx.try_recv() else { return };
+    commands.remove_resource::<Dial>();
+    status.busy = false;
+    // the player has since walked away from the screen
+    if *state.get() != AppState::Coop {
+        return;
+    }
+    let stream = match reached {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("LAN: no answer: {e}");
+            status.error = Some("coop-error-lan".into());
+            return;
+        }
+    };
+    let _ = stream.set_nonblocking(true);
+    let _ = stream.set_nodelay(true);
+    let me = fresh_peer();
+    info!("LAN: joined as {me}");
+    commands.insert_resource(net_of(Node::join(me, &format!("guest{}", me % 100), HOST), "LAN".into(), false));
+    commands.insert_resource(Lan { listener: None, links: vec![Link { stream, peer: Some(HOST), buf: vec![] }], me });
+    status.dirty = true;
+    next.set(AppState::Lobby);
+}
+
+/// A name no other guest will have, whichever machine they are on.
+fn fresh_peer() -> Peer {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos() as u64);
+    1000 + (nanos ^ (std::process::id() as u64) << 20)
+}
+
+/// The party is over: the sockets close.
+fn hang_up(mut commands: Commands, net: Option<Res<Net>>) {
+    if net.is_none() {
+        commands.remove_resource::<Lan>();
+    }
+}
+
+/// This machine's addresses friends can reach it at, a VPN's first since that is why it is there.
+fn my_addresses() -> Vec<String> {
+    let mut found = Vec::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const NO_WINDOW: u32 = 0x0800_0000;
+        if let Ok(out) = std::process::Command::new("ipconfig").creation_flags(NO_WINDOW).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("IPv4")) {
+                if let Some(ip) = line.rsplit(':').next().map(str::trim).filter(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok()) {
+                    found.push(ip.to_string());
+                }
+            }
+        }
+    }
+    // Radmin hands out 26.*, Hamachi 25.*
+    found.sort_by_key(|ip: &String| match ip.split('.').next() {
+        Some("26") => 0,
+        Some("25") => 1,
+        _ => 2,
+    });
+    found.truncate(3);
+    if found.is_empty() {
+        found.push("127.0.0.1".into());
+    }
+    found
 }
 
 #[derive(Resource)]
@@ -56,26 +178,32 @@ fn frame(from: Peer, to: Peer, msg: &[u8]) -> Vec<u8> {
     f
 }
 
-/// Writes all of it, waiting out a full send buffer: on a local socket that never lasts.
+/// Writes all of it, waiting out a full send buffer. A peer that will not take it in time is cut
+/// off: half a frame sent can never be taken back, and the socket closing tells `receive`.
 fn write_all(stream: &mut TcpStream, mut bytes: &[u8]) -> std::io::Result<()> {
+    let until = Instant::now() + SEND_WAIT;
     while !bytes.is_empty() {
         match stream.write(bytes) {
             Ok(0) => return Err(ErrorKind::WriteZero.into()),
             Ok(n) => bytes = &bytes[n..],
-            Err(e) if e.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(1)),
-            Err(e) => return Err(e),
+            Err(e) if e.kind() == ErrorKind::WouldBlock && Instant::now() < until => std::thread::sleep(Duration::from_millis(1)),
+            Err(e) => {
+                let _ = stream.shutdown(Shutdown::Both);
+                return Err(e);
+            }
         }
     }
     Ok(())
 }
 
+#[cfg(feature = "dev")]
 fn open(mut commands: Commands, mut done: Local<bool>, mut next: ResMut<NextState<AppState>>) {
     let Ok(spec) = std::env::var("TROPA_LAN") else { return };
     if std::mem::replace(&mut *done, true) {
         return;
     }
     let (node, lan) = if let Some(port) = spec.strip_prefix("host:") {
-        let listener = match TcpListener::bind(("127.0.0.1", port.parse::<u16>().unwrap_or(7777))) {
+        let listener = match TcpListener::bind(("0.0.0.0", port.parse::<u16>().unwrap_or(PORT))) {
             Ok(l) => l,
             Err(e) => {
                 error!("LAN: cannot host on {port}: {e}");
@@ -112,7 +240,7 @@ fn open(mut commands: Commands, mut done: Local<bool>, mut next: ResMut<NextStat
     next.set(AppState::Lobby);
 }
 
-fn receive(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>, db: Res<Db>) {
+fn receive(mut commands: Commands, mut lan: ResMut<Lan>, net: Option<ResMut<Net>>, db: Res<Db>, mut status: ResMut<NetStatus>, mut next: ResMut<NextState<AppState>>) {
     let Some(mut net) = net else { return };
     let lan = &mut *lan;
     if let Some(listener) = &lan.listener {
@@ -143,13 +271,29 @@ fn receive(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>, db: Res<Db>) {
         }
         while link.buf.len() >= 4 {
             let len = u32::from_be_bytes(link.buf[..4].try_into().unwrap()) as usize;
+            // not one of ours: whatever it is, it is not listened to
+            if !(16..=MOST_FRAME).contains(&len) {
+                warn!("LAN: a frame of {len} bytes, closing that link");
+                let _ = link.stream.shutdown(Shutdown::Both);
+                link.buf.clear();
+                gone.push(k);
+                break;
+            }
             if link.buf.len() < 4 + len {
                 break;
             }
             let body: Vec<u8> = link.buf.drain(..4 + len).skip(4).collect();
-            let from = u64::from_be_bytes(body[..8].try_into().unwrap());
+            let said = u64::from_be_bytes(body[..8].try_into().unwrap());
             let to = u64::from_be_bytes(body[8..16].try_into().unwrap());
-            link.peer.get_or_insert(from);
+            // a link is whoever it first said it was, and can never speak as the host
+            if link.peer.is_none() && said == HOST {
+                warn!("LAN: a guest calling itself the host, closing that link");
+                let _ = link.stream.shutdown(Shutdown::Both);
+                link.buf.clear();
+                gone.push(k);
+                break;
+            }
+            let from = *link.peer.get_or_insert(said);
             frames.push((k, from, to, body[16..].to_vec()));
         }
     }
@@ -169,9 +313,22 @@ fn receive(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>, db: Res<Db>) {
             }
         }
     }
+    gone.sort_unstable();
+    gone.dedup();
     for k in gone.into_iter().rev() {
         warn!("LAN: {:?} left", lan.links[k].peer);
-        lan.links.remove(k);
+        let link = lan.links.remove(k);
+        match link.peer {
+            // the host is the party: without it there is nothing left to play
+            Some(HOST) if lan.listener.is_none() => {
+                status.host_gone = true;
+                commands.remove_resource::<Net>();
+                next.set(AppState::Coop);
+                return;
+            }
+            Some(peer) => net.node.peer_left(peer),
+            None => {}
+        }
     }
 }
 
@@ -195,6 +352,7 @@ fn transmit(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>) {
     }
 }
 
+#[cfg(feature = "dev")]
 /// `TROPA_FIGHT`: as soon as the run exists here, it opens on that fight. Each copy does it for
 /// itself, and from the same seed they all come to the same.
 fn open_on_fight(mut commands: Commands, net: Option<ResMut<Net>>, db: Res<Db>, mut done: Local<bool>) {
@@ -213,6 +371,7 @@ fn open_on_fight(mut commands: Commands, net: Option<ResMut<Net>>, db: Res<Db>, 
     }
 }
 
+#[cfg(feature = "dev")]
 /// `TROPA_LAN_HERO`: take a hero and get ready unasked; the host starts once all are ready.
 fn auto_lobby(net: Option<ResMut<Net>>, db: Res<Db>, profile: Res<crate::profile::Profile>, state: Res<State<AppState>>) {
     let (Some(mut net), Ok(hero)) = (net, std::env::var("TROPA_LAN_HERO")) else { return };

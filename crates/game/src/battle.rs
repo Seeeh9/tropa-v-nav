@@ -912,7 +912,7 @@ struct Preloaded {
 }
 
 /// Poses a unit is drawn in for a moment, over its own picture.
-const POSES: [&str; 5] = ["_strike", "_cast", "_hurt", "_guard", "_downed"];
+const POSES: [&str; 6] = ["_strike", "_cast", "_hurt", "_guard", "_downed", "_headless"];
 
 /// The unit's own picture under whatever pose it is drawn in for the moment.
 pub(crate) fn pose_base(stem: &str) -> &str {
@@ -934,7 +934,7 @@ fn swap_form_art(
     let stems = session.shown.heroes.iter().flat_map(|h| [format!("heroes/{}", h.def), format!("heroes/{}_beast", h.def)]).chain(session.shown.enemies.iter().map(|e| format!("enemies/{}", e.def)));
     for stem in stems {
         if preloaded.seen.insert(stem.clone()) {
-            for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed"] {
+            for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed", "_headless"] {
                 if let Some(handle) = art.image(&assets, &format!("{stem}{pose}")) {
                     preloaded.handles.push(handle);
                 }
@@ -969,6 +969,12 @@ fn swap_form_art(
             Some((Anim::Guarded, t)) if t < 0.36 => Some("_guard"),
             _ => None,
         };
+        // who walks with no head wears their own picture of it, when one was painted
+        if let UnitRef::Hero(i) = s.unit {
+            if session.shown.hero(i).is_some_and(|h| h.walks_headless) && art.image(&assets, &format!("{want}_headless")).is_some() {
+                want = format!("{want}_headless");
+            }
+        }
         if let Some(pose) = pose.filter(|_| !downed && whole) {
             if art.image(&assets, &format!("{want}{pose}")).is_some() {
                 want = format!("{want}{pose}");
@@ -1022,6 +1028,12 @@ fn animate_sprites(
         let toward = if hero { 1.0 } else { -1.0 };
         let mut tint = s.base;
         let mut pose = rig::Pose::idle(s.base, hero);
+        // a body short of its parts cannot hold itself up: it lurches where it stands
+        let unsteady = matches!(s.unit, UnitRef::Hero(i) if session.shown.hero(i).is_some_and(|h| h.walks_headless || h.lost_limbs > 0));
+        if unsteady {
+            pose.sway *= 3.0;
+            pose.lean += 0.035 * (s.t * 1.1).sin() + 0.015 * (s.t * 2.7).sin();
+        }
         // the weapon arm hangs and stirs a little
         // the parts stir at rest, each in its own time: the weapon hangs heavy, the head looks
         // about, the shield arm tires and is lifted again
@@ -1249,8 +1261,13 @@ fn dying(
                 }
                 .wrapping_mul(7919)
                 .wrapping_add(lost * 104_729);
-                let lying = art.image(&assets, &format!("{stem}_dead"));
                 let headless = art.image(&assets, &format!("{stem}_dead_headless"));
+                // who had no head to lose falls as they are, and nothing flies off
+                let no_head = matches!(unit, UnitRef::Hero(i) if session.shown.hero(i).is_some_and(|h| h.walks_headless));
+                let lying = if no_head { headless.clone() } else { art.image(&assets, &format!("{stem}_dead")) };
+                if no_head {
+                    parts.retain(|p: &(rig::Part, Vec2, Handle<Image>, Entity)| p.0 != rig::Part::Head);
+                }
                 let swaps = gore::strike_down(&mut commands, entity, unit, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *layers.0, *layers.1, &blood_art, lying, headless, art.image(&assets, &stem), seed, weight);
                 for c in children.iter() {
                     if let Ok((mut s, _)) = sprites.get_mut(c) {

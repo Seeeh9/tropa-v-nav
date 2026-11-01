@@ -311,6 +311,11 @@ fn top_bar(
 /// nothing if they were never cut.
 #[allow(clippy::too_many_arguments)]
 pub fn figure_with_no_head(commands: &mut Commands, root: Entity, stem: &str, place: Node, color: Color, flip: bool, art: &Art, assets: &AssetServer) {
+    // painted as it is, when it was
+    if let Some(h) = art.image(assets, &format!("{stem}_headless")) {
+        commands.spawn((place, ImageNode { color, flip_x: flip, ..ImageNode::new(h) }, Pickable::IGNORE, ChildOf(root)));
+        return;
+    }
     for part in ["_body", "_shield", "_arm"] {
         if let Some(h) = art.image(assets, &format!("{stem}{part}")) {
             commands.spawn((place.clone(), ImageNode { color, flip_x: flip, ..ImageNode::new(h) }, Pickable::IGNORE, ChildOf(root)));

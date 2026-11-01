@@ -379,3 +379,32 @@ bark-emelya-rare-2 = By my own wish!
 bark-emelya-rare-3 = Pike, bite!
 bark-emelya-rare-4 = Well, if you ask so nicely…
 bark-emelya-rare-5 = Stove, go!
+
+# More takes (-2 .. -5) and the lines for rare cards, gifts and gloating.
+bark-bogatyr-maim = My arm! No matter, I kill with the other.
+bark-bogatyr-maim-2 = Aaah! My arm!
+bark-bogatyr-maim-3 = Hack away… One is enough for me.
+
+bark-vorozheya-maim = My arm! The cards never showed this!
+bark-vorozheya-maim-2 = Aah! Give it back, give it back!
+bark-vorozheya-maim-3 = Blood… my blood on the bones.
+
+bark-volhv-maim = My arm! Perun, why?
+bark-volhv-maim-2 = Aaah! What will I carve with now?
+bark-volhv-maim-3 = Cut off. I will remember this.
+
+bark-volkolak-maim = Rrrah! My paw! My paw!
+bark-volkolak-maim-2 = I will bite your head off for that!
+bark-volkolak-maim-3 = A wolf runs on three!
+
+bark-znaharka-maim = Oh, my arm! That I cannot stitch!
+bark-znaharka-maim-2 = Aah! No herb will help this.
+bark-znaharka-maim-3 = My dears, where has my arm gone?
+
+bark-skomoroh-maim = Ow! How do I beat the tambourine now?
+bark-skomoroh-maim-2 = My arm! Now that is a joke!
+bark-skomoroh-maim-3 = Clap for me. I no longer can!
+
+bark-emelya-maim = Oh, my arm! What do I hold the bread with?
+bark-emelya-maim-2 = Pike! They cut my arm off!
+bark-emelya-maim-3 = Ow, ow, ow! I was only lying here!

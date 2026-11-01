@@ -493,7 +493,7 @@ fn enter(
                                 BorderColor::all(theme::hero_color(&h.def)),
                                 Pickable::IGNORE,
                             ),
-                            (Label::Team(h.slot), theme::text("", &fonts.body, 20.0, theme::BONE), Pickable::IGNORE),
+                            (Label::Team(h.slot), theme::text("", &fonts.body, 20.0, theme::BONE)),
                         ],
                     ));
                 }

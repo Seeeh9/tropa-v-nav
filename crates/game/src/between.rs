@@ -193,7 +193,7 @@ fn top_bar(
         e.with_children(|f| {
             match art.image(&assets, &format!("potions/{id}")) {
                 Some(h) => f.spawn((Node { width: percent(100), height: percent(100), ..default() }, ImageNode::new(h), Pickable::IGNORE)),
-                None => f.spawn((theme::text(name.chars().take(2).collect::<String>(), &fonts.title, 20.0, theme::ROTLIGHT), Pickable::IGNORE)),
+                None => f.spawn(theme::text(name.chars().take(2).collect::<String>(), &fonts.title, 20.0, theme::ROTLIGHT)),
             };
         });
         let heals = db.0.potions.get(&id).is_some_and(|d| !out_of_fight_heals(&d.effects).is_empty());

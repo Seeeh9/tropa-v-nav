@@ -167,7 +167,7 @@ fn party_panel(commands: &mut Commands, root: Entity, run: &Run, me: u8, fonts: 
                     Node { padding: UiRect::axes(px(8), px(3)), ..default() },
                     BackgroundColor(theme::PEAT),
                     observe(crate::between::open_player),
-                    children![(theme::text(party_line(pl, l10n), &fonts.body, 20.0, color), Pickable::IGNORE)],
+                    children![theme::text(party_line(pl, l10n), &fonts.body, 20.0, color)],
                 ));
             }
         });

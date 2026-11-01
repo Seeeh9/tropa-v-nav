@@ -48,3 +48,4 @@ story-secret-1 = I sat by this fire too. I was told this tale too, and I laughed
 story-secret-2 = My mother waited for me until the first snow, then she put up a cross. They scraped my name off themselves: that is what we do when a man walks into Nav alive. So he cannot find the way back.
 story-secret-3 = Mara gave me a choice: to freeze like all the others, or to serve. I chose to serve. Since then I tell the tale by the fires. Whoever hears it to the end follows me.
 story-secret-4 = Koschei is deathless not because his death is in a needle. It is because his tale is told again and again. While the circle holds, he lives. Only one who does not hear it to the end can break it.
+story-leaf_end = The leaves beyond will not open until the path is walked.

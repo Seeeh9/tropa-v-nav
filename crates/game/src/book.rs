@@ -39,6 +39,10 @@ const PAGE_H: f32 = 1.37;
 const GUTTER: f32 = 0.005;
 /// Height of the top of the page block above the table.
 const TOP: f32 = 0.09;
+/// How far from the hand's line of sight a leaf in the air is still within its reach.
+const CATCH_REACH: f32 = PAGE_W * 0.22;
+/// How high over the book a leaf may be and still count as down.
+const NEARLY_DOWN: f32 = 0.04;
 /// Where a leaf lies: on the right-hand page, on the left-hand one, and on the table round the book.
 const LEAF_FLOOR: Floor = Floor { right: TOP + 0.004, left: TOP + 0.009, half: (PAGE_W + 0.06, PAGE_H / 2.0 + 0.04) };
 /// Distance from the edge of the frame texture to its inner window, in texture pixels.
@@ -439,8 +443,22 @@ impl Book {
         }
     }
 
-    /// Is the right-hand page lying open under any leaf in the air the last one that can be
-    /// reached. A secret is never it: it lies aside from the story's pages.
+    /// How many of the story's pages lie beyond this spread, if it is near enough to tell: a secret
+    /// lies between its glued page and the next.
+    fn ahead_of(&self, s: &Spread) -> Option<usize> {
+        let holds = |page: &Spread| *page == *s || page.secret.as_ref().is_some_and(|(_, inner)| **inner == *s);
+        if holds(&self.spread) {
+            Some(self.pages_ahead)
+        } else if self.next.as_ref().is_some_and(holds) {
+            Some(self.pages_ahead.saturating_sub(1))
+        } else {
+            None
+        }
+    }
+
+    /// Is the right-hand page lying open under any leaf in the air the last that can be reached. A
+    /// glued page counts until its secret has been opened, or the seal would give the secret away;
+    /// from then on the seal lies on the secret, the last page there is.
     fn right_page_is_last(&self) -> bool {
         let lying = match &self.turn {
             // the leaf is the left page coming over: what lies on the right stays till it lands
@@ -448,13 +466,29 @@ impl Book {
             Some(t) => &t.to,
             None => self.shown.as_ref().unwrap_or(&self.spread),
         };
-        if *lying == self.spread {
-            self.pages_ahead == 0
-        } else if self.next.as_ref() == Some(lying) {
-            self.pages_ahead == 1
-        } else {
-            false
+        let opened = lying.secret.as_ref().is_some_and(|(act, _)| self.opened.contains(act));
+        self.ahead_of(lying) == Some(0) && !opened
+    }
+
+    /// The leaf is all but down where it is going: nobody would see it finish at once.
+    fn nearly_down(&self) -> bool {
+        self.leaf.side().abs() > 0.9 && self.leaf.points.iter().all(|p| p.y < TOP + NEARLY_DOWN)
+    }
+
+    /// A hand takes the leaf out of the air, just where it is. Let go, a leaf the story has read on
+    /// past still goes on over.
+    fn catch(&mut self, point: usize) -> bool {
+        let Some(turn) = self.turn.as_mut() else { return false };
+        if !matches!(turn.hand, Hand::Gone | Hand::Unseen { .. }) {
+            return false;
         }
+        turn.hand = Hand::Reader;
+        turn.mine = true;
+        turn.loose = 0.0;
+        self.leaf.grab = Some((point, self.leaf.points[point]));
+        self.easing = EASE;
+        note(format!("caught at {point}; {}", self.state()));
+        true
     }
 
     /// A new run: a new reading of the book, its glued leaves whole again.
@@ -1288,7 +1322,8 @@ fn hold_leaf(
     mut commands: Commands,
     mut book: ResMut<Book>,
     pointers: Query<(&PointerId, &PointerLocation, &PointerPressState)>,
-    mut was_down: Local<bool>,
+    // the mouse button a frame ago, and whether a hand still down waits for a leaf to land
+    mut state: Local<(bool, bool)>,
     mut since_told: Local<f32>,
     time: Res<Time>,
     window: Single<&Window>,
@@ -1306,8 +1341,8 @@ fn hold_leaf(
     let mouse = pointers.iter().find(|(id, ..)| id.is_mouse());
     let cursor = mouse.and_then(|(_, loc, _)| loc.location()).map(|l| crate::stage_point(&window, scale.0, l.position));
     let down = mouse.is_some_and(|(.., press)| press.is_primary_pressed());
-    let pressed = down && !*was_down;
-    *was_down = down;
+    let pressed = down && !state.0;
+    state.0 = down;
     let book = &mut *book;
     book.over_glue = false;
     // over a page read together the others see where the hand is, a few times a second
@@ -1376,14 +1411,42 @@ fn hold_leaf(
             }
         }
     }
-    // a leaf still falling is down the moment a hand reaches for the book
-    if pressed && book.open >= 1.0 && cursor.is_some_and(|c| c.y <= crate::STAGE_H - BUTTON_BAND) {
-        if let Some(settled) = book.land_now() {
-            if let Some((act, whole, mine)) = settled.found {
-                found.write(Found { act, whole, mine });
+    // a leaf in the air is caught where it is, if the hand reaches it. If not it flies on, and the
+    // hand still down when it lands takes what it reached for
+    if pressed && book.open >= 1.0 {
+        if let Some(c) = cursor.filter(|c| c.y <= crate::STAGE_H - BUTTON_BAND) {
+            let flying = book.turn.as_ref().is_some_and(|t| matches!(t.hand, Hand::Gone | Hand::Unseen { .. }));
+            if flying && book.drag_ok {
+                let caught = book.leaf.pick(|y| cursor_on(camera, at, c, y), CATCH_REACH, false, TOP).filter(|_| !book.nearly_down());
+                if let Some(point) = caught {
+                    if book.catch(point) {
+                        let back = book.turn.as_ref().is_some_and(|t| t.back);
+                        let hand = book.leaf.points[point];
+                        tell_news(book, hand_news(hand, (!back).then_some(point as u16)), true);
+                        play(&mut commands, &art, &assets, &mixer, "book_rustle");
+                        return;
+                    }
+                }
+                if book.nearly_down() {
+                    if let Some(settled) = book.land_now() {
+                        if let Some((act, whole, mine)) = settled.found {
+                            found.write(Found { act, whole, mine });
+                        }
+                    }
+                }
+                state.1 = book.turn.is_some();
             }
         }
     }
+    if state.1 && !down {
+        state.1 = false;
+    }
+    let pressed = if state.1 && book.turn.is_none() {
+        state.1 = false;
+        true
+    } else {
+        pressed
+    };
     // take hold: of a page lying still, with a page after it to uncover
     if pressed && book.turn.is_none() && book.drag_ok && book.open >= 1.0 {
         let Some(c) = cursor else { return };
@@ -1500,6 +1563,7 @@ fn hold_leaf(
         let over = if back { side > -0.15 } else { side < 0.15 };
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
+        let told = turn.committed;
         // let go past the spine, the leaf is carried on over by the book's own hand, so it lands
         // where the story now is: let go short of it, it falls back and the story stays
         let carry_on = |turn: &mut Turning, leaf: &mut Leaf| {
@@ -1510,6 +1574,11 @@ fn hold_leaf(
             // the reader let go: what tears now is no hand's doing
             leaf.tearing = false;
         };
+        // caught out of the air after the story had read on: it can only go on over
+        if told {
+            carry_on(turn, &mut book.leaf);
+            return;
+        }
         if back {
             if over {
                 turn.committed = true;
@@ -2233,13 +2302,11 @@ mod tests {
     #[test]
     fn the_seal_lies_only_on_the_last_page_that_can_be_reached() {
         let mut b = book_at(spread(2, None));
-        b.spread = spread(2, None);
-        b.shown = Some(spread(2, None));
         b.next = Some(spread(4, None));
         b.pages_ahead = 1;
         assert!(!b.right_page_is_last(), "pages still to come");
         // the leaf lifted off the page before the last uncovers the seal
-        b.turn = Some(Turning { from: spread(2, None), to: spread(4, None), committed: false, hand: Hand::Loose, loose: 0.0, mine: false, peel: None, back: false, own: false, story_to: spread(4, None) });
+        assert!(b.take_up(Hand::Reader));
         assert!(b.right_page_is_last());
         // the story has read on while it is in the air
         b.spread = spread(4, None);
@@ -2249,16 +2316,46 @@ mod tests {
         b.turn = None;
         b.shown = Some(spread(4, None));
         assert!(b.right_page_is_last());
-        // turning back to earlier pages: it stays till the leaf has come over it, then is gone
-        b.prev = Some(spread(2, None));
-        b.turn = Some(Turning { from: spread(4, None), to: spread(2, None), committed: false, hand: Hand::Loose, loose: 0.0, mine: false, peel: None, back: true, own: false, story_to: spread(2, None) });
-        assert!(b.right_page_is_last());
-        b.turn = None;
-        b.spread = spread(2, None);
-        b.shown = Some(spread(2, None));
-        b.next = Some(spread(4, None));
-        b.pages_ahead = 1;
+    }
+
+    #[test]
+    fn a_secret_opened_takes_the_seal_from_its_glued_page() {
+        let glued = spread(2, Some((1, secret(4))));
+        let mut b = book_at(glued.clone());
+        b.pages_ahead = 0;
+        assert!(b.right_page_is_last(), "unopened, nothing gives it away");
+        b.opened.push(1);
+        assert!(!b.right_page_is_last(), "the reader knows there is more");
+        b.shown = Some(secret(4));
+        assert!(b.right_page_is_last(), "the secret is the last page");
+        // with pages after it, neither is
+        b.pages_ahead = 2;
         assert!(!b.right_page_is_last());
+    }
+
+    #[test]
+    fn a_leaf_is_caught_out_of_the_air_where_it_is_and_nothing_moves() {
+        let mut b = book_at(spread(2, None));
+        b.next = Some(spread(4, None));
+        assert!(b.take_up(Hand::Reader));
+        // lifted and let go: it is falling
+        let point = b.leaf.nearest(Vec3::new(GUTTER + PAGE_W, LEAF_FLOOR.right, 0.0));
+        b.leaf.grab = Some((point, Vec3::new(0.3, 0.8, 0.0)));
+        for _ in 0..40 {
+            b.leaf.step(1.0 / 60.0);
+        }
+        b.leaf.grab = None;
+        b.turn.as_mut().unwrap().hand = Hand::Gone;
+        let before = b.leaf.points.clone();
+        let (shown, faces) = (b.shown.clone(), b.faces.clone());
+        assert!(!b.nearly_down());
+        assert!(b.catch(point));
+        assert_eq!(b.leaf.points, before, "not a point of it has jumped");
+        assert_eq!((b.shown.clone(), b.faces.clone()), (shown, faces));
+        assert!(matches!(b.turn.as_ref().unwrap().hand, Hand::Reader));
+        assert_eq!(b.leaf.grab.map(|(p, h)| (p, h)), Some((point, before[point])));
+        // a hand already on it cannot catch it again
+        assert!(!b.catch(point));
     }
 
     #[test]

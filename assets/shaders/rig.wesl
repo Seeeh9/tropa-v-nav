@@ -41,7 +41,9 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     // the knees take the first of a bend, the hips and shoulders the most
     let carry = smoothstep(0.04, 0.9, h);
     // squash and stretch, from the feet
-    let hs = h / max(rig.body.y, 0.2);
+    // (not the clamped height: above the top of the picture must stay above it, or a stretch
+    // repeats one row of paint up the node)
+    let hs = (1.0 - p.y) / max(rig.body.y, 0.2);
     p.y = 1.0 - hs;
     // lean and idle sway: a curve up the spine
     var dx = (rig.motion.y * face) * carry * carry;

@@ -632,7 +632,7 @@ fn draw_rest(
             // and who walks without one stands there without it
             if pl.walks_headless {
                 let place = Node { position_type: PositionType::Absolute, left: px(x - width / 2.0), top: px(880.0 - height), width: px(width), height: px(height), ..default() };
-                crate::between::figure_with_no_head(&mut commands, root, &stem, place, Color::srgb(1.0, 0.86, 0.72), flip, &art, &assets);
+                crate::between::figure_with_no_head(&mut commands, root, &stem, pl.lost_arms, place, Color::srgb(1.0, 0.86, 0.72), flip, &art, &assets);
                 continue;
             }
             commands.spawn((

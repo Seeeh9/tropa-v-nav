@@ -310,8 +310,24 @@ fn top_bar(
 /// A hero's standing figure with its head left off: its cut-out parts, stacked. Falls back on
 /// nothing if they were never cut.
 #[allow(clippy::too_many_arguments)]
-pub fn figure_with_no_head(commands: &mut Commands, root: Entity, stem: &str, place: Node, color: Color, flip: bool, art: &Art, assets: &AssetServer) {
+pub fn figure_with_no_head(commands: &mut Commands, root: Entity, stem: &str, lost_arms: u8, place: Node, color: Color, flip: bool, art: &Art, assets: &AssetServer) {
     // painted as it is, when it was
+    let mark = crate::battle::short_of(true, lost_arms).unwrap_or("_headless");
+    if let Some(h) = art.image(assets, &format!("{stem}{mark}")) {
+        commands.spawn((place, ImageNode { color, flip_x: flip, ..ImageNode::new(h) }, Pickable::IGNORE, ChildOf(root)));
+        return;
+    }
+    if lost_arms != 0 {
+        // the arms are off too: the parts below leave them out, not the whole headless picture
+        for (part, arm) in [("_body", 0), ("_shield", nav_core::combat::SHIELD_ARM), ("_arm", nav_core::combat::WEAPON_ARM)] {
+            if lost_arms & arm == 0 {
+                if let Some(h) = art.image(assets, &format!("{stem}{part}")) {
+                    commands.spawn((place.clone(), ImageNode { color, flip_x: flip, ..ImageNode::new(h) }, Pickable::IGNORE, ChildOf(root)));
+                }
+            }
+        }
+        return;
+    }
     if let Some(h) = art.image(assets, &format!("{stem}_headless")) {
         commands.spawn((place, ImageNode { color, flip_x: flip, ..ImageNode::new(h) }, Pickable::IGNORE, ChildOf(root)));
         return;
@@ -489,7 +505,7 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
         }
         if pl.walks_headless {
             let place = Node { position_type: PositionType::Absolute, left: px(foot.x - size.x / 2.0), top: px(foot.y - size.y), width: px(size.x), height: px(size.y), ..default() };
-            figure_with_no_head(commands, root, &format!("heroes/{}", pl.hero), place, Color::WHITE, false, art, assets);
+            figure_with_no_head(commands, root, &format!("heroes/{}", pl.hero), pl.lost_arms, place, Color::WHITE, false, art, assets);
             continue;
         }
         let Some(h) = art.image(assets, &format!("heroes/{}", pl.hero)) else { continue };

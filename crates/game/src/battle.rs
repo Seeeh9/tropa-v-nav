@@ -982,7 +982,7 @@ struct Preloaded {
 /// Poses a unit is drawn in for a moment, over its own picture.
 const POSES: [&str; 9] = ["_strike", "_cast", "_hurt", "_guard", "_downed", "_headless", "_noweapon", "_noshield", "_noarms"];
 
-/// The painted picture of a figure short of a part. Short of both a head and an arm has none: it
+/// The painted picture of a figure short of a part. Where none was painted for it, the figure
 /// stands in its cut-out parts.
 pub(crate) fn short_of(no_head: bool, lost_arms: u8) -> Option<&'static str> {
     use nav_core::combat::{SHIELD_ARM, WEAPON_ARM};
@@ -991,6 +991,9 @@ pub(crate) fn short_of(no_head: bool, lost_arms: u8) -> Option<&'static str> {
         (false, a) if a == WEAPON_ARM => Some("_noweapon"),
         (false, a) if a == SHIELD_ARM => Some("_noshield"),
         (false, a) if a == WEAPON_ARM | SHIELD_ARM => Some("_noarms"),
+        (true, a) if a == WEAPON_ARM => Some("_headless_noweapon"),
+        (true, a) if a == SHIELD_ARM => Some("_headless_noshield"),
+        (true, a) if a == WEAPON_ARM | SHIELD_ARM => Some("_headless_noarms"),
         _ => None,
     }
 }
@@ -1019,7 +1022,7 @@ fn swap_form_art(
     let stems = session.shown.heroes.iter().flat_map(|h| [format!("heroes/{}", h.def), format!("heroes/{}_beast", h.def)]).chain(session.shown.enemies.iter().map(|e| format!("enemies/{}", e.def)));
     for stem in stems {
         if preloaded.seen.insert(stem.clone()) {
-            for mark in ["", "_headless", "_noweapon", "_noshield", "_noarms"] {
+            for mark in ["", "_headless", "_noweapon", "_noshield", "_noarms", "_headless_noweapon", "_headless_noshield", "_headless_noarms"] {
                 for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed"] {
                     if let Some(handle) = art.image(&assets, &format!("{stem}{mark}{pose}")) {
                         preloaded.handles.push(handle);

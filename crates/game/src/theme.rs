@@ -23,6 +23,7 @@ pub fn hero_color(hero: &str) -> Color {
         "volkolak" => Color::srgb(0.62, 0.10, 0.12),
         "znaharka" => Color::srgb(0.85, 0.62, 0.22),
         "skomoroh" => Color::srgb(0.48, 0.36, 0.56),
+        "emelya" => Color::srgb(0.78, 0.74, 0.62),
         _ => DIM,
     }
 }

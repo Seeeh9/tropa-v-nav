@@ -48,4 +48,13 @@
             "sk_mask_bear", "sk_mask_goat", "sk_echo", "sk_tumble",
         ],
     ),
+    (
+        // Емеля: герой-испытание. Сам не целится, бьёт щукой наугад; в колоде Лень, которую не сыграть.
+        id: "emelya", max_hp: 60, mechanic: Sloth, relic: "em_pike_bucket", alt_relics: ["em_alt_warm_bricks", "em_alt_dry_crust"],
+        deck: [
+            "em_bid", "em_bid", "em_bid", "em_bid",
+            "em_lie", "em_lie", "em_lie", "em_lie",
+            "em_sloth", "em_sloth",
+        ],
+    ),
 ]

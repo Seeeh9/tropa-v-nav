@@ -669,7 +669,7 @@ fn sync_units(
         let is_hero = matches!(unit, UnitRef::Hero(_));
         // elites and bosses are painted square and stand larger than their slot: the picture
         // spills over the sides and the top, the layout box stays put
-        let wide = !is_hero && art.aspect(&stem).is_some_and(|a| a > 0.9);
+        let wide = (!is_hero || stem == "heroes/emelya") && art.aspect(&stem).is_some_and(|a| a > 0.9);
         // a foe of known stature is drawn as tall as it stands, a raven small, a giant huge
         let tall = match unit {
             UnitRef::Enemy(uid) => shown.enemy(uid).and_then(|e| stature::height_of(&e.def)),

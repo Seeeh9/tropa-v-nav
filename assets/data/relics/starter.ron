@@ -43,4 +43,11 @@
     (id: "zn_alt_herb_pouch", rarity: Starter, hero: "znaharka", passives: [(on: TurnEnd, effects: [Once("zn_alt_pouch", [Heal(N(3), AllFriends)])])]),
     (id: "sk_alt_fools_cap", rarity: Starter, hero: "skomoroh", passives: [(on: CombatStart, effects: [Mask(Goat), Block(N(4), Me)])]),
     (id: "sk_alt_bear_tooth", rarity: Starter, hero: "skomoroh", passives: [(on: CombatStart, effects: [Mask(Bear)])]),
+    (
+        // Щука в ведре: в начале каждого хода кусает случайного врага на 3
+        id: "em_pike_bucket", rarity: Starter, hero: "emelya",
+        passives: [(on: TurnStart, effects: [Damage(N(3), RandomFoe)])],
+    ),
+    (id: "em_alt_warm_bricks", rarity: Starter, hero: "emelya", passives: [(on: TurnStart, effects: [Block(N(3), Me)])]),
+    (id: "em_alt_dry_crust", rarity: Starter, hero: "emelya", passives: [(on: CombatStart, effects: [Heal(N(4), Me)])]),
 ]

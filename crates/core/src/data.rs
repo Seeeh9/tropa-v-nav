@@ -34,7 +34,7 @@ data_enum!(RelicPool { Any, Shop, Boss, Book });
 data_enum!(Form { Human, Beast });
 data_enum!(MaskKind { Bear, Goat, Mara });
 data_enum!(RuneKind { Thunder, Frost, Mist, Flame, Zhiva });
-data_enum!(Mechanic { Valor, Curse, Runes, Moon, Brew, Masks });
+data_enum!(Mechanic { Valor, Curse, Runes, Moon, Brew, Masks, Sloth });
 data_enum!(EncounterKind { Normal, Elite, Boss });
 data_enum!(IntentKind { Attack, AttackAll, Defend, Buff, Debuff, Summon, Unknown, Special });
 

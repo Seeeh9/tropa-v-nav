@@ -676,7 +676,8 @@ fn trophies_and_pedlars_wares_are_never_found_on_the_road() {
 #[test]
 fn the_card_pool_matches_the_design_document() {
     let c = content();
-    let real: Vec<&CardDef> = c.cards.values().filter(|d| !d.id.starts_with("t_")).collect();
+    // the six of the design document: Yemelya the challenge hero came after it
+    let real: Vec<&CardDef> = c.cards.values().filter(|d| !d.id.starts_with("t_") && d.hero != "emelya").collect();
     let count = |f: &dyn Fn(&CardDef) -> bool| real.iter().filter(|d| f(d)).count();
     assert_eq!(count(&|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special), 30, "neutral");
     assert_eq!(count(&|d| d.kind == CardType::Curse), 13, "curses");

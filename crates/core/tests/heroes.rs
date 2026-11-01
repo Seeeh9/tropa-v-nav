@@ -442,3 +442,14 @@ fn the_hare_dodges_once_a_turn_and_says_so() {
     apply(&c, &mut s, 0, &CombatAction::Play { card: second, target: Some(UnitRef::Enemy(foe)) }).unwrap();
     assert!(s.enemies[0].hp < hp, "the second one lands");
 }
+
+#[test]
+fn yemelya_aims_at_nobody_and_lies_with_sloth_in_his_deck() {
+    let c = content();
+    let h = &c.heroes["emelya"];
+    assert_eq!(h.deck.iter().filter(|d| *d == "em_sloth").count(), 2);
+    for card in c.cards.values().filter(|d| d.hero == "emelya") {
+        assert_eq!(card.target, CardTarget::None, "{} must not be aimed", card.id);
+    }
+    assert!(c.cards["em_sloth"].keywords.contains(&Keyword::Unplayable));
+}

@@ -1,0 +1,64 @@
+// Емеля: сам не встаёт и ни в кого не целится. Всё делает щука, а бьёт она куда придётся.
+// В колоде лежит Лень, которую не сыграть. Самый трудный герой: 60 жизни, почти нет прицела.
+[
+    (
+        id: "em_bid", hero: "emelya", kind: Attack, rarity: Starter, cost: 1,
+        effects: [Damage(N(7), RandomFoe)],
+        up: (effects: [Damage(N(10), RandomFoe)]),
+    ),
+    (
+        id: "em_lie", hero: "emelya", kind: Skill, rarity: Starter, cost: 1,
+        effects: [Block(N(6), Me)],
+        up: (effects: [Block(N(9), Me)]),
+    ),
+    (
+        id: "em_sloth", hero: "emelya", kind: Curse, rarity: Starter, cost: 0,
+        keywords: [Unplayable],
+    ),
+    (
+        id: "em_yawn", hero: "emelya", kind: Skill, rarity: Common, cost: 0,
+        effects: [Draw(N(1))],
+        up: (effects: [Draw(N(2))]),
+    ),
+    (
+        id: "em_kalach", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Heal(N(4), Me), Block(N(4), Me)],
+        keywords: [Exhaust],
+        up: (effects: [Heal(N(6), Me), Block(N(6), Me)]),
+    ),
+    (
+        id: "em_buckets", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Block(N(7), Me), Draw(N(1))],
+        up: (effects: [Block(N(10), Me), Draw(N(1))]),
+    ),
+    (
+        id: "em_axe", hero: "emelya", kind: Attack, rarity: Common, cost: 2,
+        effects: [Hits(N(5), 3, RandomFoe)],
+        up: (effects: [Hits(N(7), 3, RandomFoe)]),
+    ),
+    (
+        id: "em_sled", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(5), AllFoes)],
+        up: (effects: [Damage(N(8), AllFoes)]),
+    ),
+    (
+        id: "em_stove_ride", hero: "emelya", kind: Attack, rarity: Uncommon, cost: 2,
+        effects: [Damage(N(11), AllFoes)],
+        up: (effects: [Damage(N(15), AllFoes)]),
+    ),
+    (
+        id: "em_warm_stove", hero: "emelya", kind: Power, rarity: Uncommon, cost: 1,
+        passives: [(on: TurnStart, effects: [Block(N(4), Me)])],
+        up: (passives: [(on: TurnStart, effects: [Block(N(6), Me)])]),
+    ),
+    (
+        id: "em_three_wishes", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Draw(N(3)), AddCard(card: "em_sloth", pile: Discard, to: Me)],
+        up: (effects: [Draw(N(4)), AddCard(card: "em_sloth", pile: Discard, to: Me)]),
+    ),
+    (
+        id: "em_by_the_pike", hero: "emelya", kind: Attack, rarity: Rare, cost: 3,
+        effects: [Hits(N(7), 5, RandomFoe)],
+        up: (effects: [Hits(N(9), 5, RandomFoe)]),
+    ),
+]

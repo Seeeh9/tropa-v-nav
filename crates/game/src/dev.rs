@@ -7,6 +7,8 @@
 //!   TROPA_FORCE=shop|omen|rest|trophy|chest  open `run` straight at that stage
 //!   TROPA_SHRINE=<0..2>         pretend the shrine stands at this level (in memory only; never saved by a screenshot run)
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
+//!   TROPA_HERO_HP=<n>[@slot]    the heroes of that fight, or the one in that seat, are down to that HP
+//!   TROPA_FOE_STR=<n>           the foes of that fight hit that much harder
 //!   TROPA_HAND=<id>,<id>|all    the heroes of that fight hold these cards, or every card (a text that cannot fit is logged)
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_POTIONS=<id>,<id>     every player's belt holds these draughts

@@ -38,6 +38,8 @@ pub(super) struct Corpse {
     /// The picture of the body lying dead, which the standing one gives way to (`None` when
     /// something was struck off, since that picture is whole).
     lying: Option<Entity>,
+    /// How far a body going over whole is held up, so what stuck out behind it stays on the ground.
+    lift: f32,
     /// What runs in its veins.
     blood: Color,
 }
@@ -212,10 +214,8 @@ fn hide_lost_limbs(session: Res<Session>, sprites: Query<(&UnitSprite, &Children
     }
 }
 
-/// Below this share of its health a unit bleeds on its own.
-const BADLY_HURT: f32 = 0.35;
-
-/// The badly hurt bleed: now and then a trickle runs down from a wound.
+/// Whoever carries the bleeding status shows it: now and then a trickle runs down from a wound.
+/// Low health alone draws none, or blood would promise a status that is not there.
 fn trickle_down(
     mut commands: Commands,
     time: Res<Time>,
@@ -237,8 +237,8 @@ fn trickle_down(
         .iter()
         .map(|w| w.unit)
         .filter(|u| match u {
-            UnitRef::Hero(i) => session.shown.hero(*i).is_some_and(|h| !h.downed && (h.hp as f32) < h.max_hp as f32 * BADLY_HURT),
-            UnitRef::Enemy(e) => session.shown.enemy(*e).is_some_and(|e| e.alive && (e.hp as f32) < e.max_hp as f32 * BADLY_HURT),
+            UnitRef::Hero(i) => session.shown.hero(*i).is_some_and(|h| !h.downed && h.statuses.get(&StatusKind::Bleed).is_some_and(|n| *n > 0)),
+            UnitRef::Enemy(e) => session.shown.enemy(*e).is_some_and(|e| e.alive && e.statuses.get(&StatusKind::Bleed).is_some_and(|n| *n > 0)),
         })
         .collect();
     if hurt.is_empty() {
@@ -350,6 +350,7 @@ pub(super) fn strike_down(
     art: &BloodArt,
     lying: Option<Handle<Image>>,
     lying_headless: Option<Handle<Image>>,
+    standing: Option<Handle<Image>>,
     seed: u32,
     weight: f32,
 ) -> bool {
@@ -360,7 +361,7 @@ pub(super) fn strike_down(
     let pic = Vec2::new(foot.x - draw.x / 2.0, foot.y - draw.y);
     // only a heavy killing blow strikes anything off, and each part takes its own chance: a
     // light one only fells the body, a crushing one may take every part at once
-    let flying: Vec<bool> = parts
+    let mut flying: Vec<bool> = parts
         .iter()
         .enumerate()
         .map(|(k, (part, ..))| {
@@ -377,8 +378,14 @@ pub(super) fn strike_down(
         })
         .collect();
     // a body still whole crumples and gives way to its picture lying dead, a beheaded one to its
-    // picture lying dead without a head; one cut up otherwise goes over as it is
+    // picture lying dead without a head, and that picture has its arms, so only the head flies;
+    // one cut up otherwise goes over as it is
     let head_off = parts.iter().zip(&flying).any(|((p, ..), f)| *f && *p == rig::Part::Head);
+    if head_off && lying_headless.is_some() {
+        for (f, (p, ..)) in flying.iter_mut().zip(&parts) {
+            *f = *f && *p == rig::Part::Head;
+        }
+    }
     let others_off = parts.iter().zip(&flying).any(|((p, ..), f)| *f && *p != rig::Part::Head);
     let lying = match (head_off, others_off) {
         (false, false) => lying,
@@ -403,13 +410,15 @@ pub(super) fn strike_down(
             .id()
     });
     let swaps = lying.is_some();
+    // it turns about its feet, so all it holds out on that side would swing under the ground
+    let lift = if swaps { 0.0 } else { standing.and_then(|p| reach_past_feet(images, &p, side)).unwrap_or(0.3) * draw.x * 0.85 };
     // what was in the air when it fell hangs there a moment
     play(commands, float_layer, &art.mist, foot - Vec2::new(0.0, draw.y * 0.55), Vec2::splat(draw.y * 0.9), Vec2::splat(0.5), 0.0, blood.with_alpha(0.55), 9.0, false, side < 0.0);
     // blood spreads out from under the body as it lies, the more if it was cut to pieces
     let wide = draw.y * if flying.contains(&true) { 1.3 } else { 0.9 };
     play(commands, stain_layer, &art.pool, foot + Vec2::new(side * draw.y * 0.25, 8.0), Vec2::new(wide, wide * 0.36), Vec2::splat(0.5), 0.0, blood.with_alpha(0.9), 3.0, true, side < 0.0);
     // the dead lie behind the living
-    commands.entity(widget).insert((Corpse { unit, t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying, blood }, ZIndex(0)));
+    commands.entity(widget).insert((Corpse { unit, t: 0.0, side, feet: foot - origin, ground: foot, angle: 0.0, lying, lift, blood }, ZIndex(0)));
     for (k, (part, joint, picture, skin)) in parts.into_iter().enumerate() {
         if !flying[k] {
             continue;
@@ -434,7 +443,8 @@ pub(super) fn strike_down(
                     vel,
                     angle: 0.0,
                     spin: side * (5.0 + 8.0 * r(30 + k)),
-                    ground: foot.y + 10.0 + 50.0 * r(40 + k),
+                    // on the earth in front of the units, not on their bars
+                    ground: foot.y + 2.0 + 16.0 * r(40 + k),
                     radius: radius * draw.y,
                     weight,
                     blood,
@@ -460,6 +470,27 @@ pub(super) fn strike_down(
         commands.spawn(Bleeder { corpse: widget, local: wound, dir: dir.normalize(), color: blood, t: 0.0, life: 4.5, due: 0.0, strength: weight });
     }
     swaps
+}
+
+/// How far (0..0.5 of the width) a picture's paint reaches past its middle, where the feet stand,
+/// on one side.
+fn reach_past_feet(images: &Assets<Image>, picture: &Handle<Image>, side: f32) -> Option<f32> {
+    let image = images.get(picture)?;
+    let data = image.data.as_ref()?;
+    let (w, h) = (image.width() as usize, image.height() as usize);
+    if data.len() < w * h * 4 {
+        return None;
+    }
+    let mut far = 0usize;
+    for y in (0..h).step_by(4) {
+        for x in (0..w).step_by(2) {
+            if data[(y * w + x) * 4 + 3] > 128 {
+                let past = if side > 0.0 { x.saturating_sub(w / 2) } else { (w / 2).saturating_sub(x) };
+                far = far.max(past);
+            }
+        }
+    }
+    Some(far as f32 / w as f32)
 }
 
 /// Where a part's paint is centred on its picture (0..1), and how far it reaches.
@@ -528,7 +559,7 @@ fn fall(
         let arm = size / 2.0 - c.feet;
         let turned = Vec2::from_angle(c.angle).rotate(arm);
         tf.rotation = Rot2::radians(c.angle);
-        tf.translation = Val2::px(turned.x - arm.x, turned.y - arm.y);
+        tf.translation = Val2::px(turned.x - arm.x, turned.y - arm.y - c.lift * ease);
     }
 }
 

@@ -208,6 +208,7 @@ enum Label {
     Draw,
     Discard,
     Round,
+    Gold,
     Ready,
     Error,
     Tooltip,
@@ -282,11 +283,11 @@ pub(crate) fn ground_lift(backdrop: &str) -> f32 {
     }
 }
 
-/// Where the relics run: a strip along the top of the stage, right of the party list and clear of
-/// everyone's heads.
-const RELIC_LEFT: f32 = 580.0;
-const RELIC_RIGHT: f32 = 1800.0;
-const RELIC_TOP: f32 = 12.0;
+/// Where the belt lies on the bar: past the longest name, health and purse.
+const BELT_LEFT: f32 = 520.0;
+/// Where the relics run on the bar: past the belt, short of the round.
+const RELIC_LEFT: f32 = 700.0;
+const RELIC_RIGHT: f32 = 1720.0;
 
 /// The size of a relic's chip: full size while one row holds them all, then small enough for two.
 fn relic_side(count: usize) -> f32 {
@@ -295,7 +296,7 @@ fn relic_side(count: usize) -> f32 {
         42.0
     } else {
         // two rows, at least as many across as fit; past that they shrink further
-        (room / (count as f32 / 2.0).ceil() - 4.0).clamp(14.0, 34.0)
+        (room / (count as f32 / 2.0).ceil() - 4.0).clamp(10.0, 26.0)
     }
 }
 
@@ -303,7 +304,9 @@ fn relic_side(count: usize) -> f32 {
 fn relic_at(i: usize, count: usize) -> Vec2 {
     let side = relic_side(count);
     let across = (((RELIC_RIGHT - RELIC_LEFT) / (side + 4.0)) as usize).max(1);
-    Vec2::new(RELIC_LEFT + (i % across) as f32 * (side + 4.0), RELIC_TOP + (i / across) as f32 * (side + 4.0))
+    // one row sits in the middle of the bar, more start at its top
+    let top = if count <= across { (crate::between::BAR_H - side) / 2.0 } else { 4.0 };
+    Vec2::new(RELIC_LEFT + (i % across) as f32 * (side + 4.0), top + (i / across) as f32 * (side + 4.0))
 }
 
 pub(crate) fn hero_foot(slot: u8) -> Vec2 {
@@ -431,12 +434,29 @@ fn enter(
             p.spawn((gore::CorpseLayer, layer(), Pickable::IGNORE));
             p.spawn((UnitLayer, layer(), Pickable::IGNORE));
 
-            // party panel, top-left
+            // the bar along the top, as between fights: who you are, health, purse; the belt and
+            // the relics lie over it, the round at its right end
+            let mine = session.my_hero();
+            p.spawn((crate::between::bar_plate(), Pickable::IGNORE)).with_children(|bar| {
+                bar.spawn(theme::text(l10n.t(&format!("hero-{}", mine.def)), &fonts.title, 30.0, theme::hero_color(&mine.def).lighter(0.1)));
+                bar.spawn(crate::between::bar_stat()).with_children(|s| {
+                    s.spawn(crate::between::blood_mark());
+                    s.spawn((Label::Hp(UnitRef::Hero(mine.slot)), theme::text("", &fonts.num, 28.0, theme::FRESH_BLOOD.lighter(0.2)), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK }));
+                });
+                bar.spawn(crate::between::bar_stat()).with_children(|s| {
+                    s.spawn(crate::between::coin_mark());
+                    s.spawn((Label::Gold, theme::text("", &fonts.num, 28.0, theme::CANDLE), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK }));
+                });
+            });
+
+            // party panel under the bar, top-left: alone, the bar says it all
+            let party = session.truth.heroes.len() > 1;
             p.spawn((
                 theme::panel(Node {
                     position_type: PositionType::Absolute,
                     left: px(16),
-                    top: px(16),
+                    top: px(crate::between::BAR_H + 10.0),
+                    display: if party { Display::Flex } else { Display::None },
                     padding: UiRect::all(px(12)),
                     border: UiRect::all(px(2)),
                     flex_direction: FlexDirection::Column,
@@ -463,9 +483,8 @@ fn enter(
                 }
             });
 
-            // what the player carries, under the party list: a picture where one is painted,
-            // else the first letters of its name
-            let mine = session.my_hero();
+            // what the player carries, along the bar: a picture where one is painted, else the
+            // first letters of its name
             let count = mine.relics.len();
             let side = relic_side(count);
             for (i, id) in mine.relics.iter().enumerate() {
@@ -503,7 +522,7 @@ fn enter(
             p.spawn((
                 Label::Timer,
                 theme::text("", &fonts.num, 30.0, theme::CANDLE),
-                Node { position_type: PositionType::Absolute, right: px(24), top: px(56), ..default() },
+                Node { position_type: PositionType::Absolute, right: px(24), top: px(crate::between::BAR_H + 8.0), ..default() },
             ));
             // the very first fight explains itself, briefly
             if profile.runs == 0 {
@@ -511,7 +530,7 @@ fn enter(
                     theme::panel(Node {
                         position_type: PositionType::Absolute,
                         left: px(560),
-                        top: px(70),
+                        top: px(crate::between::BAR_H + 10.0),
                         width: px(800),
                         padding: UiRect::all(px(14)),
                         border: UiRect::all(px(2)),
@@ -583,8 +602,8 @@ fn enter(
 
             p.spawn((
                 PotionBelt,
-                // along the top, as on the bar between fights, and the relics after it
-                Node { position_type: PositionType::Absolute, left: px(380), top: px(10), column_gap: px(10), ..default() },
+                // on the bar, as between fights, and the relics after it
+                Node { position_type: PositionType::Absolute, left: px(BELT_LEFT), top: px(7), column_gap: px(10), ..default() },
                 Pickable::IGNORE,
             ));
             // the hand over every unit, bar and intent: a card held is never under anything
@@ -1214,7 +1233,7 @@ fn dying(
                 .wrapping_add(lost * 104_729);
                 let lying = art.image(&assets, &format!("{stem}_dead"));
                 let headless = art.image(&assets, &format!("{stem}_dead_headless"));
-                let swaps = gore::strike_down(&mut commands, entity, unit, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *layers.0, *layers.1, &blood_art, lying, headless, seed, weight);
+                let swaps = gore::strike_down(&mut commands, entity, unit, origin, foot, draw, matches!(unit, UnitRef::Hero(_)), blood, parts, &images, *float_layer, *layers.0, *layers.1, &blood_art, lying, headless, art.image(&assets, &stem), seed, weight);
                 for c in children.iter() {
                     if let Ok((mut s, _)) = sprites.get_mut(c) {
                         s.vanish = swaps;
@@ -1336,7 +1355,8 @@ fn update_intent_icons(
     }
 }
 
-fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<TooltipText>, clock: Res<TimerText>, mut labels: Query<(&Label, &mut Text)>) {
+#[allow(clippy::too_many_arguments)]
+fn update_labels(session: Res<Session>, net: Option<Res<crate::net::Net>>, db: Res<Db>, l10n: Res<L10n>, tip: Res<TooltipText>, clock: Res<TimerText>, mut labels: Query<(&Label, &mut Text)>) {
     let (shown, truth) = (&session.shown, &session.truth);
     for (label, mut text) in &mut labels {
         let s = match *label {
@@ -1383,6 +1403,9 @@ fn update_labels(session: Res<Session>, db: Res<Db>, l10n: Res<L10n>, tip: Res<T
             Label::Draw => Some(session.my_hero().draw.len().to_string()),
             Label::Discard => Some(session.my_hero().discard.len().to_string()),
             Label::Round => Some(l10n.n("battle-round", shown.round as i32)),
+            Label::Gold => net.as_ref().and_then(|n| n.node.state.as_ref().zip(n.node.my_slot())).and_then(|(run, me)| run.players.get(me as usize)).map(|p| p.gold.to_string()),
+            // whoever has lost their head only watches, and the seal says why it does nothing
+            Label::Ready if session.my_hero().beheaded => Some(l10n.t("battle-beheaded")),
             Label::Ready => Some(if session.my_hero().ready {
                 if truth.is_coop() {
                     l10n.t("battle-waiting")
@@ -2313,8 +2336,7 @@ mod relic_strip {
             for i in 0..count {
                 let at = relic_at(i, count);
                 assert!(at.x >= RELIC_LEFT && at.x + side <= RELIC_RIGHT + 1.0, "{count}: {at}");
-                // over everyone's heads: the tallest figure starts at about y 290
-                assert!(at.y + side < 110.0, "{count}: {at}");
+                assert!(at.y + side <= crate::between::BAR_H, "{count}: {at}");
             }
         }
         assert_eq!(relic_side(10), 42.0, "a few relics keep their full size");

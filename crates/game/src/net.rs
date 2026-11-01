@@ -291,10 +291,21 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
                             e.hp = e.hp.min(hp);
                         }
                     }
-                    // TROPA_HERO_HP=2 leaves the heroes that weak, to watch them go down
-                    if let (Some(hp), Some(c)) = (std::env::var("TROPA_HERO_HP").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
-                        for h in &mut c.heroes {
-                            h.hp = h.hp.min(hp);
+                    // TROPA_HERO_HP=2 leaves the heroes that weak, to watch them go down; 2@0 only the first
+                    if let (Ok(v), Some(c)) = (std::env::var("TROPA_HERO_HP"), run.combat.as_mut()) {
+                        let (hp, only) = v.split_once('@').map_or((v.as_str(), None), |(a, b)| (a, b.parse::<usize>().ok()));
+                        if let Ok(hp) = hp.parse::<i32>() {
+                            for (i, h) in c.heroes.iter_mut().enumerate() {
+                                if only.is_none_or(|o| o == i) {
+                                    h.hp = h.hp.min(hp);
+                                }
+                            }
+                        }
+                    }
+                    // TROPA_FOE_STR=40 makes the foes hit that much harder, to watch limbs and heads go
+                    if let (Some(n), Some(c)) = (std::env::var("TROPA_FOE_STR").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
+                        for e in &mut c.enemies {
+                            e.statuses.insert(nav_core::StatusKind::Strength, n);
                         }
                     }
                     // TROPA_HAND=a,b deals the heroes these cards, `all` every card there is

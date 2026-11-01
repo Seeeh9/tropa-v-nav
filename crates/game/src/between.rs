@@ -79,6 +79,46 @@ struct Flight {
     t: f32,
 }
 
+/// The strip along the top of the screen, the same in a fight as between fights.
+pub(crate) fn bar_plate() -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(0),
+            top: px(0),
+            width: px(STAGE_W),
+            height: px(BAR_H),
+            padding: UiRect::horizontal(px(20)),
+            border: UiRect::bottom(px(3)),
+            align_items: AlignItems::Center,
+            column_gap: px(26),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.11, 0.09, 0.08).with_alpha(0.94)),
+        BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+    )
+}
+
+/// A figure on the bar, its mark beside it.
+pub(crate) fn bar_stat() -> impl Bundle {
+    (Node { align_items: AlignItems::Center, column_gap: px(8), ..default() }, Pickable::IGNORE)
+}
+
+fn stat_mark(mark: Color, rim: Color, round: BorderRadius) -> impl Bundle {
+    (Node { width: px(24), height: px(24), border: UiRect::all(px(2)), border_radius: round, ..default() }, BackgroundColor(mark), BorderColor::all(rim), UiTransform { rotation: Rot2::degrees(45.0), ..default() }, Pickable::IGNORE)
+}
+
+/// The mark of health: a drop of blood.
+pub(crate) fn blood_mark() -> impl Bundle {
+    let drop = BorderRadius { top_left: percent(50).into(), top_right: px(2).into(), bottom_right: percent(50).into(), bottom_left: percent(50).into() };
+    stat_mark(theme::FRESH_BLOOD, theme::RUST_BLOOD.darker(0.1), drop)
+}
+
+/// The mark of the purse: a coin.
+pub(crate) fn coin_mark() -> impl Bundle {
+    stat_mark(theme::CANDLE, Color::srgb(0.45, 0.30, 0.10), BorderRadius::MAX)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn top_bar(
     mut commands: Commands,
@@ -109,20 +149,7 @@ fn top_bar(
         .spawn((
             TopBar,
             sig,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                top: px(0),
-                width: px(STAGE_W),
-                height: px(BAR_H),
-                padding: UiRect::horizontal(px(20)),
-                border: UiRect::bottom(px(3)),
-                align_items: AlignItems::Center,
-                column_gap: px(26),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.11, 0.09, 0.08).with_alpha(0.94)),
-            BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+            bar_plate(),
             GlobalZIndex(50),
             Pickable::IGNORE,
             ChildOf(*canvas),
@@ -131,15 +158,12 @@ fn top_bar(
     let hero = l10n.t(&format!("hero-{}", pl.hero));
     commands.spawn((theme::text(hero, &fonts.title, 30.0, theme::hero_color(&pl.hero).lighter(0.1)), ChildOf(bar)));
     // health and purse, each with its mark: a drop of blood, a coin
-    let stat = |commands: &mut Commands, mark: Color, rim: Color, round: BorderRadius, color: Color, value: String| {
-        commands.spawn((Node { align_items: AlignItems::Center, column_gap: px(8), ..default() }, Pickable::IGNORE, ChildOf(bar))).with_children(|s| {
-            s.spawn((Node { width: px(24), height: px(24), border: UiRect::all(px(2)), border_radius: round, ..default() }, BackgroundColor(mark), BorderColor::all(rim), UiTransform { rotation: Rot2::degrees(45.0), ..default() }, Pickable::IGNORE));
-            s.spawn((theme::text(value, &fonts.num, 28.0, color), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK }));
-        });
-    };
-    let drop = BorderRadius { top_left: percent(50).into(), top_right: px(2).into(), bottom_right: percent(50).into(), bottom_left: percent(50).into() };
-    stat(&mut commands, theme::FRESH_BLOOD, theme::RUST_BLOOD.darker(0.1), drop, theme::FRESH_BLOOD.lighter(0.2), format!("{}/{}", pl.hp, pl.max_hp));
-    stat(&mut commands, theme::CANDLE, Color::srgb(0.45, 0.30, 0.10), BorderRadius::MAX, theme::CANDLE, pl.gold.to_string());
+    let health = commands.spawn((bar_stat(), ChildOf(bar))).id();
+    commands.spawn((blood_mark(), ChildOf(health)));
+    commands.spawn((theme::text(format!("{}/{}", pl.hp, pl.max_hp), &fonts.num, 28.0, theme::FRESH_BLOOD.lighter(0.2)), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK }, ChildOf(health)));
+    let purse = commands.spawn((bar_stat(), ChildOf(bar))).id();
+    commands.spawn((coin_mark(), ChildOf(purse)));
+    commands.spawn((theme::text(pl.gold.to_string(), &fonts.num, 28.0, theme::CANDLE), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK }, ChildOf(purse)));
     // the potion belt: a flask is drunk, thrown or poured out from a little menu under it
     let belt = commands.spawn((Node { column_gap: px(10), margin: UiRect::left(px(20)), ..default() }, Pickable::IGNORE, ChildOf(bar))).id();
     for slot in 0..POTION_SLOTS {

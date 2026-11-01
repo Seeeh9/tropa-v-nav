@@ -2637,6 +2637,7 @@ mod tests {
         b.next = None;
         assert!(!b.follow(), "the leaf in the hand is the turn");
         assert_eq!(b.shown.as_ref(), Some(&two));
+        b.leaf = Leaf::new(GUTTER, PAGE_W, PAGE_H, LEAF_FLOOR);
         b.leaf.lay_left();
         b.settle();
         assert_eq!(b.faces[Face::Left as usize], Some((two, Half::Left)));

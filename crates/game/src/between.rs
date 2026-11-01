@@ -36,6 +36,12 @@ pub fn plugin(app: &mut App) {
             }
         });
     }
+    // a player's sheet can be opened in a fight too
+    app.add_systems(OnExit(AppState::Battle), |mut commands: Commands, views: Query<Entity, With<DeckView>>| {
+        for e in &views {
+            commands.entity(e).despawn();
+        }
+    });
     app.add_systems(OnEnter(AppState::Shop), |mut open: ResMut<ShopOpen>| open.0 = false)
         .add_systems(Update, top_bar.run_if(|state: Res<State<AppState>>| BETWEEN.contains(state.get())))
         .add_systems(Update, (fly_potions, shake_pedlar).run_if(in_state(AppState::Shop)));
@@ -60,7 +66,11 @@ struct BarSig(String);
 struct PotionMenu;
 
 #[derive(Component)]
-struct DeckView;
+pub struct DeckView;
+
+/// Pressed, opens the sheet of the player in this seat (see [`open_player`]).
+#[derive(Component)]
+pub struct PlayerSheet(pub u8);
 
 /// A relic or a flask on the bar, by its picture's stem ("relics/x", "potions/y"): where a
 /// newly gained one flies to.
@@ -282,6 +292,7 @@ fn top_bar(
     let deck = pl.deck.len();
     commands.spawn((
         Button,
+        PlayerSheet(me),
         Hovered::default(),
         Btn(theme::PEAT),
         Node { padding: UiRect::axes(px(18), px(8)), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(8)), align_items: AlignItems::Center, column_gap: px(10), ..default() },
@@ -291,15 +302,28 @@ fn top_bar(
             (Node { width: px(26), height: px(36), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(4)), ..default() }, BackgroundColor(theme::RUST_BLOOD), BorderColor::all(theme::CANDLE), Pickable::IGNORE),
             theme::text(l10n.tf("bar-deck", &[("n", (deck as i32).into())]), &fonts.title, 24.0, theme::BONE),
         ],
-        observe(open_deck),
+        observe(open_player),
         ChildOf(bar),
     ));
 }
 
-/// The player's deck laid out over the screen, until it is closed.
+/// A hero's standing figure with its head left off: its cut-out parts, stacked. Falls back on
+/// nothing if they were never cut.
 #[allow(clippy::too_many_arguments)]
-fn open_deck(
-    _: On<Activate>,
+pub fn figure_with_no_head(commands: &mut Commands, root: Entity, stem: &str, place: Node, color: Color, flip: bool, art: &Art, assets: &AssetServer) {
+    for part in ["_body", "_shield", "_arm"] {
+        if let Some(h) = art.image(assets, &format!("{stem}{part}")) {
+            commands.spawn((place.clone(), ImageNode { color, flip_x: flip, ..ImageNode::new(h) }, Pickable::IGNORE, ChildOf(root)));
+        }
+    }
+}
+
+/// A player's sheet laid out over the screen until it is closed: what they carry and their deck,
+/// whose cards turn over under the right button as anywhere.
+#[allow(clippy::too_many_arguments)]
+pub fn open_player(
+    ev: On<Activate>,
+    rows: Query<&PlayerSheet>,
     mut commands: Commands,
     open: Query<Entity, With<DeckView>>,
     net: Option<Res<Net>>,
@@ -318,8 +342,9 @@ fn open_deck(
         return;
     }
     let Some(net) = net else { return };
-    let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
-    let Some(pl) = run.players.get(me as usize) else { return };
+    let Some(run) = net.node.state.as_ref() else { return };
+    let Ok(seat) = rows.get(ev.event_target()) else { return };
+    let Some(pl) = run.players.get(seat.0 as usize) else { return };
     let view = commands
         .spawn((
             DeckView,
@@ -338,12 +363,26 @@ fn open_deck(
                 ..default()
             },
             BackgroundColor(Color::BLACK.with_alpha(0.86)),
-            GlobalZIndex(45),
+            // over the hand and whatever flies in a fight, under the card hints
+            GlobalZIndex(65),
             ChildOf(*canvas),
         ))
         .id();
     commands.entity(view).observe(|ev: On<Activate>, mut commands: Commands| commands.entity(ev.event_target()).despawn());
-    commands.spawn((theme::text(l10n.tf("bar-deck", &[("n", (pl.deck.len() as i32).into())]), &fonts.title, 40.0, theme::CANDLE), ChildOf(view)));
+    commands.spawn((theme::text(l10n.t(&format!("hero-{}", pl.hero)), &fonts.title, 40.0, theme::hero_color(&pl.hero).lighter(0.1)), ChildOf(view)));
+    commands.spawn((theme::text(crate::run_ui::party_line(pl, &l10n), &fonts.body, 22.0, theme::BONE), ChildOf(view)));
+    // what they carry, each telling what it does on hover
+    let carried = commands.spawn((Node { width: px(1500), flex_wrap: FlexWrap::Wrap, justify_content: JustifyContent::Center, column_gap: px(6), row_gap: px(6), ..default() }, Pickable::IGNORE, ChildOf(view))).id();
+    for (kind, id) in pl.relics.iter().map(|id| ("relic", id)).chain(pl.potions.iter().map(|id| ("potion", id))) {
+        commands.spawn((
+            Button,
+            Hovered::default(),
+            CardHints::new(vec![(l10n.t(&format!("{kind}-{id}")), l10n.t(&format!("{kind}-{id}-desc")))]),
+            Node { width: px(52), height: px(52), ..default() },
+            art.node(&assets, &format!("{kind}s/{id}"), theme::CANDLE),
+            ChildOf(carried),
+        ));
+    }
     commands.spawn((theme::text(l10n.t("bar-deck-close"), &fonts.body, 20.0, theme::DIM), ChildOf(view)));
     let mut cards: Vec<(usize, &(Id, bool))> = pl.deck.iter().enumerate().collect();
     cards.sort_by(|a, b| a.1.cmp(b.1));
@@ -431,6 +470,23 @@ pub fn pedlar_clearing(commands: &mut Commands, root: Entity, run: &Run, fonts: 
     for i in order {
         let pl = &run.players[i];
         let foot = crate::battle::hero_foot(i as u8) + Vec2::new(0.0, CLEARING_DROP);
+        // who has lost their head is carried along and laid down here too
+        if pl.beheaded {
+            if let Some(h) = art.image(assets, &format!("heroes/{}_dead_headless", pl.hero)) {
+                commands.spawn((
+                    Node { position_type: PositionType::Absolute, left: px(foot.x - size.y * 0.75), top: px(foot.y - size.y), width: px(size.y * 1.5), height: px(size.y), ..default() },
+                    ImageNode::new(h),
+                    Pickable::IGNORE,
+                    ChildOf(root),
+                ));
+            }
+            continue;
+        }
+        if pl.walks_headless {
+            let place = Node { position_type: PositionType::Absolute, left: px(foot.x - size.x / 2.0), top: px(foot.y - size.y), width: px(size.x), height: px(size.y), ..default() };
+            figure_with_no_head(commands, root, &format!("heroes/{}", pl.hero), place, Color::WHITE, false, art, assets);
+            continue;
+        }
         let Some(h) = art.image(assets, &format!("heroes/{}", pl.hero)) else { continue };
         commands.spawn((
             Node { position_type: PositionType::Absolute, left: px(foot.x - size.x / 2.0), top: px(foot.y - size.y), width: px(size.x), height: px(size.y), ..default() },

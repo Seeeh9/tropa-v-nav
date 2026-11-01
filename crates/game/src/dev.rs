@@ -9,6 +9,8 @@
 //!   TROPA_FIGHT=<id>,<id>       open `run` on a fight with exactly these enemies
 //!   TROPA_HERO_HP=<n>[@slot]    the heroes of that fight, or the one in that seat, are down to that HP
 //!   TROPA_FOE_STR=<n>           the foes of that fight hit that much harder
+//!   TROPA_HEADLESS=<seat>       the player in that seat lies without a head
+//!   TROPA_OMEN=<id>             open `run` on that omen
 //!   TROPA_HAND=<id>,<id>|all    the heroes of that fight hold these cards, or every card (a text that cannot fit is logged)
 //!   TROPA_SEED=<n>              fixed seed for that run
 //!   TROPA_POTIONS=<id>,<id>     every player's belt holds these draughts

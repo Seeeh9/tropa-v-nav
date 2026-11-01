@@ -10,7 +10,7 @@ const ME: UnitRef = UnitRef::Hero(0);
 /// A real hero with a chosen deck and their starting relic.
 fn with(c: &Content, hero_id: &str, deck: &[&str]) -> HeroSetup {
     let d = &c.heroes[hero_id];
-    HeroSetup { def: hero_id.into(), hp: d.max_hp, max_hp: d.max_hp, deck: deck.iter().map(|x| (x.to_string(), false)).collect(), relics: vec![d.relic.clone()], falls: 0, potions: vec![], lost_limbs: 0, beheaded: false }
+    HeroSetup { def: hero_id.into(), hp: d.max_hp, max_hp: d.max_hp, deck: deck.iter().map(|x| (x.to_string(), false)).collect(), relics: vec![d.relic.clone()], falls: 0, potions: vec![], lost_limbs: 0, beheaded: false, walks_headless: false }
 }
 
 fn fight(hero_id: &str, deck: &[&str], enemies: &[&str]) -> (Content, Combat) {

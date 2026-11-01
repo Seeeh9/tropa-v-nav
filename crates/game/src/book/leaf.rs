@@ -72,6 +72,65 @@ impl Floor {
     }
 }
 
+/// How high the paper already lying about stands, over the book and the table: a leaf coming down
+/// lies on it and bends over its edges instead of passing through.
+pub struct Heights {
+    half: (f32, f32),
+    h: Vec<f32>,
+}
+
+const HEIGHT_COLS: usize = 128;
+const HEIGHT_ROWS: usize = 96;
+/// A sheet's thickness on the one under it.
+const SHEET: f32 = 0.003;
+/// Paper higher than this over what it lies on is in the air, not lying there.
+const LYING: f32 = 0.06;
+
+impl Heights {
+    pub fn new(floor: &Floor) -> Heights {
+        Heights { half: (floor.half.0 * 1.7, floor.half.1 * 1.7), h: vec![0.0; HEIGHT_COLS * HEIGHT_ROWS] }
+    }
+
+    fn cell(&self, x: f32, z: f32) -> (f32, f32) {
+        ((x + self.half.0) / (2.0 * self.half.0) * (HEIGHT_COLS - 1) as f32, (z + self.half.1) / (2.0 * self.half.1) * (HEIGHT_ROWS - 1) as f32)
+    }
+
+    /// The height at a place, smoothly between cells, so paper bends over an edge.
+    fn at(&self, x: f32, z: f32) -> f32 {
+        let (cx, cz) = self.cell(x, z);
+        if cx < 0.0 || cz < 0.0 || cx >= (HEIGHT_COLS - 1) as f32 || cz >= (HEIGHT_ROWS - 1) as f32 {
+            return 0.0;
+        }
+        let (i, j) = (cx as usize, cz as usize);
+        let (u, v) = (cx.fract(), cz.fract());
+        let h = |a: usize, b: usize| self.h[b * HEIGHT_COLS + a];
+        (h(i, j) * (1.0 - u) + h(i + 1, j) * u) * (1.0 - v) + (h(i, j + 1) * (1.0 - u) + h(i + 1, j + 1) * u) * v
+    }
+
+    /// Lays a leaf's paper down on the map: what it covers stands one sheet higher than it does.
+    /// Paper sunk under a page or in the air counts for nothing.
+    pub fn lay(&mut self, leaf: &Leaf) {
+        let reach = leaf.width / (NX - 1) as f32 * 0.8;
+        let across = reach / (2.0 * self.half.0) * (HEIGHT_COLS - 1) as f32;
+        let down = reach / (2.0 * self.half.1) * (HEIGHT_ROWS - 1) as f32;
+        for q in &leaf.points {
+            let floor = leaf.floor.at(q.x, q.z);
+            if q.y < floor - 1e-3 || q.y > floor + LYING {
+                continue;
+            }
+            let (cx, cz) = self.cell(q.x, q.z);
+            let (i0, i1) = ((cx - across).floor().max(0.0) as usize, ((cx + across).ceil() as usize).min(HEIGHT_COLS - 1));
+            let (j0, j1) = ((cz - down).floor().max(0.0) as usize, ((cz + down).ceil() as usize).min(HEIGHT_ROWS - 1));
+            for j in j0..=j1 {
+                for i in i0..=i1 {
+                    let slot = &mut self.h[j * HEIGHT_COLS + i];
+                    *slot = slot.max(q.y + SHEET);
+                }
+            }
+        }
+    }
+}
+
 /// One side of a torn edge, for drawing its fringe of fibres: see [`Leaf::rims`].
 pub struct Rim {
     pub a: Vec3,
@@ -117,6 +176,8 @@ pub struct Leaf {
     width: f32,
     height: f32,
     floor: Floor,
+    /// The paper this leaf lies on, if any lies under it.
+    pub under: Option<Heights>,
 }
 
 /// A repeatable hash of a number to 0..1, the same on every machine.
@@ -169,6 +230,7 @@ impl Leaf {
             width,
             height,
             floor,
+            under: None,
         };
         for j in 0..NZ {
             for i in 0..NX {
@@ -454,15 +516,17 @@ impl Leaf {
             }
             // the leaf lies on paper or on the table: it cannot sink into either
             let floor = self.floor;
+            let under = self.under.as_ref();
             for q in &mut self.points {
-                q.y = q.y.max(floor.at(q.x, q.z));
+                q.y = q.y.max(floor.at(q.x, q.z)).max(under.map_or(0.0, |h| h.at(q.x, q.z)));
             }
         }
         // paper on paper: a little friction, so a landed leaf does not slide about, but not so
         // much that a bulge cannot spread flat
         for p in 0..self.points.len() {
             let q = self.points[p];
-            if q.y <= self.floor.at(q.x, q.z) + 1e-4 {
+            let lies_at = self.floor.at(q.x, q.z).max(self.under.as_ref().map_or(0.0, |h| h.at(q.x, q.z)));
+            if q.y <= lies_at + 1e-4 {
                 let prev = &mut self.prev[p];
                 prev.x = q.x + (prev.x - q.x) * 0.9;
                 prev.z = q.z + (prev.z - q.z) * 0.9;

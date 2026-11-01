@@ -98,6 +98,9 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             for (x, n) in herbs {
                 out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, &format!("herb-{x}")) });
             }
+            if h.walks_headless {
+                out.push(Chip { icon: "status/hollow".into(), n: None, good: Some(false), name: l10n.t("trait-walks-headless"), help: help(l10n, "trait-walks-headless") });
+            }
             if h.lost_limbs > 0 {
                 let key = if h.lost_limbs >= 2 { "trait-lost-both" } else { "trait-lost-one" };
                 out.push(Chip { icon: "status/lost_limb".into(), n: (h.lost_limbs > 1).then_some(h.lost_limbs as i32), good: Some(false), name: l10n.t(key), help: help(l10n, key) });

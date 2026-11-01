@@ -294,3 +294,6 @@ trait-lost-one = A limb lost
 trait-lost-one-help = For the rest of the run, 1 card fewer each turn.
 trait-lost-both = Both limbs lost
 trait-lost-both-help = For the rest of the run, 1 card and 1 energy fewer each turn.
+battle-walks-headless = walks headless
+trait-walks-headless = Walks headless
+trait-walks-headless-help = Water raised the body but sewed nothing. A tenth of their health, until the Graveyard Seamstress gives the head back.

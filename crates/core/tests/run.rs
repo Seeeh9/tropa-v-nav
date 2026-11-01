@@ -613,7 +613,7 @@ fn a_schism_parts_the_party() {
 #[test]
 fn fifty_omens_of_all_four_kinds() {
     let c = content();
-    assert_eq!(c.events.len(), 50);
+    assert_eq!(c.events.values().filter(|e| !e.for_the_maimed).count(), 50);
     for kind in [EventKind::Personal, EventKind::Vote, EventKind::Sacrifice, EventKind::Schism] {
         assert!(c.events.values().any(|e| e.kind == kind), "{kind:?}");
     }
@@ -1006,4 +1006,82 @@ fn a_headless_player_is_asked_nothing_and_the_road_goes_on() {
     run.apply(&c, 0, &RunAction::Vote(0)).unwrap();
     assert!(!matches!(run.stage, Stage::Map { .. }), "one living vote moves the party");
     assert!(run.combat.as_ref().is_none_or(|f| f.heroes[1].downed));
+}
+
+#[test]
+fn water_at_the_fire_gets_a_body_up_but_sews_nothing() {
+    let c = content();
+    let mut run = party(&c, 2, 5, 0);
+    run.players[1].beheaded = true;
+    run.players[1].hp = 0;
+    run.stage = Stage::Rest { done: vec![false, false] };
+    let before = run.players[1].max_hp;
+    assert_eq!(run.apply(&c, 1, &RunAction::Sleep), Err(RunError::WrongStage), "a corpse does not choose");
+    assert_eq!(run.apply(&c, 0, &RunAction::Raise { who: 0 }), Err(RunError::BadChoice), "only one without a head");
+    run.apply(&c, 0, &RunAction::Raise { who: 1 }).unwrap();
+    assert!(!run.players[1].beheaded);
+    assert!(run.players[1].walks_headless, "it walks with no head");
+    assert_eq!(run.players[1].max_hp, before * WATER_PCT / 100);
+    assert_eq!(run.players[1].hp, run.players[1].max_hp);
+    // and the seamstress works from what they were, not from the tenth left
+    run.stage = Stage::Omen { id: "needle_crone".into(), picks: vec![None; 2] };
+    run.apply(&c, 0, &RunAction::Choose(0)).unwrap();
+    assert!(!run.players[1].walks_headless);
+    assert_eq!(run.players[1].max_hp, before - before * HEAD_SEAM_PCT / 100);
+}
+
+#[test]
+fn a_corpse_stays_at_nothing_and_takes_nothing() {
+    let c = content();
+    let mut run = party(&c, 2, 5, 0);
+    run.players[1].beheaded = true;
+    run.players[1].hp = 0;
+    let deck = run.players[1].deck.len();
+    run.stage = Stage::Rest { done: vec![false, false] };
+    run.apply(&c, 0, &RunAction::Sleep).unwrap();
+    assert_eq!(run.players[1].hp, 0, "the fire warms no corpse");
+    assert_eq!(run.players[1].deck.len(), deck);
+    assert!(matches!(run.stage, Stage::Map { .. }) || !matches!(run.stage, Stage::Rest { .. }), "the headless do not hold the party at the fire");
+}
+
+#[test]
+fn the_seamstress_sews_one_thing_a_visit_and_it_costs_dear() {
+    let c = content();
+    let mut run = party(&c, 3, 5, 0);
+    run.players[2].beheaded = true;
+    run.players[2].hp = 0;
+    run.players[1].lost_limbs = 1;
+    let (head, arm) = (run.players[2].max_hp, run.players[1].max_hp);
+    run.stage = Stage::Omen { id: "needle_crone".into(), picks: vec![None; 3] };
+    assert_eq!(run.apply(&c, 0, &RunAction::Choose(1)), Err(RunError::BadChoice), "no limb of its own to sew");
+    run.apply(&c, 0, &RunAction::Choose(0)).unwrap();
+    assert!(!run.players[2].beheaded);
+    assert!(run.players[2].hp > 0);
+    assert_eq!(run.players[2].max_hp, head - head * HEAD_SEAM_PCT / 100);
+    assert_eq!(run.apply(&c, 1, &RunAction::Choose(1)), Err(RunError::BadChoice), "she has done her one thing");
+    assert_eq!(run.players[1].lost_limbs, 1);
+    assert_eq!(run.players[1].max_hp, arm);
+}
+
+#[test]
+fn the_seamstress_gives_back_a_limb() {
+    let c = content();
+    let mut run = party(&c, 2, 5, 0);
+    run.players[0].lost_limbs = 2;
+    let max = run.players[0].max_hp;
+    run.stage = Stage::Omen { id: "needle_crone".into(), picks: vec![None; 2] };
+    assert_eq!(run.apply(&c, 0, &RunAction::Choose(0)), Err(RunError::BadChoice), "nobody lacks a head");
+    run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
+    assert_eq!(run.players[0].lost_limbs, 1, "one at a time");
+    assert_eq!(run.players[0].max_hp, max - max * LIMB_SEAM_PCT / 100);
+}
+
+#[test]
+fn the_seamstress_never_comes_to_a_whole_party_by_chance() {
+    let c = content();
+    for seed in 0..40 {
+        let mut run = party(&c, 2, seed, 0);
+        run.force_stage(&c, NodeKind::Event);
+        assert!(!matches!(&run.stage, Stage::Omen { id, .. } if id == "needle_crone"));
+    }
 }

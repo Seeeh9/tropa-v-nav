@@ -64,6 +64,8 @@ const PULL: f32 = 2.5;
 const SLACK: f32 = 0.9;
 /// Past this share of its paper lost, a torn leaf is no page any more.
 const WHOLE_PAGE_GONE: f32 = 0.5;
+/// A leaf let go swinging at least this fast (sides a second) goes that way, wherever it is.
+const FLICK: f32 = 0.5;
 /// A leaf lying flatter than this over one side lies there; less, it hangs in the air.
 const LIES_FLAT: f32 = 0.8;
 /// Stage pixels at the foot of the screen that belong to the story's buttons, not the book.
@@ -342,6 +344,14 @@ pub struct Book {
     charged: f32,
     /// Time not yet run by the leaf's paper (see `LEAF_RATE`).
     leaf_clock: f32,
+    /// Page numbers torn out of the book for good: they lie bare from now on, this whole run.
+    gone: Vec<u32>,
+    /// Order in which paper came to lie where it lies, and the place of the leaf in play in it.
+    paper_tick: u32,
+    leaf_layer: u32,
+    /// How fast the leaf in the hand is swinging over the spine, sides a second.
+    swing: f32,
+    last_side: Option<f32>,
     /// Torn leaves set aside for a fresh one, with what their two faces wear: they stay in the
     /// scene as scraps (`keep_scraps`).
     scraps_out: Vec<(Leaf, (Spread, Half), (Spread, Half))>,
@@ -425,6 +435,11 @@ impl Book {
             kept: false,
             charged: 0.0,
             leaf_clock: 0.0,
+            gone: Vec::new(),
+            paper_tick: 0,
+            leaf_layer: 0,
+            swing: 0.0,
+            last_side: None,
             scraps_out: Vec::new(),
             covered: Vec::new(),
             leaf_meshes,
@@ -491,8 +506,25 @@ impl Book {
         true
     }
 
+    /// A leaf caught in the air after the story had read on and let go back where it came from:
+    /// the hand has the last word. It is now a turn the other way, wearing the same faces, and the
+    /// story has to step back with it. Is the story to be told so?
+    fn reverse(&mut self) -> bool {
+        let Some(turn) = self.turn.as_mut() else { return false };
+        std::mem::swap(&mut turn.from, &mut turn.to);
+        turn.back = !turn.back;
+        turn.committed = true;
+        if turn.own {
+            return false;
+        }
+        turn.story_to = turn.to.clone();
+        true
+    }
+
     /// A new run: a new reading of the book, its glued leaves whole again.
     pub fn forget_run(&mut self) {
+        self.gone.clear();
+        self.drawn = Default::default();
         self.opened.clear();
         self.loose.clear();
     }
@@ -692,6 +724,21 @@ impl Book {
             }
             // torn out, or left hanging: it is no page any more, only paper lying about, and the
             // book shows one whole spread beneath it, never the halves of two
+            // torn out: both its sides are gone from the book for good
+            if lost > WHOLE_PAGE_GONE {
+                for face in [Face::LeafFront, Face::LeafBack] {
+                    if let Some((spread, half)) = &self.faces[face as usize] {
+                        let number = match half {
+                            Half::Left => spread.numbers.0,
+                            Half::Right => spread.numbers.1,
+                        };
+                        if number > 0 && !self.gone.contains(&number) {
+                            self.gone.push(number);
+                        }
+                    }
+                }
+                self.drawn = Default::default();
+            }
             if lost > WHOLE_PAGE_GONE || side.abs() < LIES_FLAT || (committed && !over) {
                 out.read_on = !committed && !own && !back && lost > WHOLE_PAGE_GONE && self.next.is_some();
                 let at = if committed || done || out.read_on { &to } else { &from };
@@ -1560,7 +1607,16 @@ fn hold_leaf(
         let back = book.turn.as_ref().is_some_and(|t| t.back);
         // a torn leaf goes where the hand took it: what is left at the spine may hardly stir
         let side = if book.leaf.torn() { (hand.x / PAGE_W).clamp(-1.0, 1.0) } else { book.leaf.side() };
-        let over = if back { side > -0.15 } else { side < 0.15 };
+        // the way the hand was going when it let go decides; with the hand at rest, where it is
+        let swing = std::mem::take(&mut book.swing);
+        book.last_side = None;
+        let over = if !book.leaf.torn() && swing.abs() > FLICK {
+            if back { swing > 0.0 } else { swing < 0.0 }
+        } else if back {
+            side > -0.15
+        } else {
+            side < 0.15
+        };
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
         let told = turn.committed;
@@ -1569,14 +1625,31 @@ fn hold_leaf(
         let carry_on = |turn: &mut Turning, leaf: &mut Leaf| {
             // how far over it already is, as the unseen hand's arc would have it
             let s = side.clamp(-1.0, 1.0).acos() / PI;
-            let t = if back { 1.0 - s } else { s };
+            let t = if turn.back { 1.0 - s } else { s };
             turn.hand = Hand::Unseen { t, point, z: hand.z };
             // the reader let go: what tears now is no hand's doing
             leaf.tearing = false;
         };
-        // caught out of the air after the story had read on: it can only go on over
+        // caught out of the air after the story had read on: let go past the spine it goes on
+        // over; carried back past it, the hand has changed its mind and the story goes back too
         if told {
+            let changed_mind = !over && turn.peel.is_none() && !book.leaf.torn();
+            if !changed_mind {
+                carry_on(turn, &mut book.leaf);
+                return;
+            }
+            let went_back = !back;
+            let tell = book.reverse();
+            let Some(turn) = book.turn.as_mut() else { return };
             carry_on(turn, &mut book.leaf);
+            if tell {
+                if went_back {
+                    turned_back.write(TurnedBack);
+                } else {
+                    turned.write(Turned);
+                }
+            }
+            play(&mut commands, &art, &assets, &mixer, "book_flip");
             return;
         }
         if back {
@@ -1602,6 +1675,13 @@ fn hold_leaf(
         }
         return;
     }
+    // which way the leaf in the hand is swinging, smoothed over a few frames
+    let side_now = book.leaf.side();
+    if let Some(was) = book.last_side {
+        let speed = (side_now - was) / time.delta_secs().max(1e-3);
+        book.swing += (speed - book.swing) * 0.25;
+    }
+    book.last_side = Some(side_now);
     // carry: the point held keeps its distance from the spine, so it rides a dome over the book;
     // a hand that pulls past the dome pulls the paper with it, and paper pulled too far tears
     let (Some(c), Some((point, hand))) = (cursor, book.leaf.grab) else { return };
@@ -1865,6 +1945,7 @@ fn keep_scraps(
         book.scraps_out.clear();
         return;
     }
+    let layer = book.leaf_layer;
     for (leaf, front, back) in std::mem::take(&mut book.scraps_out) {
         *count += 1;
         let age = *count;
@@ -1906,7 +1987,7 @@ fn keep_scraps(
         let fringe = meshes.add(fringe);
         commands.spawn((part, Mesh3d(fringe.clone()), MeshMaterial3d(fibres), place, bevy::light::NotShadowCaster, bevy::light::NotShadowReceiver));
         let [front, back] = shapes;
-        commands.spawn((ScrapPart { age }, ScrapLeaf { age, leaf, meshes: [front, back, fringe], held: false, theirs: false, active: 0.0 }));
+        commands.spawn((ScrapPart { age }, ScrapLeaf { age, leaf, meshes: [front, back, fringe], held: false, theirs: false, active: 0.0, layer, was_held: false }));
     }
 }
 
@@ -1977,6 +2058,9 @@ fn carry_remote(time: Res<Time>, mut book: ResMut<Book>, mut scraps: Query<&mut 
 /// A scrap's paper: still, until a hand takes it up, then run until it lies still again.
 #[derive(Component)]
 struct ScrapLeaf {
+    /// Its place in the order paper came to lie: it lies over those before it.
+    layer: u32,
+    was_held: bool,
     age: u32,
     leaf: Leaf,
     /// Its two faces and the fibres along its tears.
@@ -1990,11 +2074,58 @@ struct ScrapLeaf {
 
 /// Runs the scraps that are in the hand or falling, and lays those under a page that has come
 /// down over them out of sight.
-fn run_scraps(time: Res<Time>, mut book: ResMut<Book>, mut scraps: Query<&mut ScrapLeaf>, mut meshes: ResMut<Assets<Mesh>>) {
+fn run_scraps(time: Res<Time>, mut book: ResMut<Book>, mut scraps: Query<(Entity, &mut ScrapLeaf)>, mut meshes: ResMut<Assets<Mesh>>, mut was_turning: Local<bool>) {
     let covered = std::mem::take(&mut book.covered);
     let dt = time.delta_secs();
     let steps = ((dt * LEAF_RATE).round() as usize).clamp(1, 4);
-    for mut scrap in &mut scraps {
+    // paper taken up comes down on top of all that lies
+    let turning = book.turn.is_some();
+    if turning && !*was_turning {
+        book.paper_tick += 1;
+        book.leaf_layer = book.paper_tick;
+    }
+    *was_turning = turning;
+    for (_, mut scrap) in &mut scraps {
+        if scrap.held && !scrap.was_held {
+            book.paper_tick += 1;
+            scrap.layer = book.paper_tick;
+        }
+        scrap.was_held = scrap.held;
+    }
+    // what moves must not pass through what lies under it, and what lay on it must settle anew
+    let stirring = scraps.iter().filter(|(_, s)| s.held || s.active > 0.0).map(|(_, s)| s.layer).min();
+    if let Some(from) = stirring {
+        for (_, mut scrap) in &mut scraps {
+            if scrap.layer > from && !scrap.held {
+                scrap.active = scrap.active.max(0.2);
+            }
+        }
+    }
+    let under_scraps: Vec<(Entity, crate::book::leaf::Heights)> = scraps
+        .iter()
+        .filter(|(_, s)| s.held || s.active > 0.0)
+        .map(|(e, s)| {
+            let mut map = crate::book::leaf::Heights::new(&LEAF_FLOOR);
+            for (_, other) in scraps.iter().filter(|(o, other)| *o != e && other.layer < s.layer) {
+                map.lay(&other.leaf);
+            }
+            if !turning && book.leaf_layer < s.layer {
+                map.lay(&book.leaf);
+            }
+            (e, map)
+        })
+        .collect();
+    let mut leaf_map = None;
+    for (_, other) in scraps.iter().filter(|(_, other)| other.layer < book.leaf_layer || turning) {
+        leaf_map.get_or_insert_with(|| crate::book::leaf::Heights::new(&LEAF_FLOOR)).lay(&other.leaf);
+    }
+    book.leaf.under = leaf_map;
+    for (e, map) in under_scraps {
+        if let Ok((_, mut scrap)) = scraps.get_mut(e) {
+            scrap.leaf.under = Some(map);
+        }
+    }
+    for (_, mut scrap) in &mut scraps {
         let scrap = &mut *scrap;
         let mut changed = false;
         for half in &covered {
@@ -2041,9 +2172,45 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
             continue;
         }
         let Some((spread, half)) = book.faces[f].clone() else { continue };
-        print_page(&mut commands, entity, &spread, half, &fonts, &art, &assets);
+        let number = match half {
+            Half::Left => spread.numbers.0,
+            Half::Right => spread.numbers.1,
+        };
+        if book.gone.contains(&number) {
+            print_stub(&mut commands, entity, half, &art, &assets);
+        } else {
+            print_page(&mut commands, entity, &spread, half, &fonts, &art, &assets);
+        }
         book.drawn[f] = Some((spread, half));
     }
+}
+
+/// Where a leaf was torn out: bare paper, nothing printed, and the ragged stub left at the spine.
+fn print_stub(commands: &mut Commands, entity: Entity, half: Half, art: &Art, assets: &AssetServer) {
+    commands.entity(entity).despawn_children();
+    let mut page = commands.entity(entity);
+    if let Some(p) = art.image(assets, "book/parchment") {
+        page.insert(ImageNode::new(p).with_mode(NodeImageMode::Stretch).with_color(Color::srgb(0.78, 0.72, 0.62)));
+    }
+    let bare = art.find("book/bare", "png", "cut").map(|f| assets.load::<Image>(f));
+    let (w, h) = (PAGE_PX.x as f32, PAGE_PX.y as f32);
+    let band = 150.0;
+    page.with_children(|p| {
+        // down the side of the spine, patch over patch, so its edge is never straight
+        for k in 0..7 {
+            let y = (k as f32 - 0.5) * h / 6.0;
+            let wide = band * (0.7 + 0.6 * hash(k * 13 + 5));
+            let left = match half {
+                Half::Left => w - wide * 0.7,
+                Half::Right => -wide * 0.3,
+            };
+            let mut node = p.spawn(Node { position_type: PositionType::Absolute, left: px(left), top: px(y), width: px(wide), height: px(h / 4.0), ..default() });
+            match &bare {
+                Some(b) => node.insert(ImageNode::new(b.clone()).with_mode(NodeImageMode::Stretch).with_color(Color::WHITE.with_alpha(0.95))),
+                None => node.insert(BackgroundColor(Color::srgba(0.95, 0.92, 0.85, 0.6))),
+            };
+        }
+    });
 }
 
 fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer) {
@@ -2428,6 +2595,49 @@ mod tests {
         assert_eq!(b.faces[Face::Right as usize], Some((one.clone(), Half::Right)));
         assert_eq!(b.faces[Face::Left as usize], Some((one, Half::Left)));
         assert!(!b.take_up_back(Hand::Reader), "the first page has nothing before it");
+    }
+
+    #[test]
+    fn a_leaf_torn_out_stays_gone_from_the_book() {
+        let (one, two) = (spread(2, None), spread(4, None));
+        let mut b = book_at(one.clone());
+        b.next = Some(two);
+        assert!(b.take_up(Hand::Reader));
+        tear_off(&mut b);
+        b.settle();
+        assert!(b.gone.contains(&one.numbers.1), "its right page is gone");
+        assert!(b.gone.contains(&4), "and the page on its back");
+        b.forget_run();
+        assert!(b.gone.is_empty(), "a new run, a new reading");
+    }
+
+    #[test]
+    fn a_caught_leaf_carried_back_takes_the_story_back_with_it() {
+        let (one, two) = (spread(2, None), spread(4, None));
+        let mut b = book_at(two.clone());
+        b.prev = Some(one.clone());
+        assert!(b.take_up_back(Hand::Reader));
+        // let go over the spine: the story has gone back a page
+        b.turn.as_mut().unwrap().committed = true;
+        b.spread = one.clone();
+        b.prev = None;
+        b.next = Some(two.clone());
+        assert!(!b.follow());
+        assert_eq!(b.shown.as_ref(), Some(&one));
+        // caught in the air and carried back the other way
+        assert!(b.reverse(), "the story must be told");
+        let t = b.turn.as_ref().unwrap();
+        assert!(!t.back);
+        assert_eq!((&t.from, &t.to), (&one, &two));
+        // the story steps forward again, and the leaf is that turn: no page changes under it
+        b.spread = two.clone();
+        b.prev = Some(one);
+        b.next = None;
+        assert!(!b.follow(), "the leaf in the hand is the turn");
+        assert_eq!(b.shown.as_ref(), Some(&two));
+        b.leaf.lay_left();
+        b.settle();
+        assert_eq!(b.faces[Face::Left as usize], Some((two, Half::Left)));
     }
 
     #[test]

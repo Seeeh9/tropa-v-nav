@@ -62,4 +62,12 @@
         options: [(id: "road", fx: [Gold(50)]), (id: "death", fx: [MaxHp(5)]), (id: "nothing")]),
     (id: "last_candle", kind: Sacrifice, act: 3,
         options: [(id: "carry", fx: [Card("toska")], all: [UpgradeRandomCard]), (id: "dark")]),
+    (
+        id: "needle_crone", kind: Personal, for_the_maimed: true,
+        options: [
+            (id: "head", fx: [SewHeadOn]),
+            (id: "arm", fx: [SewLimbOn]),
+            (id: "pass"),
+        ],
+    ),
 ]

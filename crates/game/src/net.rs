@@ -218,6 +218,47 @@ pub fn resume_solo(commands: &mut Commands, name: &str, run: nav_core::Run) {
     commands.insert_resource(Net { node, lobby: None, code: String::new(), locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral: false });
 }
 
+/// The dev shortcut `TROPA_FIGHT` and what goes with it: the run opens on that fight, set up as the
+/// environment says. Every machine in a party must do the same, with the same environment.
+#[cfg(feature = "dev")]
+pub fn dev_fight(db: &nav_core::Content, run: &mut nav_core::Run, enemies: &[String]) {
+    run.force_fight(db, &enemies);
+    // TROPA_FOE_HP=5 leaves every foe that weak, to watch them die
+    if let (Some(hp), Some(c)) = (std::env::var("TROPA_FOE_HP").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
+        for e in &mut c.enemies {
+            e.hp = e.hp.min(hp);
+        }
+    }
+    // TROPA_HERO_HP=2 leaves the heroes that weak, to watch them go down; 2@0 only the first
+    if let (Ok(v), Some(c)) = (std::env::var("TROPA_HERO_HP"), run.combat.as_mut()) {
+        let (hp, only) = v.split_once('@').map_or((v.as_str(), None), |(a, b)| (a, b.parse::<usize>().ok()));
+        if let Ok(hp) = hp.parse::<i32>() {
+            for (i, h) in c.heroes.iter_mut().enumerate() {
+                if only.is_none_or(|o| o == i) {
+                    h.hp = h.hp.min(hp);
+                }
+            }
+        }
+    }
+    // TROPA_FOE_STR=40 makes the foes hit that much harder, to watch limbs and heads go
+    if let (Some(n), Some(c)) = (std::env::var("TROPA_FOE_STR").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
+        for e in &mut c.enemies {
+            e.statuses.insert(nav_core::StatusKind::Strength, n);
+        }
+    }
+    // TROPA_HAND=a,b deals the heroes these cards, `all` every card there is
+    if let (Ok(hand), Some(c)) = (std::env::var("TROPA_HAND"), run.combat.as_mut()) {
+        let ids: Vec<String> = if hand == "all" { db.cards.keys().cloned().collect() } else { hand.split(',').map(|s| s.trim().to_string()).filter(|s| db.cards.contains_key(s)).collect() };
+        for h in &mut c.heroes {
+            h.hand = ids.iter().enumerate().map(|(i, def)| nav_core::Card { uid: 90_000 + i as u32, def: def.clone(), upgraded: false, free: false }).collect();
+        }
+    }
+    // TROPA_ACT=2 puts that fight on another act's backdrop
+    if let Some(act) = std::env::var("TROPA_ACT").ok().and_then(|a| a.parse().ok()) {
+        run.act = act;
+    }
+}
+
 /// Like [`start_offline`], but picks a hero for the host too and sets out at once.
 #[cfg(feature = "dev")]
 pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: usize, seed: u64, hero: Option<String>, bot_me: bool, force: Option<nav_core::NodeKind>) {
@@ -267,6 +308,23 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
+    // dev shortcut: TROPA_HEADLESS=1 has the player in that seat lying without a head
+    if let Some(seat) = std::env::var("TROPA_HEADLESS").ok().and_then(|s| s.parse::<usize>().ok()) {
+        for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+            if let Some(pl) = n.state.as_mut().and_then(|run| run.players.get_mut(seat)) {
+                pl.beheaded = true;
+                pl.hp = 0;
+            }
+        }
+    }
+    // dev shortcut: TROPA_OMEN=well opens on that omen
+    if let Ok(id) = std::env::var("TROPA_OMEN") {
+        for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+            if let Some(run) = n.state.as_mut() {
+                run.stage = Stage::Omen { id: id.clone(), picks: vec![None; run.players.len()] };
+            }
+        }
+    }
     // dev shortcut: TROPA_POTIONS=a,b fills every belt with those draughts
     if let Ok(list) = std::env::var("TROPA_POTIONS") {
         let potions: Vec<String> = list.split(',').map(|s| s.trim().to_string()).filter(|s| db.potions.contains_key(s)).collect();
@@ -284,41 +342,7 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
         if !enemies.is_empty() {
             for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
                 if let Some(run) = n.state.as_mut() {
-                    run.force_fight(db, &enemies);
-                    // TROPA_FOE_HP=5 leaves every foe that weak, to watch them die
-                    if let (Some(hp), Some(c)) = (std::env::var("TROPA_FOE_HP").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
-                        for e in &mut c.enemies {
-                            e.hp = e.hp.min(hp);
-                        }
-                    }
-                    // TROPA_HERO_HP=2 leaves the heroes that weak, to watch them go down; 2@0 only the first
-                    if let (Ok(v), Some(c)) = (std::env::var("TROPA_HERO_HP"), run.combat.as_mut()) {
-                        let (hp, only) = v.split_once('@').map_or((v.as_str(), None), |(a, b)| (a, b.parse::<usize>().ok()));
-                        if let Ok(hp) = hp.parse::<i32>() {
-                            for (i, h) in c.heroes.iter_mut().enumerate() {
-                                if only.is_none_or(|o| o == i) {
-                                    h.hp = h.hp.min(hp);
-                                }
-                            }
-                        }
-                    }
-                    // TROPA_FOE_STR=40 makes the foes hit that much harder, to watch limbs and heads go
-                    if let (Some(n), Some(c)) = (std::env::var("TROPA_FOE_STR").ok().and_then(|v| v.parse::<i32>().ok()), run.combat.as_mut()) {
-                        for e in &mut c.enemies {
-                            e.statuses.insert(nav_core::StatusKind::Strength, n);
-                        }
-                    }
-                    // TROPA_HAND=a,b deals the heroes these cards, `all` every card there is
-                    if let (Ok(hand), Some(c)) = (std::env::var("TROPA_HAND"), run.combat.as_mut()) {
-                        let ids: Vec<String> = if hand == "all" { db.cards.keys().cloned().collect() } else { hand.split(',').map(|s| s.trim().to_string()).filter(|s| db.cards.contains_key(s)).collect() };
-                        for h in &mut c.heroes {
-                            h.hand = ids.iter().enumerate().map(|(i, def)| nav_core::Card { uid: 90_000 + i as u32, def: def.clone(), upgraded: false, free: false }).collect();
-                        }
-                    }
-                    // TROPA_ACT=2 puts that fight on another act's backdrop
-                    if let Some(act) = std::env::var("TROPA_ACT").ok().and_then(|a| a.parse().ok()) {
-                        run.act = act;
-                    }
+                    dev_fight(db, run, &enemies);
                 }
             }
             // no events announced this fight, so the battle screen is handed its state directly

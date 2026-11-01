@@ -53,6 +53,9 @@ fn dev_scene(mut tale: ResMut<Tale>) {
         s => ending_pages(s),
     };
     let skip = std::env::var("TROPA_STORY_PAGE").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(1).saturating_sub(1);
+    if pages.last().is_some_and(|p| secret_of(p).is_some()) {
+        pages.push(end_leaf());
+    }
     tale.total = pages.len();
     tale.pages.extend(pages.drain(skip.min(pages.len().saturating_sub(1))..));
 }
@@ -104,8 +107,17 @@ pub struct Tale {
     shut: bool,
 }
 
+/// The quiet leaf a chapter ends on, when its last page was glued: a glued page turned without
+/// parting it must have somewhere to turn to.
+fn end_leaf() -> Page {
+    page("leaf_end")
+}
+
 impl Tale {
-    fn tell(&mut self, pages: Vec<Page>) {
+    fn tell(&mut self, mut pages: Vec<Page>) {
+        if pages.last().is_some_and(|p| secret_of(p).is_some()) {
+            pages.push(end_leaf());
+        }
         // the book opens where it was left, on the last page read, and the new ones lie beyond it
         if self.pages.is_empty() {
             if let Some(mut last) = self.past.pop() {
@@ -755,8 +767,9 @@ mod tests {
             t.past.push(p);
         }
         t.tell(vec![page("act2")]);
-        assert_eq!(t.pages.front().map(|p| (p.text.as_str(), p.reread)), Some(("story-pro_3", true)));
+        assert_eq!(t.pages.front().map(|p| (p.text.as_str(), p.reread)), Some(("story-leaf_end", true)));
         assert_eq!(t.pages.get(1).map(|p| p.text.as_str()), Some("story-act2"));
-        assert_eq!((t.past.len(), t.total), (2, 4));
+        assert_eq!(t.pages.get(2).map(|p| p.text.as_str()), Some("story-leaf_end"), "a glued page always has a leaf after it");
+        assert_eq!((t.past.len(), t.total), (3, 6));
     }
 }

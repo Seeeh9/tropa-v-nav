@@ -54,6 +54,49 @@ impl Corpse {
     }
 }
 
+/// The body of one who lost their head in an earlier fight, laid where they would stand.
+#[derive(Component)]
+pub(super) struct LaidOut(u8);
+
+/// Who has lost their head comes along as a body: it lies on the ground of every fight after.
+pub(super) fn lay_out_the_headless(
+    mut commands: Commands,
+    session: Res<Session>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    layer: Option<Single<Entity, With<CorpseLayer>>>,
+    units: Query<&UnitWidget>,
+    corpses: Query<&Corpse>,
+    laid: Query<&LaidOut>,
+) {
+    let Some(layer) = layer else { return };
+    for h in session.shown.heroes.iter().filter(|h| h.beheaded) {
+        let unit = UnitRef::Hero(h.slot);
+        // still falling, or fallen in this very fight
+        if units.iter().any(|w| w.unit == unit) || corpses.iter().any(|c| c.unit == unit) || laid.iter().any(|l| l.0 == h.slot) {
+            continue;
+        }
+        let Some((foot, size)) = unit_place(&session.shown, unit) else { continue };
+        let stem = format!("heroes/{}", h.def);
+        let Some(picture) = art.image(&assets, &format!("{stem}_dead_headless")) else { continue };
+        let draw = hero_draw(&stem, size);
+        commands.spawn((
+            LaidOut(h.slot),
+            ImageNode::new(picture),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(foot.x - draw.y * 0.75),
+                top: px(foot.y - draw.y),
+                width: px(draw.y * 1.5),
+                height: px(draw.y),
+                ..default()
+            },
+            Pickable::IGNORE,
+            ChildOf(*layer),
+        ));
+    }
+}
+
 /// The bodies lying dead, over the stains and under the living.
 #[derive(Component)]
 pub(super) struct CorpseLayer;
@@ -201,12 +244,13 @@ fn hide_lost_limbs(session: Res<Session>, sprites: Query<(&UnitSprite, &Children
     for (sprite, children) in &sprites {
         let UnitRef::Hero(i) = sprite.unit else { continue };
         let limbs = session.shown.hero(i).map_or(0, |h| h.lost_limbs);
-        if limbs == 0 {
+        let no_head = session.shown.hero(i).is_some_and(|h| h.walks_headless);
+        if limbs == 0 && !no_head {
             continue;
         }
         let mut iter = skins.iter_many_mut(children);
         while let Some(Ok((skin, mut vis))) = iter.fetch_next() {
-            let gone = matches!((skin.part, limbs), (Some(rig::Part::Arm), _) | (Some(rig::Part::Shield), 2..));
+            let gone = (no_head && skin.part == Some(rig::Part::Head)) || matches!((skin.part, limbs), (Some(rig::Part::Arm), 1..) | (Some(rig::Part::Shield), 2..));
             if gone {
                 vis.set_if_neq(Visibility::Hidden);
             }

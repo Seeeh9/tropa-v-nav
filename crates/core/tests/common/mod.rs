@@ -107,6 +107,7 @@ pub fn hero(def: &str, deck: &[&str]) -> HeroSetup {
         potions: vec![],
         lost_limbs: 0,
         beheaded: false,
+        walks_headless: false,
     }
 }
 

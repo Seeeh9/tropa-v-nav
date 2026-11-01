@@ -55,6 +55,9 @@ pub struct Hero {
     /// The head struck off: gone for good, and the player only watches from here on.
     #[serde(default)]
     pub beheaded: bool,
+    /// Raised by water alone: up and fighting, with no head.
+    #[serde(default)]
+    pub walks_headless: bool,
     /// Curses earned this combat, to be added to the run deck afterwards.
     pub new_curses: u32,
     /// Bogatyr slot soaking this hero's overflow damage until the round closes.
@@ -166,6 +169,9 @@ pub struct HeroSetup {
     pub lost_limbs: u8,
     #[serde(default)]
     pub beheaded: bool,
+    /// Raised by water alone: up and fighting, with no head.
+    #[serde(default)]
+    pub walks_headless: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

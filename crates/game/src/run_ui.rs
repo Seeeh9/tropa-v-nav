@@ -158,12 +158,32 @@ fn party_panel(commands: &mut Commands, root: Entity, run: &Run, me: u8, fonts: 
         ))
         .with_children(|p| {
             for (i, pl) in run.players.iter().enumerate() {
-                let name = l10n.t(&format!("hero-{}", pl.hero));
-                let line = l10n.tf("run-party-line", &[("name", name.into()), ("hp", pl.hp.into()), ("max", pl.max_hp.into()), ("gold", pl.gold.into()), ("cards", (pl.deck.len() as i32).into())]);
                 let color = if i as u8 == me { theme::BONE } else { theme::DIM };
-                p.spawn(theme::text(line, &fonts.body, 20.0, color));
+                p.spawn((
+                    Button,
+                    Hovered::default(),
+                    Btn(theme::PEAT),
+                    crate::between::PlayerSheet(i as u8),
+                    Node { padding: UiRect::axes(px(8), px(3)), ..default() },
+                    BackgroundColor(theme::PEAT),
+                    observe(crate::between::open_player),
+                    children![(theme::text(party_line(pl, l10n), &fonts.body, 20.0, color), Pickable::IGNORE)],
+                ));
             }
         });
+}
+
+/// A player in one line: who, how they are, what they have.
+pub fn party_line(pl: &nav_core::Player, l10n: &L10n) -> String {
+    let name = l10n.t(&format!("hero-{}", pl.hero));
+    let line = l10n.tf("run-party-line", &[("name", name.into()), ("hp", pl.hp.into()), ("max", pl.max_hp.into()), ("gold", pl.gold.into()), ("cards", (pl.deck.len() as i32).into())]);
+    if pl.beheaded {
+        format!("{line}  ·  {}", l10n.t("battle-beheaded"))
+    } else if pl.walks_headless {
+        format!("{line}  ·  {}", l10n.t("battle-walks-headless"))
+    } else {
+        line
+    }
 }
 
 // ---- map ----
@@ -602,10 +622,18 @@ fn draw_rest(
         commands.spawn((crate::menu::backdrop(&art, &assets, "bg/lobby", 0.75), ChildOf(root)));
         // the party round it, the far side facing back across the flames
         for (i, pl) in run.players.iter().enumerate() {
-            let Some(h) = art.image(&assets, &format!("heroes/{}", pl.hero)) else { continue };
+            // who has lost their head lies by the fire
+            let stem = if pl.beheaded { format!("heroes/{}_dead_headless", pl.hero) } else { format!("heroes/{}", pl.hero) };
+            let Some(h) = art.image(&assets, &stem) else { continue };
             let (x, flip) = [(420.0, false), (1340.0, true), (240.0, false), (1530.0, true)][i.min(3)];
             let height = 400.0;
-            let width = height * art.aspect(&format!("heroes/{}", pl.hero)).unwrap_or(0.75);
+            let width = height * art.aspect(&stem).unwrap_or(0.75);
+            // and who walks without one stands there without it
+            if pl.walks_headless {
+                let place = Node { position_type: PositionType::Absolute, left: px(x - width / 2.0), top: px(880.0 - height), width: px(width), height: px(height), ..default() };
+                crate::between::figure_with_no_head(&mut commands, root, &stem, place, Color::srgb(1.0, 0.86, 0.72), flip, &art, &assets);
+                continue;
+            }
             commands.spawn((
                 ImageNode { color: Color::srgb(1.0, 0.86, 0.72), flip_x: flip, ..ImageNode::new(h) },
                 Node { position_type: PositionType::Absolute, left: px(x - width / 2.0), top: px(880.0 - height), width: px(width), height: px(height), ..default() },
@@ -641,6 +669,15 @@ fn draw_rest(
         return;
     }
     if !pick.0 {
+        // the rest can go to one who lies without a head
+        for (i, other) in run.players.iter().enumerate().filter(|(i, o)| o.beheaded && *i != me as usize) {
+            let who = i as u8;
+            commands.spawn((
+                menu_button(l10n.tf("rest-raise", &[("name", l10n.t(&format!("hero-{}", other.hero)).into()), ("n", nav_core::WATER_PCT.into())]), &fonts),
+                observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Raise { who })),
+                ChildOf(column),
+            ));
+        }
         let heal = (pl.max_hp * run.rules().rest_percent() / 100).min(pl.max_hp - pl.hp);
         commands.spawn((
             menu_button(l10n.n("rest-sleep", heal), &fonts),
@@ -923,6 +960,8 @@ fn describe_fx(l10n: &L10n, db: &Content, o: &EventOption) -> Vec<(String, Tone)
         }
         let good = |b: bool| if b { Tone::Good } else { Tone::Bad };
         parts.push(match fx {
+            RunFx::SewHeadOn => (l10n.n("fx-run-sew-head", nav_core::HEAD_SEAM_PCT), Tone::Bad),
+            RunFx::SewLimbOn => (l10n.n("fx-run-sew-arm", nav_core::LIMB_SEAM_PCT), Tone::Bad),
             RunFx::Gold(n) if *n >= 0 => (l10n.n("fx-run-gold", *n), Tone::Good),
             RunFx::Gold(n) => (l10n.n("fx-run-lose-gold", -*n), Tone::Bad),
             RunFx::Hp(n) if *n >= 0 => (l10n.n("fx-run-heal", *n), Tone::Good),
@@ -1049,7 +1088,7 @@ fn draw_omen(
         return;
     }
     for (i, o) in def.options.iter().enumerate() {
-        let can = pl.gold >= o.price && closed != Some(i as u8);
+        let can = pl.gold >= o.price && closed != Some(i as u8) && nav_core::seam_open(&run.players, def, o, me as usize, picks);
         let chosen = mine == Some(i as u8);
         let base = if chosen { theme::SWAMP } else if can { theme::PEAT } else { theme::SOOT };
         let ink = |c: Color| if can { c } else { c.with_alpha(0.45) };

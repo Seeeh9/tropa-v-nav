@@ -29,6 +29,7 @@ impl HeroSetup {
             potions: vec![],
             lost_limbs: 0,
             beheaded: false,
+            walks_headless: false,
         })
     }
 }

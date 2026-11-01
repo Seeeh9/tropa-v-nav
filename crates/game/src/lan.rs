@@ -8,6 +8,8 @@
 //!   TROPA_SEED=<n>                 (host) a fixed seed for the run
 //!   TROPA_LAN_HERO=<id>            take this hero and get ready at once; the host starts the run
 //!                                  as soon as everyone is
+//!   TROPA_FIGHT=<id>,<id>          the run opens on this fight (give every copy the same, with the
+//!                                  same TROPA_HERO_HP and the like)
 //!
 //! A frame is its length (u32), the sender (u64), the addressee (u64, 0 for everyone) and the
 //! message as `Msg::encode` writes it, all big-endian.
@@ -27,7 +29,7 @@ const EVERYONE: Peer = 0;
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), open)
         .add_systems(PreUpdate, receive.run_if(resource_exists::<Lan>))
-        .add_systems(Update, auto_lobby.run_if(resource_exists::<Lan>))
+        .add_systems(Update, (auto_lobby, open_on_fight).chain().run_if(resource_exists::<Lan>))
         .add_systems(PostUpdate, transmit.run_if(resource_exists::<Lan>).before(crate::net::send));
 }
 
@@ -190,6 +192,24 @@ fn transmit(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>) {
                 let _ = write_all(&mut link.stream, &f);
             }
         }
+    }
+}
+
+/// `TROPA_FIGHT`: as soon as the run exists here, it opens on that fight. Each copy does it for
+/// itself, and from the same seed they all come to the same.
+fn open_on_fight(mut commands: Commands, net: Option<ResMut<Net>>, db: Res<Db>, mut done: Local<bool>) {
+    let (Some(mut net), false) = (net, *done) else { return };
+    let Ok(list) = std::env::var("TROPA_FIGHT") else { return };
+    let me = net.node.my_slot();
+    let Some(run) = net.node.state.as_mut() else { return };
+    *done = true;
+    let enemies: Vec<String> = list.split(',').map(|s| s.trim().to_string()).filter(|s| db.0.enemies.contains_key(s)).collect();
+    if enemies.is_empty() {
+        return;
+    }
+    crate::net::dev_fight(&db.0, run, &enemies);
+    if let (Some(combat), Some(me)) = (run.combat.clone(), me) {
+        commands.insert_resource(crate::session::Session::from_state(combat, me, []));
     }
 }
 

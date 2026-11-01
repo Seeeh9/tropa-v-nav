@@ -64,7 +64,7 @@ pub fn plugin(app: &mut App) {
             Update,
             (
                 playback,
-                (sync_units, sync_hand, sync_potions, cue_effects).chain(),
+                (sync_units, gore::lay_out_the_headless, sync_hand, sync_potions, cue_effects).chain(),
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_intent_icons, update_bars, update_tooltip),
                 (floaters, fly_ghosts, dying, style_buttons, impact::shake_screen, turn_timer, send_pings, show_pings),
             )
@@ -339,6 +339,16 @@ fn unit_place(shown: &Combat, unit: UnitRef) -> Option<(Vec2, Vec2)> {
     }
 }
 
+/// How large a unit's picture is drawn, for one whose picture is broader than its slot.
+pub(super) fn hero_draw(stem: &str, size: Vec2) -> Vec2 {
+    // the stove is broad: drawn as large as an elite, it would stand on its neighbours
+    if stem == "heroes/emelya" {
+        Vec2::splat(size.y * 1.08)
+    } else {
+        size
+    }
+}
+
 fn widget_origin(foot: Vec2, size: Vec2) -> Vec2 {
     Vec2::new(foot.x - UNIT_W / 2.0, foot.y - size.y - HEAD_ROOM)
 }
@@ -467,9 +477,15 @@ fn enter(
             ))
             .with_children(|team| {
                 for h in &session.truth.heroes {
+                    // pressed, opens what that player carries
                     team.spawn((
-                        Node { column_gap: px(10), align_items: AlignItems::Center, ..default() },
-                        Pickable::IGNORE,
+                        Button,
+                        Hovered::default(),
+                        Btn(theme::PEAT),
+                        crate::between::PlayerSheet(h.slot),
+                        BackgroundColor(theme::PEAT),
+                        observe(crate::between::open_player),
+                        Node { column_gap: px(10), align_items: AlignItems::Center, padding: UiRect::axes(px(6), px(3)), ..default() },
                         children![
                             (
                                 Node { width: px(34), height: px(34), border: UiRect::all(px(2)), ..default() },
@@ -477,7 +493,7 @@ fn enter(
                                 BorderColor::all(theme::hero_color(&h.def)),
                                 Pickable::IGNORE,
                             ),
-                            (Label::Team(h.slot), theme::text("", &fonts.body, 20.0, theme::BONE)),
+                            (Label::Team(h.slot), theme::text("", &fonts.body, 20.0, theme::BONE), Pickable::IGNORE),
                         ],
                     ));
                 }
@@ -833,9 +849,11 @@ fn sync_units(
                         (Label::Hp(unit), theme::text("", &fonts.num, 17.0, theme::BONE)),
                         (
                             BlockBadge(unit),
+                            // half over its own bar and over a neighbour's: bars stand side by side
+                            GlobalZIndex(21),
                             Node {
                                 position_type: PositionType::Absolute,
-                                left: px(-44),
+                                left: px(-22),
                                 top: px(-8),
                                 width: px(40),
                                 height: px(34),
@@ -929,7 +947,7 @@ fn swap_form_art(
             UnitRef::Hero(i) => {
                 let Some(h) = session.shown.hero(i) else { continue };
                 // a lost limb is on no finished picture: he stands in his cut-out parts
-                whole = h.lost_limbs == 0;
+                whole = h.lost_limbs == 0 && !h.walks_headless;
                 (if h.form == Form::Beast { format!("heroes/{}_beast", h.def) } else { format!("heroes/{}", h.def) }, h.downed && !h.beheaded)
             }
             UnitRef::Enemy(uid) => {
@@ -1390,6 +1408,11 @@ fn update_labels(session: Res<Session>, net: Option<Res<crate::net::Net>>, db: R
                     s.push_str(&format!("  ·  {}", l10n.t("battle-beheaded")));
                 } else if h.downed {
                     s.push_str(&format!("  ·  {}", l10n.t("battle-downed")));
+                } else if h.walks_headless {
+                    s.push_str(&format!("  ·  {}  ·  {} {}", l10n.t("battle-walks-headless"), l10n.t("battle-energy"), real.energy));
+                    if real.ready {
+                        s.push_str(&format!("  ·  {}", l10n.t("battle-ready")));
+                    }
                 } else {
                     s.push_str(&format!("  ·  {} {}", l10n.t("battle-energy"), real.energy));
                     if real.ready {

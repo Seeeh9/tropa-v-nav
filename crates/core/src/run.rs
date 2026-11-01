@@ -10,6 +10,30 @@ use serde::{Deserialize, Serialize};
 pub const FLOORS: usize = 15;
 pub const MAP_WIDTH: u8 = 7;
 pub const POTION_SLOTS: usize = 3;
+/// Whether the player in seat `p` can have this option of an omen as far as sewing goes: there must
+/// be something to sew, and she sews one thing a visit. Any other option is open.
+pub fn seam_open(players: &[Player], def: &EventDef, option: &EventOption, p: usize, picks: &[Option<u8>]) -> bool {
+    let sews = |o: &EventOption| o.fx.iter().any(|f| matches!(f, RunFx::SewHeadOn | RunFx::SewLimbOn));
+    if !sews(option) {
+        return true;
+    }
+    let taken = picks.iter().enumerate().any(|(q, v)| q != p && v.is_some_and(|i| def.options.get(i as usize).is_some_and(sews)));
+    let me = &players[p];
+    let target = (option.fx.contains(&RunFx::SewHeadOn) && players.iter().any(|pl| pl.beheaded || pl.walks_headless)) || (option.fx.contains(&RunFx::SewLimbOn) && me.lost_limbs > 0);
+    !me.beheaded && !taken && target
+}
+
+/// Percent of max HP that one whose head is sewn back on stands up with.
+pub const RAISED_PCT: i32 = 25;
+/// Water raises a body but sews nothing: it walks headless on this percent of its health.
+pub const WATER_PCT: i32 = 10;
+/// Percent of max HP a head put back costs for good, and a limb sewn back on.
+pub const HEAD_SEAM_PCT: i32 = 35;
+pub const LIMB_SEAM_PCT: i32 = 20;
+/// However often they are sewn, nobody is left with less to lose than this.
+const LEAST_MAX_HP: i32 = 10;
+/// Percent chance an omen on the road is the seamstress, while someone is missing a part.
+pub const SEAMSTRESS_CHANCE: i32 = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum NodeKind {
@@ -53,6 +77,12 @@ pub struct Player {
     /// Head struck off: this seat only watches from here on.
     #[serde(default)]
     pub beheaded: bool,
+    /// Raised by water alone: up and fighting, with no head and a tenth of their health.
+    #[serde(default)]
+    pub walks_headless: bool,
+    /// What their max HP was before the water, for the seamstress to work from; 0 if it was not.
+    #[serde(default)]
+    pub whole_max_hp: i32,
     /// Cards removed at the shop so far; each next removal costs more.
     pub removals: u32,
 }
@@ -217,6 +247,8 @@ pub enum RunAction {
     Sleep,
     /// At the fire: upgrade the card at this deck index.
     Upgrade(u16),
+    /// At the fire: spend the rest on dead water and living water, for an ally without a head.
+    Raise { who: u8 },
     /// Hand some of your gold to an ally (shop and fire only).
     GiveGold { to: u8, amount: i32 },
     BuyCard(u8),
@@ -295,6 +327,10 @@ pub enum RunError {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RunEvent {
+    /// `who` stands again, their head back on, by `player`'s doing.
+    Raised { player: u8, who: u8 },
+    /// `player` has one limb more, sewn on.
+    LimbSewn { player: u8 },
     Combat(Event),
     Voted { player: u8, choice: u8 },
     /// A tied vote was settled by lot among `tied`.
@@ -466,7 +502,7 @@ impl Run {
             if circle_rules.starts_with_toska() && c.cards.contains_key("toska") {
                 deck.push(("toska".into(), false));
             }
-            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, lost_limbs: 0, beheaded: false, removals: 0 });
+            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, lost_limbs: 0, beheaded: false, walks_headless: false, whole_max_hp: 0, removals: 0 });
         }
         let map = generate_map(&mut rng, circle_rules);
         let n = players.len();
@@ -540,6 +576,10 @@ impl Run {
 
     /// Applies one player's action. On `Err` the run is untouched.
     pub fn apply(&mut self, c: &Content, player: u8, action: &RunAction) -> Result<Vec<RunEvent>, RunError> {
+        // the headless only watch: the pass below says for them what must be said
+        if self.players.get(player as usize).is_some_and(|p| p.beheaded) && !matches!(action, RunAction::Combat(_) | RunAction::TearPage { .. }) {
+            return Err(RunError::WrongStage);
+        }
         let mut ev = self.apply_one(c, player, action)?;
         self.the_headless_pass(c, &mut ev);
         Ok(ev)
@@ -548,6 +588,10 @@ impl Run {
     /// Whoever has lost their head chooses nothing any more: what they would have had to say is
     /// said for them, and a road goes the way the first of the living points.
     fn the_headless_pass(&mut self, c: &Content, ev: &mut Vec<RunEvent>) {
+        // whatever else went round, nothing has healed a corpse
+        for pl in self.players.iter_mut().filter(|pl| pl.beheaded) {
+            pl.hp = 0;
+        }
         for _ in 0..32 {
             let mut acted = false;
             for q in 0..self.players.len() {
@@ -560,6 +604,13 @@ impl Run {
                         living.and_then(|o| votes[o]).map(RunAction::Vote)
                     }
                     Stage::Map { .. } | Stage::Combat => None,
+                    // a corpse takes no card and buys nothing
+                    Stage::Reward { rewards } if rewards.get(q).is_some_and(|r| !r.done) => Some(RunAction::TakeCard(None)),
+                    Stage::Reward { .. } => None,
+                    Stage::Rest { done } if done.get(q) == Some(&false) => Some(RunAction::Sleep),
+                    Stage::Rest { .. } => None,
+                    Stage::Shop { done, .. } if done.get(q) == Some(&false) => Some(RunAction::LeaveShop),
+                    Stage::Shop { .. } => None,
                     _ => run_bot(c, self, q as u8),
                 };
                 if let Some(action) = action {
@@ -572,6 +623,10 @@ impl Run {
             if !acted {
                 break;
             }
+        }
+        // nor has what was said for them
+        for pl in self.players.iter_mut().filter(|pl| pl.beheaded) {
+            pl.hp = 0;
         }
     }
 
@@ -671,6 +726,21 @@ impl Run {
                 }
                 done[p] = true;
                 if done.iter().all(|d| *d) {
+                    self.to_map(c, &mut ev);
+                }
+            }
+            (RunAction::Raise { who }, Stage::Rest { done }) => {
+                let w = *who as usize;
+                if done[p] {
+                    return Err(RunError::AlreadyDone);
+                }
+                if !self.players.get(w).is_some_and(|pl| pl.beheaded) {
+                    return Err(RunError::BadChoice);
+                }
+                done[p] = true;
+                let all = done.iter().all(|d| *d);
+                self.pour_water(w, player, &mut ev);
+                if all {
                     self.to_map(c, &mut ev);
                 }
             }
@@ -831,6 +901,9 @@ impl Run {
                 }
                 if self.players[p].gold < option.price {
                     return Err(RunError::NotEnoughGold);
+                }
+                if !seam_open(&self.players, &def, option, p, picks) {
+                    return Err(RunError::BadChoice);
                 }
                 picks[p] = Some(*choice);
                 let all = picks.iter().all(|v| v.is_some());
@@ -998,7 +1071,7 @@ impl Run {
                 self.stage = Stage::Shop { stock, done: vec![false; self.players.len()] };
             }
             NodeKind::Event => {
-                let pool: Vec<&EventDef> = c.events.values().collect();
+                let pool: Vec<&EventDef> = c.events.values().filter(|e| !e.for_the_maimed).collect();
                 if let Some(e) = self.rng.pick(&pool) {
                     self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] };
                 }
@@ -1138,11 +1211,15 @@ impl Run {
                 self.floors_cleared += 1;
                 let act = self.act;
                 let open = 20 + 15 * self.unlocks.omen_tier as usize;
-                let fits: Vec<&EventDef> = c.events.values().take(open).filter(|e| e.act == 0 || e.act == act).collect();
+                let fits: Vec<&EventDef> = c.events.values().filter(|e| !e.for_the_maimed).take(open).filter(|e| e.act == 0 || e.act == act).collect();
                 let fresh: Vec<&EventDef> = fits.iter().copied().filter(|e| !self.omens_seen.contains(&e.id)).collect();
                 // a long road may run out of new omens; only then does an old one return
                 let pool = if fresh.is_empty() { fits } else { fresh };
-                match self.rng.pick(&pool) {
+                // while someone is missing a part, she who sews them may be waiting on the road
+                let someone_to_ask = self.players.iter().any(|pl| !pl.beheaded);
+                let missing = self.players.iter().any(|pl| pl.beheaded || pl.walks_headless || pl.lost_limbs > 0);
+                let waiting = if someone_to_ask && missing && self.rng.chance(SEAMSTRESS_CHANCE) { c.events.values().find(|e| e.for_the_maimed) } else { None };
+                match waiting.or_else(|| self.rng.pick(&pool).copied()) {
                     Some(e) => {
                         self.omens_seen.push(e.id.clone());
                         self.stage = Stage::Omen { id: e.id.clone(), picks: vec![None; self.players.len()] };
@@ -1183,7 +1260,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, potions: p.potions.clone() })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
             .collect();
         let rules = Circle(self.circle);
         let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind), shadow: rules.koschei_shadow() };
@@ -1212,7 +1289,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, potions: p.potions.clone() })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
             .collect();
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
         let (combat, _) = combat::start_with(c, &party, enemies, seed, CombatOpts::default());
@@ -1226,7 +1303,7 @@ impl Run {
         let Some(combat) = self.combat.clone() else { return };
         let kind = self.fighting.unwrap_or(NodeKind::Fight);
         for (pl, h) in self.players.iter_mut().zip(&combat.heroes) {
-            pl.hp = h.hp.max(1);
+            pl.hp = if h.beheaded { 0 } else { h.hp.max(1) };
             pl.max_hp = h.max_hp;
             pl.falls = h.falls;
             pl.lost_limbs = h.lost_limbs;
@@ -1333,8 +1410,39 @@ impl Run {
         self.apply_option(c, p, option, ev);
     }
 
+    /// Dead water and living water get a body up, but water sews nothing: it walks with no head,
+    /// on a tenth of its health, until the seamstress sees to it.
+    fn pour_water(&mut self, who: usize, by: u8, ev: &mut Vec<RunEvent>) {
+        let pl = &mut self.players[who];
+        pl.beheaded = false;
+        pl.walks_headless = true;
+        if pl.whole_max_hp == 0 {
+            pl.whole_max_hp = pl.max_hp;
+        }
+        pl.max_hp = (pl.whole_max_hp * WATER_PCT / 100).max(1);
+        pl.hp = pl.max_hp;
+        ev.push(RunEvent::Raised { player: by, who: who as u8 });
+    }
+
+    /// A head sewn back on, whether its owner lay dead or walked without it: far weaker for good,
+    /// with a quarter of what is left. What they lost of their limbs stays lost.
+    fn sew_head(&mut self, who: usize, by: u8, ev: &mut Vec<RunEvent>) {
+        let pl = &mut self.players[who];
+        let whole = if pl.whole_max_hp > 0 { pl.whole_max_hp } else { pl.max_hp };
+        pl.beheaded = false;
+        pl.walks_headless = false;
+        pl.whole_max_hp = 0;
+        pl.max_hp = (whole - whole * HEAD_SEAM_PCT / 100).max(LEAST_MAX_HP);
+        pl.hp = (pl.max_hp * RAISED_PCT / 100).max(1);
+        ev.push(RunEvent::Raised { player: by, who: who as u8 });
+    }
+
     fn apply_option(&mut self, c: &Content, p: usize, option: &EventOption, ev: &mut Vec<RunEvent>) {
         let player = p as u8;
+        // an omen does nothing to a corpse
+        if self.players[p].beheaded {
+            return;
+        }
         if option.price > 0 {
             self.players[p].gold = (self.players[p].gold - option.price).max(0);
             ev.push(RunEvent::Gold { player, delta: -option.price });
@@ -1359,6 +1467,20 @@ impl Run {
                     let pl = &mut self.players[p];
                     pl.max_hp = (pl.max_hp + n).max(1);
                     pl.hp = (pl.hp + (*n).max(0)).min(pl.max_hp).max(1);
+                }
+                RunFx::SewHeadOn => {
+                    if let Some(who) = self.players.iter().position(|pl| pl.beheaded || pl.walks_headless) {
+                        self.sew_head(who, player, ev);
+                    }
+                }
+                RunFx::SewLimbOn => {
+                    let pl = &mut self.players[p];
+                    if pl.lost_limbs > 0 {
+                        pl.lost_limbs -= 1;
+                        pl.max_hp = (pl.max_hp - pl.max_hp * LIMB_SEAM_PCT / 100).max(LEAST_MAX_HP);
+                        pl.hp = pl.hp.min(pl.max_hp);
+                        ev.push(RunEvent::LimbSewn { player });
+                    }
                 }
                 RunFx::Card(card) => {
                     self.players[p].deck.push((card.clone(), false));
@@ -1558,6 +1680,12 @@ pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
             if *done.get(p)? {
                 return None;
             }
+            // nobody is left lying while there is water
+            if let Some(who) = run.players.iter().position(|o| o.beheaded) {
+                if !pl.beheaded {
+                    return Some(RunAction::Raise { who: who as u8 });
+                }
+            }
             // hurt heroes sleep, healthy ones sharpen a card
             let upgrade = pl.deck.iter().position(|(id, up)| !up && c.cards.get(id).is_some_and(|d| d.up.is_some() && d.kind != CardType::Curse));
             Some(match upgrade {
@@ -1589,7 +1717,7 @@ pub fn run_bot(c: &Content, run: &Run, player: u8) -> Option<RunAction> {
             let pl = run.players.get(p)?;
             // the first option it can pay for (and, at a schism, that is still open to it)
             let closed = if def.kind == EventKind::Schism { schism_closed(picks, p) } else { None };
-            let i = (0..def.options.len()).find(|i| def.options[*i].price <= pl.gold && closed != Some(*i as u8)).unwrap_or(def.options.len() - 1);
+            let i = (0..def.options.len()).find(|i| def.options[*i].price <= pl.gold && closed != Some(*i as u8) && seam_open(&run.players, def, &def.options[*i], p, picks)).unwrap_or(def.options.len() - 1);
             Some(RunAction::Choose(i as u8))
         }
         Stage::Trophy { picks, .. } => picks.get(p)?.is_none().then_some(RunAction::Choose(0)),

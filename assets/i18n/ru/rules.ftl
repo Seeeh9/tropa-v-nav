@@ -295,3 +295,6 @@ trait-lost-one = Отрублена рука
 trait-lost-one-help = До конца забега на 1 карту меньше каждый ход.
 trait-lost-both = Обе руки отрублены
 trait-lost-both-help = До конца забега на 1 карту и на 1 силу меньше каждый ход.
+battle-walks-headless = ходит без головы
+trait-walks-headless = Ходит без головы
+trait-walks-headless-help = Вода подняла тело, но ничего не пришила. Здоровья десятая часть, пока Швея на погосте не вернёт голову.

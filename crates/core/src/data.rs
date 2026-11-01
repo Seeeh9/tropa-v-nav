@@ -366,6 +366,10 @@ pub enum RunFx {
     Potion,
     RemoveRandomCard,
     UpgradeRandomCard,
+    /// The first of the party without a head gets one back, and much of their health goes with it.
+    SewHeadOn,
+    /// The chooser gets a lost limb back, and much of their health goes with it.
+    SewLimbOn,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -390,6 +394,9 @@ pub struct EventDef {
     pub act: u8,
     pub kind: EventKind,
     pub options: Vec<EventOption>,
+    /// Comes only while someone of a party has lost a limb or their head, and someone is left to ask.
+    #[serde(default)]
+    pub for_the_maimed: bool,
 }
 
 /// What a set of herbs brews into. `herbs` is a multiset; `"*"` matches any herb.

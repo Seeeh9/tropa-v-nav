@@ -23,7 +23,7 @@ window.repaint = (change) =>
 window.noHead =
   "the figure has no head at all. The neck ends in a ragged raw bloody stump of torn flesh with a pale bone in it, and thick dark blood has soaked the collar and chest and runs down the clothes.";
 window.stump =
-  "In its place the shoulder ends in a short ragged round stump, clearly visible and not hidden by any fur or cloth: torn skin at the rim, wet bright red raw flesh, and the pale white round end of the bone sticking out in the middle. Bright red blood runs from the stump down the side of the body in long streaks.";
+  "The stump sits exactly where that arm joined the body, at the outer edge of its own shoulder, never on the chest or the belly. In its place the shoulder ends in a short ragged round stump, clearly visible and not hidden by any fur or cloth: torn skin at the rim, wet bright red raw flesh, and the pale white round end of the bone sticking out in the middle. Bright red blood runs from the stump down the side of the body in long streaks.";
 window.cut = (side, extra) =>
   "the whole arm on the " + side +
   " side of the picture is chopped off completely at the shoulder joint. Nothing of that arm remains: no upper arm, no elbow, no forearm, no hand, no sleeve hanging, and anything that hand held is gone too. " +

@@ -249,10 +249,10 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
     }
     // dev shortcut: TROPA_FORCE=trophy opens on a boss's trophy vote
     if std::env::var("TROPA_FORCE").as_deref() == Ok("trophy") {
-        let offers: Vec<String> = db.relics.values().filter(|r| r.pool == nav_core::RelicPool::Boss).take(3).map(|r| r.id.clone()).collect();
         for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
             if let Some(run) = n.state.as_mut() {
-                run.stage = Stage::Trophy { offers: offers.clone(), picks: vec![None; run.players.len()] };
+                let offers = run.roll_trophies(db);
+                run.stage = Stage::Trophy { offers, picks: vec![None; run.players.len()] };
             }
         }
     }

@@ -1098,7 +1098,7 @@ fn draw_omen(
     }
 }
 
-/// The boss's trophy: three relics, one vote, and the winner goes to everyone.
+/// The boss's trophy: three relics of their own for each player, to take one.
 fn draw_trophy(
     mut commands: Commands,
     mut status: ResMut<NetStatus>,
@@ -1135,7 +1135,12 @@ fn draw_trophy(
     commands.spawn((theme::text(l10n.t("trophy-title"), &fonts.title, 56.0, theme::BONE), ChildOf(column)));
     commands.spawn((theme::text(l10n.t("trophy-hint"), &fonts.body, 22.0, theme::DIM), Node { margin: UiRect::bottom(px(14)), ..default() }, ChildOf(column)));
     let mine = picks[me as usize];
-    for (i, id) in offers.iter().enumerate() {
+    // the others choose from their own; all that shows is who still has to
+    let waiting: Vec<String> = picks.iter().enumerate().filter(|(_, v)| v.is_none()).filter_map(|(seat, _)| run.players.get(seat)).map(|p| l10n.t(&format!("hero-{}", p.hero))).collect();
+    if mine.is_some() && !waiting.is_empty() {
+        commands.spawn((theme::text(l10n.tf("trophy-waiting", &[("who", waiting.join(", ").into())]), &fonts.body, 22.0, theme::CANDLE), ChildOf(column)));
+    }
+    for (i, id) in offers[me as usize].iter().enumerate() {
         let base = if mine == Some(i as u8) { theme::SWAMP } else { theme::PEAT };
         let mut b = commands.spawn((
             Button,
@@ -1153,18 +1158,6 @@ fn draw_trophy(
                 t.spawn(theme::text(l10n.t(&format!("relic-{id}")), &fonts.title, 28.0, theme::CANDLE));
                 t.spawn((theme::text(l10n.t(&format!("relic-{id}-desc")), &fonts.body, 22.0, theme::BONE), Node { max_width: px(820), ..default() }));
             });
-            // who has voted for it, a dot in each voter's colour
-            for (seat, v) in picks.iter().enumerate() {
-                if *v == Some(i as u8) {
-                    let color = run.players.get(seat).map(|p| theme::hero_color(&p.hero)).unwrap_or(theme::BONE);
-                    b.spawn((
-                        Node { width: px(18), height: px(18), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, flex_shrink: 0.0, ..default() },
-                        BackgroundColor(color),
-                        BorderColor::all(theme::BONE),
-                        Pickable::IGNORE,
-                    ));
-                }
-            }
         });
     }
 }

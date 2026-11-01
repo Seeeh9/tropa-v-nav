@@ -119,8 +119,8 @@ pub enum Stage {
     Shop { stock: Vec<Stock>, done: Vec<bool> },
     /// An omen. `picks[player]` is the chosen option (a vote, for vote omens).
     Omen { id: Id, picks: Vec<Option<u8>> },
-    /// A boss trophy: the party votes for one of `offers`, and every player gets it.
-    Trophy { offers: Vec<Id>, picks: Vec<Option<u8>> },
+    /// A boss trophy: `offers[player]` are that player's own to take one of.
+    Trophy { offers: Vec<Vec<Id>>, picks: Vec<Option<u8>> },
     /// A chest shared by the party: a relic for every player.
     Chest(Chest),
     Victory,
@@ -765,32 +765,16 @@ impl Run {
                 }
             }
             (RunAction::Choose(choice), Stage::Trophy { offers, picks }) => {
-                if *choice as usize >= offers.len() {
+                if *choice as usize >= offers[p].len() {
                     return Err(RunError::BadChoice);
                 }
+                // each chooses from their own; one may change their mind until the last has chosen
                 picks[p] = Some(*choice);
-                ev.push(RunEvent::Voted { player, choice: *choice });
                 if picks.iter().all(|v| v.is_some()) {
-                    let cast: Vec<u8> = picks.iter().flatten().copied().collect();
-                    let offers = offers.clone();
-                    let mut counts = vec![0u32; offers.len()];
-                    for v in &cast {
-                        counts[*v as usize] += 1;
-                    }
-                    let best = counts.iter().copied().max().unwrap_or(0);
-                    let tied: Vec<u8> = (0..offers.len() as u8).filter(|i| counts[*i as usize] == best).collect();
-                    let winner = if tied.len() == 1 {
-                        tied[0]
-                    } else {
-                        let chosen = *self.rng.pick(&tied).unwrap_or(&tied[0]);
-                        ev.push(RunEvent::Lot { tied: tied.clone(), chosen });
-                        chosen
-                    };
-                    ev.push(RunEvent::OmenResolved { option: winner });
-                    let relic = offers[winner as usize].clone();
-                    for q in 0..self.players.len() {
+                    let won: Vec<Id> = offers.iter().zip(picks.iter()).map(|(own, pick)| own[pick.unwrap_or(0) as usize].clone()).collect();
+                    for (q, relic) in won.into_iter().enumerate() {
                         self.players[q].relics.push(relic.clone());
-                        ev.push(RunEvent::RelicGained { player: q as u8, relic: relic.clone() });
+                        ev.push(RunEvent::RelicGained { player: q as u8, relic });
                     }
                     self.stage = Stage::Map { votes: vec![None; self.players.len()] };
                 }
@@ -1071,11 +1055,9 @@ impl Run {
                 }
             }
             self.map = if self.act >= 4 { Map { floors: vec![] } } else { generate_map(&mut self.rng, Circle(self.circle)) };
-            // the boss leaves a trophy: three are offered, the party votes for one, everyone gets it
-            let mut offers: Vec<Id> = c.relics.values().filter(|r| r.pool == RelicPool::Boss && !self.players.iter().any(|p| p.relics.contains(&r.id))).map(|r| r.id.clone()).collect();
-            self.rng.shuffle(&mut offers);
-            offers.truncate(3);
-            if !offers.is_empty() {
+            // the boss leaves a trophy: three of their own for every player, to take one
+            let offers = self.roll_trophies(c);
+            if offers.iter().all(|own| !own.is_empty()) {
                 self.stage = Stage::Trophy { offers, picks: vec![None; self.players.len()] };
                 return;
             }
@@ -1302,6 +1284,12 @@ impl Run {
         out
     }
 
+    /// An omen's option applied to one player, for tests.
+    #[doc(hidden)]
+    pub fn test_apply_option(&mut self, c: &Content, p: usize, option: &EventOption, ev: &mut Vec<RunEvent>) {
+        self.apply_option(c, p, option, ev);
+    }
+
     fn apply_option(&mut self, c: &Content, p: usize, option: &EventOption, ev: &mut Vec<RunEvent>) {
         let player = p as u8;
         if option.price > 0 {
@@ -1445,6 +1433,33 @@ impl Run {
     }
 
     /// A relic this player doesn't own yet: common pool, or their hero's own.
+    /// Three boss relics for each player: none they hold, and none another is offered or holds
+    /// while the pool lasts.
+    pub fn roll_trophies(&mut self, c: &Content) -> Vec<Vec<Id>> {
+        let mut pool: Vec<Id> = c.relics.values().filter(|r| r.pool == RelicPool::Boss).map(|r| r.id.clone()).collect();
+        self.rng.shuffle(&mut pool);
+        let mut offers: Vec<Vec<Id>> = vec![Vec::new(); self.players.len()];
+        let held = |run: &Run, id: &Id| run.players.iter().any(|pl| pl.relics.contains(id));
+        for own in offers.iter_mut() {
+            for id in pool.iter().filter(|id| !held(self, id)) {
+                if own.len() < 3 {
+                    own.push(id.clone());
+                }
+            }
+            pool.retain(|id| !own.contains(id));
+        }
+        // a pool run dry: fill up with what others have, never what the player has
+        let all: Vec<Id> = c.relics.values().filter(|r| r.pool == RelicPool::Boss).map(|r| r.id.clone()).collect();
+        for (q, own) in offers.iter_mut().enumerate() {
+            for id in &all {
+                if own.len() < 3 && !own.contains(id) && !self.players[q].relics.contains(id) {
+                    own.push(id.clone());
+                }
+            }
+        }
+        offers
+    }
+
     fn roll_relic(&mut self, c: &Content, p: usize) -> Option<Id> {
         let pl = &self.players[p];
         let pool: Vec<&RelicDef> = c
@@ -1453,7 +1468,9 @@ impl Run {
             .filter(|r| r.rarity != Rarity::Starter && (r.pool == RelicPool::Any || (r.pool == RelicPool::Book && self.unlocks.secrets.contains(&r.id))) && (r.hero.is_empty() || r.hero == pl.hero))
             .filter(|r| !pl.relics.contains(&r.id) && self.unlocks.relic_ok(r.rarity))
             .collect();
-        self.rng.pick(&pool).map(|r| r.id.clone())
+        // what another player has is found only when nothing else is left
+        let unclaimed: Vec<&RelicDef> = pool.iter().copied().filter(|r| !self.players.iter().any(|o| o.relics.contains(&r.id))).collect();
+        self.rng.pick(if unclaimed.is_empty() { &pool } else { &unclaimed }).map(|r| r.id.clone())
     }
 }
 

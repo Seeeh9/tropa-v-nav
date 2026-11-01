@@ -640,19 +640,60 @@ fn two_hundred_and_ten_relics_fifteen_for_each_hero() {
 }
 
 #[test]
-fn a_boss_leaves_a_trophy_the_party_votes_on() {
+fn a_boss_leaves_every_player_a_trophy_of_their_own() {
     let c = content();
     let mut run = party(&c, 3, 3, 0);
-    run.stage = Stage::Trophy { offers: ids(&["likho_eye", "mara_sickle", "leshy_heart"]), picks: vec![None; 3] };
+    let offers = run.roll_trophies(&c);
+    assert!(offers.iter().all(|own| own.len() == 3));
+    let mut all: Vec<&Id> = offers.iter().flatten().collect();
+    all.sort();
+    all.dedup();
+    assert_eq!(all.len(), 9, "no two players are offered the same");
+    assert!(all.iter().all(|id| c.relics[*id].pool == RelicPool::Boss));
+    run.stage = Stage::Trophy { offers: offers.clone(), picks: vec![None; 3] };
     run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
     run.apply(&c, 1, &RunAction::Choose(0)).unwrap();
     assert_eq!(run.apply(&c, 2, &RunAction::Choose(7)), Err(RunError::BadChoice));
-    // a vote may be changed until the last one is cast
-    run.apply(&c, 1, &RunAction::Choose(1)).unwrap();
-    run.apply(&c, 2, &RunAction::Choose(2)).unwrap();
+    // a choice may be changed until the last one is made
+    run.apply(&c, 1, &RunAction::Choose(2)).unwrap();
+    assert!(matches!(run.stage, Stage::Trophy { .. }));
+    run.apply(&c, 2, &RunAction::Choose(0)).unwrap();
     assert!(matches!(run.stage, Stage::Map { .. }));
-    for pl in &run.players {
-        assert!(pl.relics.iter().any(|r| r == "mara_sickle"));
+    assert!(run.players[0].relics.contains(&offers[0][1]));
+    assert!(run.players[1].relics.contains(&offers[1][2]));
+    assert!(run.players[2].relics.contains(&offers[2][0]));
+}
+
+#[test]
+fn a_full_party_never_runs_out_of_trophies_and_none_gets_what_they_hold() {
+    let c = content();
+    let mut run = party(&c, 4, 3, 0);
+    for _ in 0..3 {
+        let offers = run.roll_trophies(&c);
+        for (q, own) in offers.iter().enumerate() {
+            assert_eq!(own.len(), 3);
+            assert!(own.iter().all(|id| !run.players[q].relics.contains(id)));
+            run.players[q].relics.push(own[0].clone());
+        }
+    }
+}
+
+#[test]
+fn an_omen_finds_each_player_a_relic_of_their_own() {
+    let c = content();
+    for seed in 0..30 {
+        let mut run = party(&c, 4, seed, 0);
+        let gift = EventOption { id: "t".into(), price: 0, fx: vec![RunFx::Relic], all: vec![] };
+        let mut ev = vec![];
+        let before: Vec<usize> = run.players.iter().map(|p| p.relics.len()).collect();
+        for q in 0..4 {
+            run.test_apply_option(&c, q, &gift, &mut ev);
+        }
+        let mut found: Vec<&Id> = run.players.iter().zip(&before).flat_map(|(p, n)| p.relics[*n..].iter()).collect();
+        assert_eq!(found.len(), 4);
+        found.sort();
+        found.dedup();
+        assert_eq!(found.len(), 4, "seed {seed}");
     }
 }
 

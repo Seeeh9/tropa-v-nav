@@ -10,7 +10,7 @@ const ME: UnitRef = UnitRef::Hero(0);
 /// A real hero with a chosen deck and their starting relic.
 fn with(c: &Content, hero_id: &str, deck: &[&str]) -> HeroSetup {
     let d = &c.heroes[hero_id];
-    HeroSetup { def: hero_id.into(), hp: d.max_hp, max_hp: d.max_hp, deck: deck.iter().map(|x| (x.to_string(), false)).collect(), relics: vec![d.relic.clone()], falls: 0, potions: vec![], lost_limbs: 0, beheaded: false, walks_headless: false }
+    HeroSetup { def: hero_id.into(), hp: d.max_hp, max_hp: d.max_hp, deck: deck.iter().map(|x| (x.to_string(), false)).collect(), relics: vec![d.relic.clone()], falls: 0, potions: vec![], lost_limbs: 0, lost_arms: 0, beheaded: false, walks_headless: false }
 }
 
 fn fight(hero_id: &str, deck: &[&str], enemies: &[&str]) -> (Content, Combat) {
@@ -513,4 +513,26 @@ fn each_limb_gone_costs_more() {
     let (whole, one, two) = (at(0), at(1), at(2));
     assert_eq!(one, (whole.0 - 1, whole.1));
     assert_eq!(two, (whole.0 - 1, whole.1 - 1));
+}
+
+#[test]
+fn an_arm_lost_takes_what_it_did() {
+    use nav_core::combat::{needs_lost_arm, SHIELD_ARM, WEAPON_ARM};
+    let c = content();
+    let card = |id: &str| c.cards.get(id).unwrap().view(false, Form::Human);
+    let strike = card("bogatyr_strike");
+    let guard = card("bogatyr_defend");
+    let h = Form::Human;
+    assert!(!needs_lost_arm(&strike, 0, "bogatyr", h) && !needs_lost_arm(&guard, 0, "bogatyr", h));
+    assert!(needs_lost_arm(&strike, WEAPON_ARM, "bogatyr", h) && !needs_lost_arm(&guard, WEAPON_ARM, "bogatyr", h), "no weapon arm, no attacks");
+    assert!(needs_lost_arm(&guard, SHIELD_ARM, "bogatyr", h) && !needs_lost_arm(&strike, SHIELD_ARM, "bogatyr", h), "no shield arm, no block");
+    // the basket is on the shield arm, the jug on the other
+    let herb = card("herb_wormwood");
+    assert!(needs_lost_arm(&herb, SHIELD_ARM, "znaharka", h) && !needs_lost_arm(&herb, WEAPON_ARM, "znaharka", h));
+    let brew = card("zn_brew");
+    assert!(needs_lost_arm(&brew, WEAPON_ARM, "znaharka", h) && !needs_lost_arm(&brew, SHIELD_ARM, "znaharka", h));
+    // a beast bites with no arm at all
+    let knife = card("wolf_knife");
+    assert!(needs_lost_arm(&knife, WEAPON_ARM, "volkolak", h));
+    assert!(!needs_lost_arm(&knife, WEAPON_ARM | SHIELD_ARM, "volkolak", Form::Beast));
 }

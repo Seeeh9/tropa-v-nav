@@ -243,14 +243,19 @@ fn fly_severed(
 fn hide_lost_limbs(session: Res<Session>, sprites: Query<(&UnitSprite, &Children)>, mut skins: Query<(&rig::RigSkin, &mut Visibility)>) {
     for (sprite, children) in &sprites {
         let UnitRef::Hero(i) = sprite.unit else { continue };
-        let limbs = session.shown.hero(i).map_or(0, |h| h.lost_limbs);
+        let arms = session.shown.hero(i).map_or(0, |h| h.lost_arms);
         let no_head = session.shown.hero(i).is_some_and(|h| h.walks_headless);
-        if limbs == 0 && !no_head {
+        if arms == 0 && !no_head {
             continue;
         }
         let mut iter = skins.iter_many_mut(children);
         while let Some(Ok((skin, mut vis))) = iter.fetch_next() {
-            let gone = (no_head && skin.part == Some(rig::Part::Head)) || matches!((skin.part, limbs), (Some(rig::Part::Arm), 1..) | (Some(rig::Part::Shield), 2..));
+            let gone = match skin.part {
+                Some(rig::Part::Head) => no_head,
+                Some(rig::Part::Arm) => arms & nav_core::combat::WEAPON_ARM != 0,
+                Some(rig::Part::Shield) => arms & nav_core::combat::SHIELD_ARM != 0,
+                None => false,
+            };
             if gone {
                 vis.set_if_neq(Visibility::Hidden);
             }

@@ -57,6 +57,49 @@ pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (C
     start_with(c, heroes, enemies, seed, CombatOpts::default())
 }
 
+/// The arm that strikes, and the arm that shields.
+pub const WEAPON_ARM: u8 = 1;
+pub const SHIELD_ARM: u8 = 2;
+
+/// Does any of these effects, however deep in a condition or a repeat, answer to this test.
+fn any_effect(effects: &[Effect], test: &dyn Fn(&Effect) -> bool) -> bool {
+    effects.iter().any(|e| {
+        test(e)
+            || match e {
+                Effect::If(_, then, other) => any_effect(then, test) || any_effect(other, test),
+                Effect::Repeat(_, inner) | Effect::Once(_, inner) | Effect::OncePerTurn(_, inner) => any_effect(inner, test),
+                _ => false,
+            }
+    })
+}
+
+/// Does this card take an arm that is gone. Every hero strikes with the weapon arm and shields with
+/// the other, and besides each arm carries what that hero holds in it: the herb woman's basket and
+/// jug, the volhv's staff, the witch's doll and bones, the jester's free hand for the masks.
+/// In beast form a werewolf bites: no arm is needed for an attack.
+pub fn needs_lost_arm(view: &CardView, lost_arms: u8, hero: &str, form: Form) -> bool {
+    let weapon_gone = lost_arms & WEAPON_ARM != 0;
+    let shield_gone = lost_arms & SHIELD_ARM != 0;
+    let any = |test: &dyn Fn(&Effect) -> bool| any_effect(&view.effects, test);
+    if weapon_gone && view.kind == CardType::Attack && form != Form::Beast {
+        return true;
+    }
+    if shield_gone && any(&|e| matches!(e, Effect::Block(..) | Effect::Guard(..))) {
+        return true;
+    }
+    match hero {
+        // the basket holds the herbs, the jug pours what is brewed
+        "znaharka" => (shield_gone && any(&|e| matches!(e, Effect::Herb(_)))) || (weapon_gone && any(&|e| matches!(e, Effect::Brew))),
+        // runes are cut by hand, and called down through the staff
+        "volhv" => (shield_gone && any(&|e| matches!(e, Effect::Rune(..)))) || (weapon_gone && any(&|e| matches!(e, Effect::Invoke))),
+        // the doll takes the curse, the bones read it and cash it in
+        "vorozheya" => (shield_gone && any(&|e| matches!(e, Effect::Apply(StatusKind::Hex, ..)))) || (weapon_gone && any(&|e| matches!(e, Effect::Consume(StatusKind::Hex, _) | Effect::ConsumeCurses(_)))),
+        // a mask is changed with the free hand
+        "skomoroh" => shield_gone && any(&|e| matches!(e, Effect::Mask(_))),
+        _ => false,
+    }
+}
+
 pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, opts: CombatOpts) -> (Combat, Vec<Event>) {
     let mut rng = Rng::new(seed);
     let mut next_uid = 1u32;
@@ -90,9 +133,11 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
             downed: h.hp <= 0 || h.beheaded,
             falls: h.falls,
             lost_limbs: h.lost_limbs,
+            lost_arms: h.lost_arms,
             beheaded: h.beheaded,
             walks_headless: h.walks_headless,
             new_curses: 0,
+            new_parts: Vec::new(),
             guard_by: None,
             valor_rem: 0,
             runes: Vec::new(),
@@ -482,16 +527,32 @@ impl<'a> Exec<'a> {
         if !fell && attack && !self.s.foretelling && self.hero(i).lost_limbs < MOST_LIMBS {
             let share = lost * 100 / max_hp.max(1);
             if share >= MAIM_FROM && self.s.rng.chance(((share - MAIM_FROM) * 2 + 25).min(70)) {
+                // whichever arm is still there, by lot when both are
+                let first = if self.s.rng.chance(50) { WEAPON_ARM } else { SHIELD_ARM };
                 let h = self.hero(i);
+                let arm = if h.lost_arms & first == 0 { first } else { first ^ (WEAPON_ARM | SHIELD_ARM) };
                 h.lost_limbs += 1;
+                h.lost_arms |= arm;
                 let limbs = h.lost_limbs;
-                self.ev.push(Event::Maimed { player: i, limbs });
+                let part = format!("own_{}_{}", if arm == WEAPON_ARM { "weapon" } else { "shield" }, h.def);
+                self.ev.push(Event::Maimed { player: i, limbs, arm });
+                // it stays with its owner, as a card that does nothing
+                if self.c.cards.contains_key(part.as_str()) {
+                    self.add_card(i, &part, Pile::Discard);
+                    self.hero(i).new_parts.push(part.into());
+                }
             }
         }
         if fell && !self.unfound(i) {
             if attack && past * 100 >= max_hp.max(1) * BEHEAD_PAST {
+                // a head already gone is not lost twice
+                let first = !self.hero(i).walks_headless;
                 self.hero(i).beheaded = true;
                 self.ev.push(Event::Beheaded { player: i });
+                let part = format!("own_head_{}", self.hero(i).def);
+                if first && self.c.cards.contains_key(part.as_str()) {
+                    self.hero(i).new_parts.push(part.into());
+                }
             }
             self.down(i);
         }
@@ -687,6 +748,9 @@ impl<'a> Exec<'a> {
         }
         if view.kind == CardType::Attack && h.flags.contains_key("coiled") {
             return Err(ActionError::Coiled);
+        }
+        if needs_lost_arm(&view, h.lost_arms, h.def.as_str(), h.form) {
+            return Err(ActionError::NoArm);
         }
         if h.flags.contains_key("mired") || h.flags.contains_key("asleep") {
             return Err(ActionError::Held);

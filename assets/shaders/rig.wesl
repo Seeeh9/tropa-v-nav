@@ -18,6 +18,8 @@ struct Rig {
     pad: vec4<f32>,
     // a limb's joint on the picture, its turn (radians, clockwise on screen), picture width/height
     limb: vec4<f32>,
+    // above zero: seen with no eyes, the figure is only its white outline
+    sight: vec4<f32>,
 }
 
 @group(1) @binding(0)
@@ -61,6 +63,19 @@ fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
     // sampled everywhere (a texture is read in uniform control flow), dropped outside the picture
     let c = textureSample(picture, picture_sampler, clamp(p, vec2<f32>(0.0), vec2<f32>(1.0)));
     let inside = step(0.0, p.x) * step(p.x, 1.0) * step(0.0, p.y) * step(p.y, 1.0);
+    // what is around this pixel, for the outline
+    let e = vec2<f32>(0.004, 0.003);
+    let left = textureSample(picture, picture_sampler, clamp(p - vec2<f32>(e.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let right = textureSample(picture, picture_sampler, clamp(p + vec2<f32>(e.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let up = textureSample(picture, picture_sampler, clamp(p - vec2<f32>(0.0, e.y), vec2<f32>(0.0), vec2<f32>(1.0)));
+    let down = textureSample(picture, picture_sampler, clamp(p + vec2<f32>(0.0, e.y), vec2<f32>(0.0), vec2<f32>(1.0)));
+    if rig.sight.x > 0.5 {
+        let shape = length(vec2<f32>(right.a - left.a, down.a - up.a));
+        let lum = vec3<f32>(0.3, 0.6, 0.1);
+        let ink = length(vec2<f32>(dot(right.rgb, lum) - dot(left.rgb, lum), dot(down.rgb, lum) - dot(up.rgb, lum))) * c.a;
+        let edge = clamp(shape * 1.6 + smoothstep(0.10, 0.28, ink) * 0.8, 0.0, 1.0);
+        return vec4<f32>(1.0, 1.0, 1.0, edge * rig.body.w * inside);
+    }
     var rgb = c.rgb * rig.tint.rgb;
     // the flash is laid on as a painter would, in gamma: mixed in linear light even a little of
     // it lifts every shadow and the whole figure goes pale

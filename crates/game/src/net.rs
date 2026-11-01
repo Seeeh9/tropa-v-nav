@@ -319,6 +319,18 @@ pub fn start_offline_run(commands: &mut Commands, db: &nav_core::Content, bots: 
             }
         }
     }
+    // dev shortcut: TROPA_WALKS=1 has the local seat up with no head; TROPA_ARMS=3 short of those arms (1 weapon, 2 shield)
+    for n in std::iter::once(&mut node).chain(locals.iter_mut()) {
+        if let Some(pl) = n.state.as_mut().and_then(|run| run.players.get_mut(0)) {
+            if std::env::var("TROPA_WALKS").is_ok_and(|v| !v.is_empty()) {
+                pl.walks_headless = true;
+            }
+            if let Some(arms) = std::env::var("TROPA_ARMS").ok().and_then(|v| v.parse::<u8>().ok()) {
+                pl.lost_arms = arms;
+                pl.lost_limbs = arms.count_ones() as u8;
+            }
+        }
+    }
     // dev shortcut: TROPA_OMEN=well opens on that omen
     if let Ok(id) = std::env::var("TROPA_OMEN") {
         for n in std::iter::once(&mut node).chain(locals.iter_mut()) {

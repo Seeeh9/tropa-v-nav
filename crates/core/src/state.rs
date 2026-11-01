@@ -52,6 +52,9 @@ pub struct Hero {
     /// Limbs struck off by heavy blows, gone for the rest of the run.
     #[serde(default)]
     pub lost_limbs: u8,
+    /// Which: [`WEAPON_ARM`] and [`SHIELD_ARM`] as bits.
+    #[serde(default)]
+    pub lost_arms: u8,
     /// The head struck off: gone for good, and the player only watches from here on.
     #[serde(default)]
     pub beheaded: bool,
@@ -60,6 +63,9 @@ pub struct Hero {
     pub walks_headless: bool,
     /// Curses earned this combat, to be added to the run deck afterwards.
     pub new_curses: u32,
+    /// Parts cut off this fight, to be carried in the deck from now on.
+    #[serde(default)]
+    pub new_parts: Vec<Id>,
     /// Bogatyr slot soaking this hero's overflow damage until the round closes.
     pub guard_by: Option<u8>,
     /// Absorbed damage not yet converted into Valor.
@@ -167,6 +173,9 @@ pub struct HeroSetup {
     pub potions: Vec<Id>,
     #[serde(default)]
     pub lost_limbs: u8,
+    /// Which: [`WEAPON_ARM`] and [`SHIELD_ARM`] as bits.
+    #[serde(default)]
+    pub lost_arms: u8,
     #[serde(default)]
     pub beheaded: bool,
     /// Raised by water alone: up and fighting, with no head.
@@ -201,6 +210,8 @@ pub enum ActionError {
     NoSuchPotion,
     /// Wrapped in the serpent's coils: no attacks until it lets go.
     Coiled,
+    /// The arm this card needs has been cut off.
+    NoArm,
     /// Sunk in the mire or put to sleep: no cards this turn.
     Held,
     /// This card is frozen in hand for the turn.
@@ -227,7 +238,7 @@ pub enum Event {
     Downed { player: u8 },
     Raised { player: u8, by: Option<u8>, hp: i32 },
     /// A heavy blow struck off a limb: this is how many are gone now.
-    Maimed { player: u8, limbs: u8 },
+    Maimed { player: u8, limbs: u8, arm: u8 },
     /// A blow far past what the hero had left struck off the head.
     Beheaded { player: u8 },
     /// A blow found only air: the unit dodged it, or it was wasted on nobody.

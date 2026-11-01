@@ -45,6 +45,8 @@ pub(super) struct RigUniform {
     /// A limb's joint on the picture (x, y in 0..1), its turn (radians, clockwise on screen) and
     /// the picture's width over height; no turn on a body.
     pub limb: Vec4,
+    /// Above zero: the figure is drawn as its white outline only.
+    pub sight: Vec4,
 }
 
 /// A part a figure may be cut into, each moved its own way.
@@ -180,12 +182,14 @@ pub(super) struct Pose {
     pub swing: f32,
     pub nod: f32,
     pub guard: f32,
+    /// Seen by one with no eyes: only the outline.
+    pub outline: bool,
 }
 
 impl Pose {
     /// At rest: breathing, swaying a little, cloth stirring.
     pub fn idle(tint: Color, hero: bool) -> Pose {
-        Pose { lean: 0.0, sway: if hero { 0.005 } else { 0.007 }, wave: 0.0035, breath: 0.018, squash: 1.0, flash: 0.0, flash_color: Color::WHITE, tint, fade: 1.0, swing: 0.0, nod: 0.0, guard: 0.0 }
+        Pose { lean: 0.0, sway: if hero { 0.005 } else { 0.007 }, wave: 0.0035, breath: 0.018, squash: 1.0, flash: 0.0, flash_color: Color::WHITE, tint, fade: 1.0, swing: 0.0, nod: 0.0, guard: 0.0, outline: false }
     }
 }
 
@@ -227,6 +231,7 @@ pub(super) fn pose(materials: &mut Assets<RigMaterial>, handle: &MaterialNode<Ri
     m.rig.body = Vec4::new(p.breath, p.squash, p.flash, p.fade);
     m.rig.tint = p.tint.to_linear().to_vec4();
     m.rig.flash = p.flash_color.to_linear().to_vec4();
+    m.rig.sight = Vec4::new(if p.outline { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0);
 }
 
 /// Puts a new picture on a skin (a change of form).

@@ -65,6 +65,7 @@ pub fn plugin(app: &mut App) {
             (
                 playback,
                 (sync_units, gore::lay_out_the_headless, sync_hand, sync_potions, cue_effects).chain(),
+                no_eyes,
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_intent_icons, update_bars, update_tooltip),
                 (floaters, fly_ghosts, dying, style_buttons, impact::shake_screen, turn_timer, send_pings, show_pings),
             )
@@ -349,6 +350,72 @@ pub(super) fn hero_draw(stem: &str, size: Vec2) -> Vec2 {
     }
 }
 
+/// The dark before the eyes of one who walks with no head.
+#[derive(Component)]
+struct NoEyes;
+
+/// This player is up and fighting with no head: a body raised by water sees nothing but outlines.
+/// One who lies dead only watches, and one sewn up again sees as ever.
+fn sees_nothing(session: &Session) -> bool {
+    let h = session.my_hero();
+    h.walks_headless && !h.downed && !h.beheaded
+}
+
+/// With no eyes the world is black: the ground and what lies on it go, the foes' marks go, and the
+/// cards in hand are empty white frames. The figures draw their own outlines (see `animate_sprites`).
+fn no_eyes(
+    session: Res<Session>,
+    mut veil: Query<&mut Visibility, With<NoEyes>>,
+    mut grounds: Query<&mut Visibility, (Or<(With<gore::StainLayer>, With<gore::CorpseLayer>)>, Without<NoEyes>)>,
+    units: Query<(&UnitWidget, &Children)>,
+    sprites: Query<(), With<UnitSprite>>,
+    cards: Query<(&CardWidget, &Children, Entity)>,
+    mut marks: Query<&mut Visibility, (Without<NoEyes>, Without<gore::StainLayer>, Without<gore::CorpseLayer>)>,
+    mut edges: Query<&mut BorderColor>,
+    mut was: Local<bool>,
+) {
+    let dark = sees_nothing(&session);
+    if !dark && !*was {
+        return;
+    }
+    *was = dark;
+    let want = |seen: bool| if seen { Visibility::Inherited } else { Visibility::Hidden };
+    for mut v in &mut veil {
+        v.set_if_neq(want(dark));
+    }
+    for mut v in &mut grounds {
+        v.set_if_neq(want(!dark));
+    }
+    for (unit, children) in &units {
+        if !matches!(unit.unit, UnitRef::Enemy(_)) {
+            continue;
+        }
+        for c in children.iter().filter(|c| !sprites.contains(*c)) {
+            if let Ok(mut v) = marks.get_mut(c) {
+                v.set_if_neq(want(!dark));
+            }
+        }
+    }
+    if dark {
+        for (card, children, entity) in &cards {
+            if !card.hidden {
+                continue;
+            }
+            if let Ok(mut edge) = edges.get_mut(entity) {
+                let white = BorderColor::all(Color::WHITE);
+                if *edge != white {
+                    *edge = white;
+                }
+            }
+            for c in children.iter() {
+                if let Ok(mut v) = marks.get_mut(c) {
+                    v.set_if_neq(Visibility::Hidden);
+                }
+            }
+        }
+    }
+}
+
 fn widget_origin(foot: Vec2, size: Vec2) -> Vec2 {
     Vec2::new(foot.x - UNIT_W / 2.0, foot.y - size.y - HEAD_ROOM)
 }
@@ -440,6 +507,7 @@ fn enter(
                 ));
             }
             // blood soaks into the ground under everyone
+            p.spawn((NoEyes, Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: px(STAGE_W), height: px(STAGE_H), ..default() }, BackgroundColor(Color::BLACK), Visibility::Hidden, Pickable::IGNORE));
             p.spawn((gore::StainLayer, layer(), Pickable::IGNORE));
             p.spawn((gore::CorpseLayer, layer(), Pickable::IGNORE));
             p.spawn((UnitLayer, layer(), Pickable::IGNORE));
@@ -912,7 +980,20 @@ struct Preloaded {
 }
 
 /// Poses a unit is drawn in for a moment, over its own picture.
-const POSES: [&str; 6] = ["_strike", "_cast", "_hurt", "_guard", "_downed", "_headless"];
+const POSES: [&str; 9] = ["_strike", "_cast", "_hurt", "_guard", "_downed", "_headless", "_noweapon", "_noshield", "_noarms"];
+
+/// The painted picture of a figure short of a part. Short of both a head and an arm has none: it
+/// stands in its cut-out parts.
+pub(crate) fn short_of(no_head: bool, lost_arms: u8) -> Option<&'static str> {
+    use nav_core::combat::{SHIELD_ARM, WEAPON_ARM};
+    match (no_head, lost_arms) {
+        (true, 0) => Some("_headless"),
+        (false, a) if a == WEAPON_ARM => Some("_noweapon"),
+        (false, a) if a == SHIELD_ARM => Some("_noshield"),
+        (false, a) if a == WEAPON_ARM | SHIELD_ARM => Some("_noarms"),
+        _ => None,
+    }
+}
 
 /// The unit's own picture under whatever pose it is drawn in for the moment.
 pub(crate) fn pose_base(stem: &str) -> &str {
@@ -934,7 +1015,7 @@ fn swap_form_art(
     let stems = session.shown.heroes.iter().flat_map(|h| [format!("heroes/{}", h.def), format!("heroes/{}_beast", h.def)]).chain(session.shown.enemies.iter().map(|e| format!("enemies/{}", e.def)));
     for stem in stems {
         if preloaded.seen.insert(stem.clone()) {
-            for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed", "_headless"] {
+            for pose in ["", "_strike", "_cast", "_hurt", "_guard", "_downed", "_headless", "_noweapon", "_noshield", "_noarms"] {
                 if let Some(handle) = art.image(&assets, &format!("{stem}{pose}")) {
                     preloaded.handles.push(handle);
                 }
@@ -969,10 +1050,11 @@ fn swap_form_art(
             Some((Anim::Guarded, t)) if t < 0.36 => Some("_guard"),
             _ => None,
         };
-        // who walks with no head wears their own picture of it, when one was painted
-        if let UnitRef::Hero(i) = s.unit {
-            if session.shown.hero(i).is_some_and(|h| h.walks_headless) && art.image(&assets, &format!("{want}_headless")).is_some() {
-                want = format!("{want}_headless");
+        // who is short of a part wears their own picture of it, when one was painted
+        let short = if let UnitRef::Hero(i) = s.unit { session.shown.hero(i).and_then(|h| short_of(h.walks_headless, h.lost_arms)) } else { None };
+        if let Some(mark) = short {
+            if art.image(&assets, &format!("{want}{mark}")).is_some() {
+                want = format!("{want}{mark}");
             }
         }
         if let Some(pose) = pose.filter(|_| !downed && whole) {
@@ -1028,6 +1110,7 @@ fn animate_sprites(
         let toward = if hero { 1.0 } else { -1.0 };
         let mut tint = s.base;
         let mut pose = rig::Pose::idle(s.base, hero);
+        pose.outline = sees_nothing(&session);
         // a body short of its parts cannot hold itself up: it lurches where it stands
         let unsteady = matches!(s.unit, UnitRef::Hero(i) if session.shown.hero(i).is_some_and(|h| h.walks_headless || h.lost_limbs > 0));
         if unsteady {
@@ -1360,6 +1443,16 @@ fn update_intent_icons(
 ) {
     let shown = &session.shown;
     let sung = session.my_hero().flags.contains_key("no_intents");
+    // with no eyes there is no telling what a foe means to do
+    if sees_nothing(&session) {
+        for (_, _, mut vis) in &mut icons {
+            vis.set_if_neq(Visibility::Hidden);
+        }
+        for (_, mut vis) in &mut plates {
+            vis.set_if_neq(Visibility::Hidden);
+        }
+        return;
+    }
     for (icon, mut image, mut vis) in &mut icons {
         let mv = shown
             .enemy(icon.0)
@@ -1614,7 +1707,8 @@ fn sync_hand(
     assets: Res<AssetServer>,
 ) {
     let h = session.my_hero();
-    let blind = h.flags.contains_key("blind");
+    // with no head the hand is felt, not read
+    let blind = h.flags.contains_key("blind") || sees_nothing(&session);
     let mut reprint = Vec::new();
     let mut leaving = 0;
     for (entity, w) in &cards {
@@ -1861,9 +1955,10 @@ let rest = hand_slot(i, n);
             let held = h.flags.contains_key("mired") || h.flags.contains_key("asleep");
             let coiled = view.kind == CardType::Attack && h.flags.contains_key("coiled");
             let frozen = (i as i32) < h.flags.get("frozen").copied().unwrap_or(0);
-            let ok = !view.has(Keyword::Unplayable) && cost <= h.energy && !h.downed && !held && !coiled && !frozen;
+            let no_arm = nav_core::combat::needs_lost_arm(&view, h.lost_arms, h.def.as_str(), h.form);
+            let ok = !view.has(Keyword::Unplayable) && cost <= h.energy && !h.downed && !held && !coiled && !frozen && !no_arm;
             let frame = card_frame(def);
-            let want = if frozen { frame.mix(&theme::FROST, 0.55) } else if ok { frame } else { frame.mix(&theme::SOOT, 0.45) };
+            let want = if sees_nothing(&session) { Color::BLACK } else if frozen { frame.mix(&theme::FROST, 0.55) } else if ok { frame } else { frame.mix(&theme::SOOT, 0.45) };
             if bg.0 != want {
                 bg.0 = want;
             }
@@ -2141,9 +2236,9 @@ fn cue_effects(
                     float(&mut commands, *dst, format!("-{blocked}"), theme::FROST, 34.0, -70.0);
                 }
             }
-            Event::Maimed { player, limbs } => {
+            Event::Maimed { player, arm, .. } => {
                 let unit = UnitRef::Hero(*player);
-                severed.0.push((unit, if *limbs >= 2 { rig::Part::Shield } else { rig::Part::Arm }));
+                severed.0.push((unit, if *arm == nav_core::combat::SHIELD_ARM { rig::Part::Shield } else { rig::Part::Arm }));
                 float(&mut commands, unit, l10n.t("battle-maimed"), comfort.blood(), 40.0, 60.0);
             }
             Event::Beheaded { player } => {

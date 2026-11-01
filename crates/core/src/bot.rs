@@ -65,7 +65,7 @@ pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
             // paying in blood is for players who can count; the autopilot never does
             let bleeds = v.effects.iter().any(|e| matches!(e, Effect::LoseHp(_, Tgt::Me)));
             // wrapped by the serpent, attacks are refused: don't offer them
-            let affordable = !bleeds && !(v.kind == CardType::Attack && h.flags.contains_key("coiled"));
+            let affordable = !bleeds && !(v.kind == CardType::Attack && h.flags.contains_key("coiled")) && !crate::combat::needs_lost_arm(&v, h.lost_arms, h.def.as_str(), h.form);
             (!v.has(Keyword::Unplayable) && cost <= h.energy && affordable && !matches!(v.kind, CardType::Curse | CardType::Status)).then_some((card, v))
         })
         .collect();

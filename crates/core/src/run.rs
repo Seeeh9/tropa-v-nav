@@ -10,6 +10,31 @@ use serde::{Deserialize, Serialize};
 pub const FLOORS: usize = 15;
 pub const MAP_WIDTH: u8 = 7;
 pub const POTION_SLOTS: usize = 3;
+/// Is this one short of a head, and still carrying it? A head thrown away cannot be sewn back on.
+fn head_to_sew(pl: &Player) -> bool {
+    (pl.beheaded || pl.walks_headless) && carries(pl, &format!("own_head_{}", pl.hero))
+}
+
+/// The arm this one lacks and still carries, the weapon arm first, with its card's name.
+fn arm_to_sew(pl: &Player) -> Option<(u8, String)> {
+    use crate::combat::{SHIELD_ARM, WEAPON_ARM};
+    [(WEAPON_ARM, "weapon"), (SHIELD_ARM, "shield")].into_iter().find_map(|(arm, word)| {
+        let card = format!("own_{word}_{}", pl.hero);
+        (pl.lost_arms & arm != 0 && carries(pl, &card)).then_some((arm, card))
+    })
+}
+
+fn carries(pl: &Player, card: &str) -> bool {
+    pl.deck.iter().any(|(id, _)| id.as_str() == card)
+}
+
+/// Takes one card by this name out of the deck.
+fn take_from_deck(pl: &mut Player, card: &str) {
+    if let Some(i) = pl.deck.iter().position(|(id, _)| id.as_str() == card) {
+        pl.deck.remove(i);
+    }
+}
+
 /// Whether the player in seat `p` can have this option of an omen as far as sewing goes: there must
 /// be something to sew, and she sews one thing a visit. Any other option is open.
 pub fn seam_open(players: &[Player], def: &EventDef, option: &EventOption, p: usize, picks: &[Option<u8>]) -> bool {
@@ -19,7 +44,7 @@ pub fn seam_open(players: &[Player], def: &EventDef, option: &EventOption, p: us
     }
     let taken = picks.iter().enumerate().any(|(q, v)| q != p && v.is_some_and(|i| def.options.get(i as usize).is_some_and(sews)));
     let me = &players[p];
-    let target = (option.fx.contains(&RunFx::SewHeadOn) && players.iter().any(|pl| pl.beheaded || pl.walks_headless)) || (option.fx.contains(&RunFx::SewLimbOn) && me.lost_limbs > 0);
+    let target = (option.fx.contains(&RunFx::SewHeadOn) && players.iter().any(head_to_sew)) || (option.fx.contains(&RunFx::SewLimbOn) && arm_to_sew(me).is_some());
     !me.beheaded && !taken && target
 }
 
@@ -74,6 +99,9 @@ pub struct Player {
     pub falls: u32,
     #[serde(default)]
     pub lost_limbs: u8,
+    /// Which: `combat::WEAPON_ARM` and `combat::SHIELD_ARM` as bits.
+    #[serde(default)]
+    pub lost_arms: u8,
     /// Head struck off: this seat only watches from here on.
     #[serde(default)]
     pub beheaded: bool,
@@ -502,7 +530,7 @@ impl Run {
             if circle_rules.starts_with_toska() && c.cards.contains_key("toska") {
                 deck.push(("toska".into(), false));
             }
-            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, lost_limbs: 0, beheaded: false, walks_headless: false, whole_max_hp: 0, removals: 0 });
+            players.push(Player { hero: h.clone(), hp: d.max_hp, max_hp: d.max_hp, gold: 99, deck, relics: vec![relic.clone()], potions: vec![], falls: 0, lost_limbs: 0, lost_arms: 0, beheaded: false, walks_headless: false, whole_max_hp: 0, removals: 0 });
         }
         let map = generate_map(&mut rng, circle_rules);
         let n = players.len();
@@ -1260,7 +1288,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, lost_arms: p.lost_arms, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
             .collect();
         let rules = Circle(self.circle);
         let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind), shadow: rules.koschei_shadow() };
@@ -1289,7 +1317,7 @@ impl Run {
         let party: Vec<HeroSetup> = self
             .players
             .iter()
-            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
+            .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, lost_arms: p.lost_arms, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
             .collect();
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
         let (combat, _) = combat::start_with(c, &party, enemies, seed, CombatOpts::default());
@@ -1307,9 +1335,17 @@ impl Run {
             pl.max_hp = h.max_hp;
             pl.falls = h.falls;
             pl.lost_limbs = h.lost_limbs;
+            pl.lost_arms = h.lost_arms;
             pl.beheaded = h.beheaded;
             pl.potions = h.potions.clone();
             pl.gold = (pl.gold - h.gold_lost).max(0);
+            // what was cut off is carried from now on; what was thrown away this fight is gone
+            for part in &h.new_parts {
+                pl.deck.push((part.clone(), false));
+            }
+            for thrown in h.exhaust.iter().filter(|card| card.def.starts_with("own_")) {
+                take_from_deck(pl, &thrown.def);
+            }
             for _ in 0..h.new_curses {
                 pl.deck.push((NAV_MARK.into(), false));
             }
@@ -1469,14 +1505,18 @@ impl Run {
                     pl.hp = (pl.hp + (*n).max(0)).min(pl.max_hp).max(1);
                 }
                 RunFx::SewHeadOn => {
-                    if let Some(who) = self.players.iter().position(|pl| pl.beheaded || pl.walks_headless) {
+                    if let Some(who) = self.players.iter().position(head_to_sew) {
+                        let card = format!("own_head_{}", self.players[who].hero);
+                        take_from_deck(&mut self.players[who], &card);
                         self.sew_head(who, player, ev);
                     }
                 }
                 RunFx::SewLimbOn => {
                     let pl = &mut self.players[p];
-                    if pl.lost_limbs > 0 {
+                    if let Some((back, card)) = arm_to_sew(pl) {
+                        take_from_deck(pl, &card);
                         pl.lost_limbs -= 1;
+                        pl.lost_arms &= !back;
                         pl.max_hp = (pl.max_hp - pl.max_hp * LIMB_SEAM_PCT / 100).max(LEAST_MAX_HP);
                         pl.hp = pl.hp.min(pl.max_hp);
                         ev.push(RunEvent::LimbSewn { player });

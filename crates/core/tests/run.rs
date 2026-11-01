@@ -718,7 +718,7 @@ fn trophies_and_pedlars_wares_are_never_found_on_the_road() {
 fn the_card_pool_matches_the_design_document() {
     let c = content();
     // the six of the design document: Yemelya the challenge hero came after it
-    let real: Vec<&CardDef> = c.cards.values().filter(|d| !d.id.starts_with("t_") && d.hero != "emelya").collect();
+    let real: Vec<&CardDef> = c.cards.values().filter(|d| !d.id.starts_with("t_") && !d.id.starts_with("own_") && d.hero != "emelya").collect();
     let count = |f: &dyn Fn(&CardDef) -> bool| real.iter().filter(|d| f(d)).count();
     assert_eq!(count(&|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special), 30, "neutral");
     assert_eq!(count(&|d| d.kind == CardType::Curse), 13, "curses");
@@ -1016,6 +1016,8 @@ fn water_at_the_fire_gets_a_body_up_but_sews_nothing() {
     run.players[1].hp = 0;
     run.stage = Stage::Rest { done: vec![false, false] };
     let before = run.players[1].max_hp;
+    let head = format!("own_head_{}", run.players[1].hero);
+    run.players[1].deck.push((head.clone().into(), false));
     assert_eq!(run.apply(&c, 1, &RunAction::Sleep), Err(RunError::WrongStage), "a corpse does not choose");
     assert_eq!(run.apply(&c, 0, &RunAction::Raise { who: 0 }), Err(RunError::BadChoice), "only one without a head");
     run.apply(&c, 0, &RunAction::Raise { who: 1 }).unwrap();
@@ -1028,6 +1030,7 @@ fn water_at_the_fire_gets_a_body_up_but_sews_nothing() {
     run.apply(&c, 0, &RunAction::Choose(0)).unwrap();
     assert!(!run.players[1].walks_headless);
     assert_eq!(run.players[1].max_hp, before - before * HEAD_SEAM_PCT / 100);
+    assert!(!run.players[1].deck.iter().any(|(id, _)| id.as_str() == head), "the head is back on, no longer in the deck");
 }
 
 #[test]
@@ -1051,6 +1054,10 @@ fn the_seamstress_sews_one_thing_a_visit_and_it_costs_dear() {
     run.players[2].beheaded = true;
     run.players[2].hp = 0;
     run.players[1].lost_limbs = 1;
+    run.players[1].lost_arms = nav_core::combat::WEAPON_ARM;
+    let (own_head, own_arm) = (format!("own_head_{}", run.players[2].hero), format!("own_weapon_{}", run.players[1].hero));
+    run.players[2].deck.push((own_head.into(), false));
+    run.players[1].deck.push((own_arm.into(), false));
     let (head, arm) = (run.players[2].max_hp, run.players[1].max_hp);
     run.stage = Stage::Omen { id: "needle_crone".into(), picks: vec![None; 3] };
     assert_eq!(run.apply(&c, 0, &RunAction::Choose(1)), Err(RunError::BadChoice), "no limb of its own to sew");
@@ -1068,11 +1075,16 @@ fn the_seamstress_gives_back_a_limb() {
     let c = content();
     let mut run = party(&c, 2, 5, 0);
     run.players[0].lost_limbs = 2;
+    run.players[0].lost_arms = nav_core::combat::WEAPON_ARM | nav_core::combat::SHIELD_ARM;
+    let hero = run.players[0].hero.clone();
+    run.players[0].deck.push((format!("own_weapon_{hero}").into(), false));
+    run.players[0].deck.push((format!("own_shield_{hero}").into(), false));
     let max = run.players[0].max_hp;
     run.stage = Stage::Omen { id: "needle_crone".into(), picks: vec![None; 2] };
     assert_eq!(run.apply(&c, 0, &RunAction::Choose(0)), Err(RunError::BadChoice), "nobody lacks a head");
     run.apply(&c, 0, &RunAction::Choose(1)).unwrap();
     assert_eq!(run.players[0].lost_limbs, 1, "one at a time");
+    assert_eq!(run.players[0].lost_arms, nav_core::combat::SHIELD_ARM, "the weapon arm first");
     assert_eq!(run.players[0].max_hp, max - max * LIMB_SEAM_PCT / 100);
 }
 
@@ -1084,4 +1096,15 @@ fn the_seamstress_never_comes_to_a_whole_party_by_chance() {
         run.force_stage(&c, NodeKind::Event);
         assert!(!matches!(&run.stage, Stage::Omen { id, .. } if id == "needle_crone"));
     }
+}
+
+#[test]
+fn what_was_thrown_away_cannot_be_sewn_back_on() {
+    let c = content();
+    let mut run = party(&c, 2, 5, 0);
+    run.players[1].beheaded = true;
+    run.players[1].hp = 0;
+    run.stage = Stage::Omen { id: "needle_crone".into(), picks: vec![None; 2] };
+    assert_eq!(run.apply(&c, 0, &RunAction::Choose(0)), Err(RunError::BadChoice), "no head in the deck, nothing to sew");
+    assert!(run.players[1].beheaded);
 }

@@ -102,8 +102,13 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                 out.push(Chip { icon: "status/hollow".into(), n: None, good: Some(false), name: l10n.t("trait-walks-headless"), help: help(l10n, "trait-walks-headless") });
             }
             if h.lost_limbs > 0 {
-                let key = if h.lost_limbs >= 2 { "trait-lost-both" } else { "trait-lost-one" };
-                out.push(Chip { icon: "status/lost_limb".into(), n: (h.lost_limbs > 1).then_some(h.lost_limbs as i32), good: Some(false), name: l10n.t(key), help: help(l10n, key) });
+                // each hero loses what that arm held
+                let key = match h.lost_arms {
+                    nav_core::combat::WEAPON_ARM => format!("trait-lost-weapon-{}", h.def),
+                    nav_core::combat::SHIELD_ARM => format!("trait-lost-shield-{}", h.def),
+                    _ => format!("trait-lost-both-{}", h.def),
+                };
+                out.push(Chip { icon: "status/lost_limb".into(), n: (h.lost_limbs > 1).then_some(h.lost_limbs as i32), good: Some(false), name: l10n.t(&key), help: help(l10n, &key) });
             }
             for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter", "draw_less", "energy_less", "no_intents"] {
                 if let Some(n) = real.flags.get(flag) {

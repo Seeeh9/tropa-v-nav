@@ -334,11 +334,11 @@ fn death_dance_counts_the_whole_partys_cards() {
 }
 
 #[test]
-fn every_hero_has_eighty_cards_five_of_them_for_company() {
+fn every_hero_has_eighty_four_cards_five_of_them_for_company() {
     let c = content();
     for hero in ["bogatyr", "vorozheya", "volhv", "volkolak", "znaharka", "skomoroh"] {
         let mine: Vec<&CardDef> = c.cards.values().filter(|d| d.hero == hero).collect();
-        assert_eq!(mine.len(), 80, "{hero}");
+        assert_eq!(mine.len(), 84, "{hero}");
         assert!(mine.iter().filter(|d| d.keywords.contains(&Keyword::Coop)).count() >= 5, "{hero}");
         let free = mine.iter().filter(|d| d.cost == 0 && !d.x_cost && d.rarity != Rarity::Starter).count();
         assert!(free <= 8, "{hero} has {free} free cards");
@@ -452,4 +452,19 @@ fn yemelya_aims_at_nobody_and_lies_with_sloth_in_his_deck() {
         assert_eq!(card.target, CardTarget::None, "{} must not be aimed", card.id);
     }
     assert!(c.cards["em_sloth"].keywords.contains(&Keyword::Unplayable));
+}
+
+#[test]
+fn strength_yemelya_leaves_unspent_is_sleep_gained_and_his_cards_spend_it() {
+    let (c, mut s) = fight("emelya", &["em_dream_bite"], &["dummy"]);
+    s.heroes[0].energy = 3;
+    s.heroes[0].statuses.insert(StatusKind::Drowse, 4);
+    let hp = s.enemies[0].hp;
+    let card = s.heroes[0].hand[0].uid;
+    apply(&c, &mut s, 0, &CombatAction::Play { card, target: None }).unwrap();
+    assert_eq!(hp - s.enemies[0].hp, 12, "three for each");
+    assert_eq!(s.status(UnitRef::Hero(0), StatusKind::Drowse), 0);
+    let left = s.heroes[0].energy;
+    end_round(&c, &mut s);
+    assert_eq!(s.status(UnitRef::Hero(0), StatusKind::Drowse), left);
 }

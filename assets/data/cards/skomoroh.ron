@@ -66,4 +66,24 @@
         effects: [Damage(PlayedThisRound(3), Target)],
         up: (effects: [Damage(PlayedThisRound(4), Target)]),
     ),
+    (
+        id: "sk_stolen_shield", hero: "skomoroh", kind: Skill, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Hook("steal_block")],
+        up: (effects: [Hook("steal_block"), Draw(N(1))]),
+    ),
+    (
+        id: "sk_mock_weak", hero: "skomoroh", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(7), WeakestFoe), Apply(Weak, N(1), WeakestFoe)],
+        up: (effects: [Damage(N(10), WeakestFoe), Apply(Weak, N(1), WeakestFoe)]),
+    ),
+    (
+        id: "sk_pratfall", hero: "skomoroh", kind: Attack, rarity: Uncommon, cost: 2, target: Enemy,
+        effects: [Damage(MissingHp(45), Target)],
+        up: (effects: [Damage(MissingHp(65), Target)]),
+    ),
+    (
+        id: "sk_again_and_again", hero: "skomoroh", kind: Skill, rarity: Rare, cost: 1,
+        effects: [Echo(Me), Draw(N(1))],
+        up: (effects: [Echo(Me), Draw(N(2))]),
+    ),
 ]

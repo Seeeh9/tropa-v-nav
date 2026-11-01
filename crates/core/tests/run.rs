@@ -723,7 +723,7 @@ fn the_card_pool_matches_the_design_document() {
     assert_eq!(count(&|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special), 30, "neutral");
     assert_eq!(count(&|d| d.kind == CardType::Curse), 13, "curses");
     assert_eq!(count(&|d| d.kind == CardType::Status), 8, "statuses");
-    assert_eq!(count(&|d| !d.hero.is_empty()), 480, "hero cards");
+    assert_eq!(count(&|d| !d.hero.is_empty()), 504, "hero cards");
 }
 
 #[test]

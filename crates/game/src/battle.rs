@@ -84,6 +84,10 @@ pub fn plugin(app: &mut App) {
 struct BattleRoot;
 #[derive(Component)]
 struct UnitLayer;
+/// The dim plate behind an enemy's intent, so it reads over any backdrop; shown with the picture.
+#[derive(Component)]
+struct IntentBack(u32);
+
 /// The picture of an enemy's intent; the number and target beside it are `Label::Intent`.
 #[derive(Component)]
 struct IntentIcon(u32);
@@ -710,12 +714,20 @@ fn sync_units(
                     // heroes show nothing overhead; the slot keeps both sides aligned
                     if let UnitRef::Enemy(uid) = unit {
                         head.spawn((
-                            IntentIcon(uid),
-                            ImageNode::default(),
-                            Node { width: px(INTENT_ICON), height: px(INTENT_ICON), margin: UiRect::right(px(4)), ..default() },
+                            IntentBack(uid),
+                            Node { align_items: AlignItems::Center, padding: UiRect::axes(px(8), px(3)), border_radius: BorderRadius::all(px(12)), ..default() },
+                            BackgroundColor(theme::SOOT.with_alpha(0.68)),
                             Visibility::Hidden,
-                        ));
-                        head.spawn((Label::Intent(uid), theme::text("", &fonts.num, 26.0, theme::BONE)));
+                        ))
+                        .with_children(|plate| {
+                            plate.spawn((
+                                IntentIcon(uid),
+                                ImageNode::default(),
+                                Node { width: px(INTENT_ICON), height: px(INTENT_ICON), margin: UiRect::right(px(4)), ..default() },
+                                Visibility::Hidden,
+                            ));
+                            plate.spawn((Label::Intent(uid), theme::text("", &fonts.num, 26.0, theme::BONE), TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK.with_alpha(0.9) }));
+                        });
                     }
                 });
                 // the feet are painted a little above the bottom edge of the picture
@@ -1280,19 +1292,22 @@ fn update_intent_icons(
     art: Res<Art>,
     assets: Res<AssetServer>,
     mut pictures: Local<std::collections::HashMap<String, Option<Handle<Image>>>>,
-    mut icons: Query<(&IntentIcon, &mut ImageNode, &mut Visibility)>,
+    mut icons: Query<(&IntentIcon, &mut ImageNode, &mut Visibility), Without<IntentBack>>,
+    mut plates: Query<(&IntentBack, &mut Visibility), Without<IntentIcon>>,
 ) {
     let shown = &session.shown;
     let sung = session.my_hero().flags.contains_key("no_intents");
     for (icon, mut image, mut vis) in &mut icons {
-        let kind = shown
+        let mv = shown
             .enemy(icon.0)
             .and_then(|e| Some((e, e.intent.as_ref()?)))
-            .and_then(|(e, i)| db.0.enemies.get(&e.def)?.moves.get(i.mv))
-            .map(|mv| if sung { IntentKind::Unknown } else { mv.intent });
-        let picture = kind.and_then(|k| {
-            let stem = format!("intents/{k:?}");
-            pictures.entry(stem.clone()).or_insert_with(|| art.image(&assets, &stem)).clone()
+            .and_then(|(e, i)| db.0.enemies.get(&e.def)?.moves.get(i.mv));
+        // every move wears its own emblem; one kept secret, or with none, only its kind's
+        let picture = mv.and_then(|mv| {
+            let kind = if sung { IntentKind::Unknown } else { mv.intent };
+            let mut look = |stem: String| pictures.entry(stem.clone()).or_insert_with(|| art.image(&assets, &stem)).clone();
+            let own = (kind != IntentKind::Unknown).then(|| look(format!("intents/m_{}", mv.id))).flatten();
+            own.or_else(|| look(format!("intents/{kind:?}")))
         });
         match picture {
             Some(h) => {
@@ -1305,6 +1320,10 @@ fn update_intent_icons(
                 vis.set_if_neq(Visibility::Hidden);
             }
         }
+    }
+    for (plate, mut vis) in &mut plates {
+        let on = icons.iter().any(|(icon, _, v)| icon.0 == plate.0 && *v != Visibility::Hidden);
+        vis.set_if_neq(if on { Visibility::Inherited } else { Visibility::Hidden });
     }
 }
 
@@ -1965,8 +1984,10 @@ fn cue_effects(
         commands.spawn((
             Floater { ttl: 0.95, life: 0.95 },
             theme::text(text, &fonts.num, size, color),
-            TextShadow::default(),
-            Node { position_type: PositionType::Absolute, left: px(foot.x - 20.0 + dx), top: px(foot.y - sz.y * 0.72), ..default() },
+            TextShadow { offset: Vec2::splat(2.0), color: Color::BLACK.with_alpha(0.95) },
+            // a dim plate behind it: a number must read over snow as over night
+            BackgroundColor(theme::SOOT.with_alpha(0.62)),
+            Node { position_type: PositionType::Absolute, left: px(foot.x - 20.0 + dx), top: px(foot.y - sz.y * 0.72), padding: UiRect::axes(px(8), px(1)), border_radius: BorderRadius::all(px(10)), ..default() },
             ChildOf(*layer),
         ));
     };
@@ -2069,8 +2090,11 @@ fn cue_effects(
             // a card played is seen in the hand that held it (`held`)
             Event::CardPlayed { player, card, .. } => {
                 let who = UnitRef::Hero(*player);
-                let kind = db.0.cards.get(card).map(|d| d.kind);
-                if kind != Some(CardType::Attack) {
+                let def = db.0.cards.get(card);
+                let kind = def.map(|d| d.kind);
+                // what raises a shield is seen raising it: the block's own guard pose follows
+                let shields = def.is_some_and(|d| d.effects.iter().any(|e| matches!(e, nav_core::Effect::Block(..) | nav_core::Effect::Guard(..))));
+                if kind != Some(CardType::Attack) && !shields {
                     play(who, Anim::Cast);
                 }
             }
@@ -2150,8 +2174,8 @@ fn fly_ghosts(mut commands: Commands, time: Res<Time>, speed: Res<AnimSpeed>, mu
     }
 }
 
-fn floaters(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Floater, &mut Node, &mut TextColor)>) {
-    for (entity, mut f, mut node, mut color) in &mut q {
+fn floaters(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut Floater, &mut Node, &mut TextColor, Option<&mut BackgroundColor>)>) {
+    for (entity, mut f, mut node, mut color, plate) in &mut q {
         let dt = time.delta_secs();
         f.ttl -= dt;
         if f.ttl <= 0.0 {
@@ -2164,7 +2188,11 @@ fn floaters(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut 
         if let Val::Px(top) = node.top {
             node.top = px(top - speed * dt);
         }
-        color.0.set_alpha(((1.0 - p) * 2.2).min(1.0));
+        let fade = ((1.0 - p) * 2.2).min(1.0);
+        color.0.set_alpha(fade);
+        if let Some(mut plate) = plate {
+            plate.0.set_alpha(0.62 * fade);
+        }
     }
 }
 

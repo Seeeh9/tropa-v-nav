@@ -570,7 +570,7 @@ fn keep_pages_ready(tale: Res<Tale>, art: Res<Art>, assets: Res<AssetServer>, mu
 }
 
 /// The book lies on the table while there is a tale to read.
-fn want_book(mut tale: ResMut<Tale>, mut book: ResMut<crate::book::Book>, mut hints: Query<(&mut Text, &mut Visibility), With<GlueHint>>, l10n: Res<L10n>) {
+fn want_book(mut tale: ResMut<Tale>, mut book: ResMut<crate::book::Book>) {
     if std::mem::take(&mut tale.new_run) {
         book.forget_run();
     }
@@ -581,13 +581,6 @@ fn want_book(mut tale: ResMut<Tale>, mut book: ResMut<crate::book::Book>, mut hi
             book.lay_open();
         }
     }
-    for (mut text, mut vis) in &mut hints {
-        let want = if book.over_glue { Visibility::Inherited } else { Visibility::Hidden };
-        if *vis != want {
-            *vis = want;
-            text.0 = l10n.t(if book.shared { "story-glue-party" } else { "story-glue" });
-        }
-    }
 }
 
 /// Page numbers of the spread at this place in a scene (1 the first), counting two pages hidden
@@ -596,10 +589,6 @@ fn page_numbers(at: usize, glued_before: usize) -> (u32, u32) {
     let left = 2 * (at + glued_before) as u32;
     (left, left + 1)
 }
-
-/// What is said while the hand is over a glued corner.
-#[derive(Component)]
-struct GlueHint;
 
 fn show_page(
     mut commands: Commands,
@@ -707,7 +696,6 @@ fn show_page(
                         children![
                             theme::text(format!("{at} / {}", tale.total.max(at)), &fonts.num, 26.0, theme::DIM),
                             (theme::text("", &fonts.body, 26.0, theme::CANDLE), VoteLabel, if together { Visibility::Inherited } else { Visibility::Hidden }),
-                            (theme::text("", &fonts.body, 22.0, theme::BONE), GlueHint, Visibility::Hidden),
                         ],
                     ),
                     (

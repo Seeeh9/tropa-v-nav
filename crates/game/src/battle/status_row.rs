@@ -40,7 +40,7 @@ pub(super) struct Chip {
 }
 
 fn boon(st: StatusKind) -> bool {
-    matches!(st, StatusKind::Strength | StatusKind::TempStrength | StatusKind::Fortitude | StatusKind::Thorns | StatusKind::Valor | StatusKind::Mist)
+    matches!(st, StatusKind::Strength | StatusKind::TempStrength | StatusKind::Fortitude | StatusKind::Thorns | StatusKind::Valor | StatusKind::Mist | StatusKind::Drowse)
 }
 
 fn help(l10n: &L10n, key: &str) -> String {
@@ -114,7 +114,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                     out.push(Chip { icon: "status/immortal".into(), n: None, good: Some(true), name: l10n.t("trait-immortal"), help: help(l10n, "trait-immortal") });
                 }
                 // what its kind does, while it can: the hare's dodge is gone once spent this round
-                for flag in ["dodge", "flying", "hiding", "enrage", "lifesteal", "piercing", "rises", "hunter"] {
+                for flag in ["dodge", "flying", "hiding", "enrage", "lifesteal", "piercing", "rises", "hunter", "pack", "spores", "vengeful"] {
                     if real.flags.contains_key(flag) && !(flag == "dodge" && real.flags.contains_key("turn_dodged")) {
                         let key = format!("trait-{flag}");
                         out.push(Chip { icon: format!("status/{flag}"), n: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });

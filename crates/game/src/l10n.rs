@@ -137,6 +137,8 @@ impl L10n {
             Amount::PlayedThisRound(m) => scaled(*m, self.t("amount-played")),
             Amount::Runes(kind, m) => scaled(*m, self.t(&format!("amount-rune-{kind:?}"))),
             Amount::Curses(_, m) => scaled(*m, self.t("amount-curses")),
+            Amount::Pack(base, _) => base.to_string(),
+            Amount::MissingHp(pct) => self.tf("amount-missing", &[("pct", (*pct).into())]),
         }
     }
 

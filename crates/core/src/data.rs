@@ -27,7 +27,7 @@ data_enum!(
 );
 data_enum!(
     /// Who an effect lands on, relative to its source.
-    Tgt { Me, Target, AllFoes, RandomFoe, AllFriends, OtherFriends }
+    Tgt { Me, Target, AllFoes, RandomFoe, AllFriends, OtherFriends, WeakestFoe }
 );
 data_enum!(Pile { Hand, Draw, Discard });
 data_enum!(RelicPool { Any, Shop, Boss, Book });
@@ -40,6 +40,7 @@ data_enum!(IntentKind { Attack, AttackAll, Defend, Buff, Debuff, Summon, Unknown
 
 data_enum!(StatusKind {
     Strength,
+    Drowse,
     TempStrength,
     Fortitude,
     Vulnerable,
@@ -86,6 +87,10 @@ pub enum Amount {
     Runes(RuneKind, i32),
     /// Rot, Hex and Weak stacks together on a unit, times the multiplier.
     Curses(Tgt, i32),
+    /// `.0` and `.1` for every other foe still standing beside the source: a pack bites harder.
+    Pack(i32, i32),
+    /// This percent of the health the source has lost.
+    MissingHp(i32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

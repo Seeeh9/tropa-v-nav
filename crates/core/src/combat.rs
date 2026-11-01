@@ -922,6 +922,7 @@ impl<'a> Exec<'a> {
                 }
             }
             Tgt::RandomFoe if self.s.foretelling => vec![],
+            Tgt::WeakestFoe => self.s.living_enemies().min_by_key(|e| e.hp).map(|e| UnitRef::Enemy(e.uid)).into_iter().collect(),
             Tgt::RandomFoe => {
                 let all = if hero_side { enemies(self) } else { heroes(self) };
                 self.s.rng.pick(&all).copied().into_iter().collect()
@@ -950,6 +951,14 @@ impl<'a> Exec<'a> {
                 us.iter().map(|u| self.s.status(*u, *st)).sum::<i32>() * m
             }
             Amount::Consumed(m) => ctx.consumed * m,
+            Amount::Pack(base, each) => {
+                let others = self.s.enemies.iter().filter(|e| e.alive && UnitRef::Enemy(e.uid) != ctx.src).count() as i32;
+                base + others * each
+            }
+            Amount::MissingHp(pct) => match ctx.src {
+                UnitRef::Hero(i) => self.s.hero(i).map_or(0, |h| (h.max_hp - h.hp) * pct / 100),
+                UnitRef::Enemy(u) => self.s.enemy(u).map_or(0, |e| (e.max_hp - e.hp) * pct / 100),
+            },
             Amount::PlayedThisRound(m) => self.s.log.len() as i32 * m,
             Amount::Curses(who, m) => {
                 let us = self.targets(ctx, *who);
@@ -1459,6 +1468,11 @@ impl<'a> Exec<'a> {
         }
         // end of the heroes' turn, in slot order
         for slot in self.standing() {
+            // Yemelya: strength not spent is sleep gained
+            let idle = self.s.hero(slot).filter(|h| h.mechanic == Mechanic::Sloth).map_or(0, |h| h.energy.max(0));
+            if idle > 0 {
+                self.add_status(UnitRef::Hero(slot), StatusKind::Drowse, idle);
+            }
             self.fire(slot, Trigger::TurnEnd);
             self.fire_runes(slot);
             if self.s.heroes[slot as usize].downed {

@@ -32,7 +32,7 @@
         id: "koschei_guard", hp: (70, 70),
         moves: [
             (id: "pierce", intent: Attack, targeted: true, effects: [Damage(N(16), Target)]),
-            (id: "shield_up", intent: Defend, effects: [Block(N(15), Me)]),
+            (id: "shield_up", intent: Defend, effects: [Block(N(15), Me), Apply(Thorns, N(3), Me)]),
         ],
         pattern: [1, 0],
     ),
@@ -49,7 +49,7 @@
         // усиливает других врагов, пока жива
         id: "weeper", hp: (30, 30),
         moves: [
-            (id: "lament", intent: Buff, effects: [Apply(Strength, N(2), OtherFriends)]),
+            (id: "lament", intent: Buff, effects: [Apply(Strength, N(2), OtherFriends), Heal(N(6), OtherFriends)]),
             (id: "keen", intent: Attack, targeted: true, effects: [Damage(N(6), Target)]),
         ],
         pattern: [0, 1, 1],

@@ -52,4 +52,24 @@
         effects: [LoseHp(N(4), Me), If(Coop, [Energy(N(2), Target)], [Energy(N(1), Me)])],
         up: (effects: [LoseHp(N(3), Me), If(Coop, [Energy(N(2), Target)], [Energy(N(1), Me)])]),
     ),
+    (
+        id: "vor_spread", hero: "vorozheya", kind: Skill, rarity: Uncommon, cost: 1, target: Enemy,
+        effects: [Hook("spread_curse")],
+        up: (effects: [Apply(Rot, N(2), Target), Hook("spread_curse")]),
+    ),
+    (
+        id: "vor_prey", hero: "vorozheya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(6), WeakestFoe), Apply(Rot, N(2), WeakestFoe)],
+        up: (effects: [Damage(N(8), WeakestFoe), Apply(Rot, N(3), WeakestFoe)]),
+    ),
+    (
+        id: "vor_ill_wind", hero: "vorozheya", kind: Skill, rarity: Uncommon, cost: 2,
+        effects: [Apply(Hex, N(3), AllFoes)],
+        up: (effects: [Apply(Hex, N(5), AllFoes)]),
+    ),
+    (
+        id: "vor_pain_price", hero: "vorozheya", kind: Attack, rarity: Rare, cost: 2, target: Enemy,
+        effects: [Damage(MissingHp(50), Target), Apply(Hex, N(3), Target)],
+        up: (effects: [Damage(MissingHp(70), Target), Apply(Hex, N(3), Target)]),
+    ),
 ]

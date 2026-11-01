@@ -50,4 +50,24 @@
         effects: [Hook("kolyada")],
         up: (keywords: [Retain]),
     ),
+    (
+        id: "vol_all_at_once", hero: "volhv", kind: Skill, rarity: Rare, cost: 2,
+        effects: [Hook("fire_all_runes")],
+        up: (effects: [Hook("fire_all_runes"), Draw(N(1))]),
+    ),
+    (
+        id: "vol_struck_oak", hero: "volhv", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(8), WeakestFoe)],
+        up: (effects: [Damage(N(11), WeakestFoe)]),
+    ),
+    (
+        id: "vol_carve_two", hero: "volhv", kind: Skill, rarity: Uncommon, cost: 2,
+        effects: [Rune(Thunder, Me), Rune(Frost, Me)],
+        up: (effects: [Rune(Thunder, Me), Rune(Flame, Me)]),
+    ),
+    (
+        id: "vol_old_wound", hero: "volhv", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Heal(MissingHp(20), Me)],
+        up: (effects: [Heal(MissingHp(30), Me)]),
+    ),
 ]

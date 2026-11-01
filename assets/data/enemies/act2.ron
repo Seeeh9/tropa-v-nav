@@ -31,9 +31,9 @@
     (
         id: "anchutka", hp: (12, 12),
         moves: [
-            (id: "pinch", intent: Attack, targeted: true, effects: [Damage(N(4), Target)]),
+            (id: "pinch", intent: Attack, targeted: true, effects: [Damage(N(4), Target)]), (id: "snatch", intent: Debuff, targeted: true, effects: [Hook("anchutka_snatch")]),
         ],
-        pattern: [0],
+        pattern: [0, 1, 0],
     ),
     (
         // через 2 хода взрывается: 12 урона всем

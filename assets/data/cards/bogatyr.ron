@@ -52,4 +52,24 @@
         effects: [Revive(25, Target)],
         up: (cost: 0),
     ),
+    (
+        id: "bog_final_line", hero: "bogatyr", kind: Attack, rarity: Uncommon, cost: 2, target: Enemy,
+        effects: [Damage(MissingHp(40), Target)],
+        up: (effects: [Damage(MissingHp(60), Target)]),
+    ),
+    (
+        id: "bog_hurt_pride", hero: "bogatyr", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Block(MissingHp(30), Me)],
+        up: (effects: [Block(MissingHp(45), Me)]),
+    ),
+    (
+        id: "bog_to_the_weak", hero: "bogatyr", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(9), WeakestFoe)],
+        up: (effects: [Damage(N(12), WeakestFoe)]),
+    ),
+    (
+        id: "bog_bloody_oath", hero: "bogatyr", kind: Skill, rarity: Rare, cost: 2,
+        effects: [LoseHp(N(5), Me), Apply(Strength, N(3), Me)],
+        up: (effects: [LoseHp(N(3), Me), Apply(Strength, N(4), Me)]),
+    ),
 ]

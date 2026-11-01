@@ -58,4 +58,24 @@
         effects: [Flag("foresight", 2)],
         up: (effects: [Flag("foresight", 2), Draw(N(1))]),
     ),
+    (
+        id: "wolf_blood_trail", hero: "volkolak", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(9), WeakestFoe)],
+        up: (effects: [Damage(N(12), WeakestFoe)]),
+    ),
+    (
+        id: "wolf_at_bay", hero: "volkolak", kind: Attack, rarity: Uncommon, cost: 2, target: Enemy,
+        effects: [Damage(MissingHp(45), Target)],
+        up: (effects: [Damage(MissingHp(65), Target)]),
+    ),
+    (
+        id: "wolf_lick", hero: "volkolak", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Heal(MissingHp(25), Me)],
+        up: (effects: [Heal(MissingHp(35), Me)]),
+    ),
+    (
+        id: "wolf_hunt_down", hero: "volkolak", kind: Attack, rarity: Rare, cost: 2,
+        effects: [Hits(N(6), 3, WeakestFoe)],
+        up: (effects: [Hits(N(8), 3, WeakestFoe)]),
+    ),
 ]

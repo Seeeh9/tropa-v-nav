@@ -217,11 +217,12 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
             }
         }
         // one-turn afflictions an enemy lays on the hero it aimed at
-        "drag_under" | "charm" | "sleep" => {
+        "drag_under" | "charm" | "sleep" | "auka_lure" => {
             let Some(UnitRef::Hero(slot)) = ctx.target else { return };
             let flag = match name {
                 "drag_under" => "energy_less",
                 "charm" => "charmed",
+                "auka_lure" => "confused",
                 _ => "asleep",
             };
             ex.s.heroes[slot as usize].flags.insert(flag.into(), 1);
@@ -261,6 +262,65 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
                     ex.ev.push(Event::Summoned { enemy: uid, def: "upyr".into() });
                 }
             }
+        }
+        // a card in the hand of the hero aimed at spoils: gone for this fight, a web in its place
+        "spoil_card" => {
+            let Some(UnitRef::Hero(slot)) = ctx.target else { return };
+            let n = ex.s.heroes[slot as usize].hand.len() as u32;
+            if n > 0 {
+                let i = ex.s.rng.below(n) as usize;
+                ex.s.heroes[slot as usize].hand.remove(i);
+                ex.s.next_uid += 1;
+                let uid = ex.s.next_uid;
+                ex.s.heroes[slot as usize].hand.push(Card { uid, def: "web".into(), upgraded: false, free: false });
+            }
+        }
+        // an anchutka runs off with a card out of the hand of the hero it aimed at
+        "anchutka_snatch" => {
+            let Some(UnitRef::Hero(slot)) = ctx.target else { return };
+            let n = ex.s.heroes[slot as usize].hand.len() as u32;
+            if n > 0 {
+                let i = ex.s.rng.below(n) as usize;
+                let h = &mut ex.s.heroes[slot as usize];
+                let card = h.hand.remove(i);
+                h.discard.push(card);
+            }
+        }
+        // the witch's curses on one foe are laid on all the others as well
+        "spread_curse" => {
+            let Some(target) = ctx.target else { return };
+            let kinds = [StatusKind::Rot, StatusKind::Hex, StatusKind::Weak];
+            let have: Vec<(StatusKind, i32)> = kinds.iter().map(|k| (*k, ex.s.status(target, *k))).filter(|(_, n)| *n > 0).collect();
+            let others: Vec<UnitRef> = ex.s.living_enemies().map(|e| UnitRef::Enemy(e.uid)).filter(|u| *u != target).collect();
+            for u in others {
+                for (k, n) in &have {
+                    ex.add_status(u, *k, *n);
+                }
+            }
+        }
+        // every rune on the volkhv goes off at once, and they stay carved
+        "fire_all_runes" => {
+            let UnitRef::Hero(me) = ctx.src else { return };
+            let runes = ex.s.heroes[me as usize].runes.clone();
+            for r in runes {
+                ex.fire_rune(me, r);
+            }
+        }
+        // the cauldron thrown over the party: a shield for each herb, and no brew
+        "spill_cauldron" => {
+            let UnitRef::Hero(me) = ctx.src else { return };
+            let herbs = std::mem::take(&mut ex.s.heroes[me as usize].cauldron).len() as i32;
+            let all: Vec<u8> = ex.s.standing_heroes().map(|h| h.slot).collect();
+            for slot in all {
+                ex.gain_block(UnitRef::Hero(slot), herbs * 3);
+            }
+        }
+        // the jester walks off with a foe's shield
+        "steal_block" => {
+            let Some(UnitRef::Enemy(uid)) = ctx.target else { return };
+            let Some(e) = ex.s.enemies.iter_mut().find(|e| e.uid == uid) else { return };
+            let n = std::mem::take(&mut e.block);
+            ex.gain_block(ctx.src, n);
         }
         // the fever moves on to the next hero
         "pass_fever" => {

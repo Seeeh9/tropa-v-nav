@@ -14,6 +14,7 @@
     (
         id: "em_sloth", hero: "emelya", kind: Curse, rarity: Starter, cost: 0,
         keywords: [Unplayable],
+        in_hand_end: [Apply(Drowse, N(1), Me)],
     ),
     (
         id: "em_yawn", hero: "emelya", kind: Skill, rarity: Common, cost: 0,
@@ -60,5 +61,194 @@
         id: "em_by_the_pike", hero: "emelya", kind: Attack, rarity: Rare, cost: 3,
         effects: [Hits(N(7), 5, RandomFoe)],
         up: (effects: [Hits(N(9), 5, RandomFoe)]),
+    ),
+    (
+        id: "em_nap", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Block(N(5), Me), Apply(Drowse, N(2), Me)],
+        up: (effects: [Block(N(7), Me), Apply(Drowse, N(3), Me)]),
+    ),
+    (
+        id: "em_snore", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(3), AllFoes), Apply(Drowse, N(1), Me)],
+        up: (effects: [Damage(N(5), AllFoes), Apply(Drowse, N(1), Me)]),
+    ),
+    (
+        id: "em_dream_bite", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Consume(Drowse, Me), Damage(Consumed(3), RandomFoe)],
+        up: (effects: [Consume(Drowse, Me), Damage(Consumed(4), RandomFoe)]),
+    ),
+    (
+        id: "em_turn_over", hero: "emelya", kind: Skill, rarity: Common, cost: 0,
+        effects: [Block(N(3), Me)],
+        up: (effects: [Block(N(5), Me)]),
+    ),
+    (
+        id: "em_cat", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Block(N(8), Me)],
+        up: (effects: [Block(N(11), Me)]),
+    ),
+    (
+        id: "em_pike_tail", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Hits(N(3), 2, RandomFoe)],
+        up: (effects: [Hits(N(4), 2, RandomFoe)]),
+    ),
+    (
+        id: "em_soot", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Apply(Weak, N(1), AllFoes)],
+        up: (effects: [Apply(Weak, N(2), AllFoes)]),
+    ),
+    (
+        id: "em_smoke", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Apply(Vulnerable, N(1), AllFoes)],
+        up: (effects: [Apply(Vulnerable, N(2), AllFoes)]),
+    ),
+    (
+        id: "em_hot_coals", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(6), RandomFoe), Apply(Rot, N(1), AllFoes)],
+        up: (effects: [Damage(N(8), RandomFoe), Apply(Rot, N(2), AllFoes)]),
+    ),
+    (
+        id: "em_pancake", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Heal(N(3), Me), Draw(N(1))],
+        keywords: [Exhaust],
+        up: (effects: [Heal(N(5), Me), Draw(N(1))]),
+    ),
+    (
+        id: "em_shchi", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Heal(N(6), Me)],
+        keywords: [Exhaust],
+        up: (effects: [Heal(N(9), Me)]),
+    ),
+    (
+        id: "em_stove_door", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(8), RandomFoe)],
+        up: (effects: [Damage(N(11), RandomFoe)]),
+    ),
+    (
+        id: "em_ice_hole", hero: "emelya", kind: Skill, rarity: Common, cost: 1,
+        effects: [Draw(N(2)), LoseHp(N(2), Me)],
+        up: (effects: [Draw(N(3)), LoseHp(N(2), Me)]),
+    ),
+    (
+        id: "em_sled_bump", hero: "emelya", kind: Attack, rarity: Common, cost: 1,
+        effects: [Damage(N(4), AllFoes), Block(N(2), Me)],
+        up: (effects: [Damage(N(6), AllFoes), Block(N(3), Me)]),
+    ),
+    (
+        id: "em_long_sleep", hero: "emelya", kind: Power, rarity: Uncommon, cost: 1,
+        passives: [(on: TurnEnd, effects: [Apply(Drowse, N(1), Me)])],
+        up: (passives: [(on: TurnEnd, effects: [Apply(Drowse, N(2), Me)])]),
+    ),
+    (
+        id: "em_brick", hero: "emelya", kind: Attack, rarity: Uncommon, cost: 2,
+        effects: [Damage(Stat(Drowse, Me, 2), RandomFoe), Block(N(6), Me)],
+        up: (effects: [Damage(Stat(Drowse, Me, 3), RandomFoe), Block(N(8), Me)]),
+    ),
+    (
+        id: "em_dream_wall", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Block(Stat(Drowse, Me, 2), Me)],
+        up: (effects: [Block(Stat(Drowse, Me, 3), Me)]),
+    ),
+    (
+        id: "em_bad_dream", hero: "emelya", kind: Attack, rarity: Uncommon, cost: 2,
+        effects: [Consume(Drowse, Me), Damage(Consumed(2), AllFoes)],
+        up: (effects: [Consume(Drowse, Me), Damage(Consumed(3), AllFoes)]),
+    ),
+    (
+        id: "em_good_dream", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Consume(Drowse, Me), Heal(Consumed(1), Me)],
+        keywords: [Exhaust],
+        up: (effects: [Consume(Drowse, Me), Heal(Consumed(2), Me)]),
+    ),
+    (
+        id: "em_wake_up", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 0,
+        effects: [If(Has(Drowse, Me, 3), [Remove(Drowse, Me), Energy(N(2), Me)], [])],
+        up: (effects: [If(Has(Drowse, Me, 2), [Remove(Drowse, Me), Energy(N(2), Me), Draw(N(1))], [])]),
+    ),
+    (
+        id: "em_downhill", hero: "emelya", kind: Attack, rarity: Uncommon, cost: 2,
+        effects: [Damage(N(9), AllFoes), AddCard(card: "em_sloth", pile: Discard, to: Me)],
+        up: (effects: [Damage(N(13), AllFoes), AddCard(card: "em_sloth", pile: Discard, to: Me)]),
+    ),
+    (
+        id: "em_mother_sloth", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 2,
+        effects: [Block(N(14), Me), AddCard(card: "em_sloth", pile: Discard, to: Me)],
+        up: (effects: [Block(N(19), Me), AddCard(card: "em_sloth", pile: Discard, to: Me)]),
+    ),
+    (
+        id: "em_pike_mercy", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [Apply(Strength, N(1), Me), Block(N(4), Me)],
+        keywords: [Exhaust],
+        up: (effects: [Apply(Strength, N(2), Me), Block(N(4), Me)]),
+    ),
+    (
+        id: "em_fish_soup", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [MaxHp(N(2), Me), Heal(N(6), Me)],
+        keywords: [Exhaust],
+        up: (effects: [MaxHp(N(3), Me), Heal(N(9), Me)]),
+    ),
+    (
+        id: "em_thrown_bucket", hero: "emelya", kind: Attack, rarity: Uncommon, cost: 1,
+        effects: [Damage(N(6), RandomFoe), Apply(Weak, N(1), AllFoes)],
+        up: (effects: [Damage(N(9), RandomFoe), Apply(Weak, N(1), AllFoes)]),
+    ),
+    (
+        id: "em_tsar_gift", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 1,
+        effects: [AddCard(card: "em_bid", pile: Hand, to: Me, count: 2)],
+        keywords: [Exhaust],
+        up: (effects: [AddCard(card: "em_bid", pile: Hand, to: Me, count: 3)]),
+    ),
+    (
+        id: "em_forest_cut", hero: "emelya", kind: Attack, rarity: Uncommon, cost: 3,
+        effects: [Hits(N(6), 4, RandomFoe)],
+        up: (effects: [Hits(N(8), 4, RandomFoe)]),
+    ),
+    (
+        id: "em_sleep_it_off", hero: "emelya", kind: Skill, rarity: Uncommon, cost: 2,
+        effects: [Apply(Drowse, N(6), Me)],
+        up: (effects: [Apply(Drowse, N(9), Me)]),
+    ),
+    (
+        id: "em_nesmeyana", hero: "emelya", kind: Power, rarity: Rare, cost: 2,
+        passives: [(on: TurnStart, effects: [Apply(Drowse, N(2), Me)])],
+        up: (passives: [(on: TurnStart, effects: [Apply(Drowse, N(3), Me)])]),
+    ),
+    (
+        id: "em_stove_palace", hero: "emelya", kind: Power, rarity: Rare, cost: 3,
+        passives: [(on: TurnStart, effects: [Damage(N(6), AllFoes)])],
+        up: (passives: [(on: TurnStart, effects: [Damage(N(9), AllFoes)])]),
+    ),
+    (
+        id: "em_chip_army", hero: "emelya", kind: Attack, rarity: Rare, cost: 3,
+        effects: [Hits(N(4), 8, RandomFoe)],
+        up: (effects: [Hits(N(5), 8, RandomFoe)]),
+    ),
+    (
+        id: "em_prophetic_dream", hero: "emelya", kind: Attack, rarity: Rare, cost: 2,
+        effects: [Consume(Drowse, Me), Damage(Consumed(5), RandomFoe)],
+        keywords: [Exhaust],
+        up: (effects: [Consume(Drowse, Me), Damage(Consumed(7), RandomFoe)]),
+    ),
+    (
+        id: "em_lazy_king", hero: "emelya", kind: Skill, rarity: Rare, cost: 3,
+        effects: [Apply(Drowse, N(10), Me), Block(N(20), Me)],
+        keywords: [Exhaust],
+        up: (effects: [Apply(Drowse, N(14), Me), Block(N(26), Me)]),
+    ),
+    (
+        id: "em_pike_teeth", hero: "emelya", kind: Power, rarity: Rare, cost: 2,
+        passives: [(on: AttackPlayed, effects: [Damage(N(2), RandomFoe)])],
+        up: (passives: [(on: AttackPlayed, effects: [Damage(N(3), RandomFoe)])]),
+    ),
+    (
+        id: "em_last_wish", hero: "emelya", kind: Skill, rarity: Rare, cost: 1,
+        effects: [Energy(N(2), Me), Draw(N(2))],
+        keywords: [Exhaust],
+        up: (effects: [Energy(N(3), Me), Draw(N(2))]),
+    ),
+    (
+        id: "em_ride_to_tsar", hero: "emelya", kind: Attack, rarity: Rare, cost: 2,
+        effects: [Damage(N(10), AllFoes), Draw(N(1))],
+        up: (effects: [Damage(N(14), AllFoes), Draw(N(1))]),
     ),
 ]

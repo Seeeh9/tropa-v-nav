@@ -86,7 +86,7 @@ const FIGURES: &[(&str, &[Cut])] = &[
     ("enemies/vodyanoy", &[(Part::Head, Vec2::new(0.492, 0.31), 1.0), (Part::Shield, Vec2::new(0.703, 0.365), 0.8), (Part::Arm, Vec2::new(0.332, 0.388), 1.0)]),
     ("enemies/chuchelo", &[(Part::Head, Vec2::new(0.51, 0.2), 0.8), (Part::Shield, Vec2::new(0.68, 0.431), 0.7), (Part::Arm, Vec2::new(0.311, 0.431), 0.7)]),
     ("enemies/verlioka", &[(Part::Head, Vec2::new(0.44, 0.253), 1.0), (Part::Shield, Vec2::new(0.733, 0.359), 0.8), (Part::Arm, Vec2::new(0.308, 0.3), 0.5)]),
-    ("enemies/viy", &[(Part::Head, Vec2::new(0.58, 0.2), 0.4), (Part::Arm, Vec2::new(0.155, 0.422), 1.0)]),
+    ("enemies/viy", &[(Part::Head, Vec2::new(0.42, 0.2), 0.4), (Part::Arm, Vec2::new(0.845, 0.422), 1.0)]),
     ("heroes/znaharka", &[(Part::Shield, Vec2::new(0.40, 0.40), 0.7), (Part::Head, Vec2::new(0.61, 0.20), 0.9), (Part::Arm, Vec2::new(0.73, 0.40), -0.6)]),
     // the "shield" is his chimney, which only rocks; the arm holds the bucket and the pike
     ("heroes/emelya", &[(Part::Shield, Vec2::new(0.30, 0.30), 0.35), (Part::Head, Vec2::new(0.445, 0.30), 0.9), (Part::Arm, Vec2::new(0.62, 0.27), 0.8)]),

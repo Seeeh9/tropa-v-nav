@@ -208,7 +208,10 @@ impl ShowPile<'_, '_> {
                 ChildOf(*self.layer),
             ))
             .observe(|ev: On<PointerClick>, mut commands: Commands, views: Query<Entity, With<PileView>>| {
-                let _ = ev;
+                // the right button turns a card over here; only the left one closes the view
+                if ev.button != PointerButton::Primary {
+                    return;
+                }
                 for e in &views {
                     commands.entity(e).despawn();
                 }

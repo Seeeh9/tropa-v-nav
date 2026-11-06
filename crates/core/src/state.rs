@@ -87,6 +87,9 @@ pub struct Intent {
     pub target: Option<u8>,
 }
 
+/// The flag on an enemy that fell once and lies as bones until its next turn.
+pub const BONES: &str = "bones";
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Enemy {
     pub uid: u32,
@@ -233,6 +236,8 @@ pub enum Event {
     Redirected { from: u8, to: u8, amount: i32 },
     Block { unit: UnitRef, amount: i32, total: i32 },
     Status { unit: UnitRef, status: StatusKind, delta: i32, total: i32 },
+    /// An enemy fell apart and will get up on its next turn.
+    Collapsed { enemy: u32 },
     Heal { unit: UnitRef, amount: i32, hp: i32 },
     Energy { player: u8, delta: i32 },
     Downed { player: u8 },
@@ -278,8 +283,9 @@ impl Combat {
     pub fn enemy(&self, uid: u32) -> Option<&Enemy> {
         self.enemies.iter().find(|e| e.uid == uid)
     }
+    /// Enemies that can act and be struck: a heap of bones getting up is neither.
     pub fn living_enemies(&self) -> impl Iterator<Item = &Enemy> {
-        self.enemies.iter().filter(|e| e.alive)
+        self.enemies.iter().filter(|e| e.alive && !e.flags.contains_key(BONES))
     }
     pub fn standing_heroes(&self) -> impl Iterator<Item = &Hero> {
         self.heroes.iter().filter(|h| !h.downed)

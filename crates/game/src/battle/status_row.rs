@@ -33,6 +33,8 @@ pub(super) struct Chip {
     /// Art stem of its picture, also what tells chips apart.
     pub icon: String,
     pub n: Option<i32>,
+    /// How `n` is written, when not as a plain number.
+    pub shown: Option<String>,
     /// A boon (gold edge), a bane (red edge) or neither.
     pub good: Option<bool>,
     pub name: String,
@@ -58,23 +60,23 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
     let status = |out: &mut Vec<Chip>, map: &Statuses| {
         for (st, n) in map.iter() {
             let key = format!("status-{st:?}");
-            out.push(Chip { icon: format!("status/{st:?}"), n: Some(*n), good: Some(boon(*st)), name: l10n.t(&key), help: help(l10n, &key) });
+            out.push(Chip { icon: format!("status/{st:?}"), n: Some(*n), shown: Some(l10n.status_amount(*st, *n)), good: Some(boon(*st)), name: l10n.t(&key), help: help(l10n, &key) });
         }
     };
     match unit {
         UnitRef::Hero(i) => {
             let (Some(h), Some(real)) = (session.shown.hero(i), session.truth.hero(i).or(session.shown.hero(i))) else { return out };
             if h.downed {
-                out.push(Chip { icon: "status/downed".into(), n: None, good: Some(false), name: l10n.t("battle-downed"), help: String::new() });
+                out.push(Chip { icon: "status/downed".into(), n: None, shown: None, good: Some(false), name: l10n.t("battle-downed"), help: String::new() });
                 return out;
             }
             if h.mechanic == Mechanic::Moon {
                 let form = l10n.t(&format!("form-{:?}", h.form));
-                out.push(Chip { icon: format!("status/moon_{:?}", h.form), n: Some(real.moon as i32), good: None, name: format!("{form} · {}", l10n.t("res-moon")), help: format!("{}/5", real.moon) });
+                out.push(Chip { icon: format!("status/moon_{:?}", h.form), n: Some(real.moon as i32), shown: None, good: None, name: format!("{form} · {}", l10n.t("res-moon")), help: format!("{}/5", real.moon) });
             }
             if let Some(m) = h.mask {
                 let key = format!("mask-{m:?}");
-                out.push(Chip { icon: format!("cards/sk_mask_{}", format!("{m:?}").to_lowercase()), n: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
+                out.push(Chip { icon: format!("cards/sk_mask_{}", format!("{m:?}").to_lowercase()), n: None, shown: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
             }
             // the same rune carved twice is one chip with a two on it
             let mut runes: Vec<(RuneKind, i32)> = Vec::new();
@@ -86,7 +88,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             }
             for (r, n) in runes {
                 let key = format!("rune-{r:?}");
-                out.push(Chip { icon: format!("status/rune_{r:?}"), n: (n > 1).then_some(n), good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
+                out.push(Chip { icon: format!("status/rune_{r:?}"), n: (n > 1).then_some(n), shown: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
             }
             let mut herbs: Vec<(String, i32)> = Vec::new();
             for x in &real.cauldron {
@@ -96,10 +98,10 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                 }
             }
             for (x, n) in herbs {
-                out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, &format!("herb-{x}")) });
+                out.push(Chip { icon: format!("cards/herb_{x}"), n: (n > 1).then_some(n), shown: None, good: None, name: format!("{}: {}", l10n.t("res-cauldron"), l10n.t(&format!("herb-{x}"))), help: help(l10n, &format!("herb-{x}")) });
             }
             if h.walks_headless {
-                out.push(Chip { icon: "status/hollow".into(), n: None, good: Some(false), name: l10n.t("trait-walks-headless"), help: help(l10n, "trait-walks-headless") });
+                out.push(Chip { icon: "status/hollow".into(), n: None, shown: None, good: Some(false), name: l10n.t("trait-walks-headless"), help: help(l10n, "trait-walks-headless") });
             }
             if h.lost_limbs > 0 {
                 // each hero loses what that arm held
@@ -108,12 +110,12 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
                     nav_core::combat::SHIELD_ARM => format!("trait-lost-shield-{}", h.def),
                     _ => format!("trait-lost-both-{}", h.def),
                 };
-                out.push(Chip { icon: "status/lost_limb".into(), n: (h.lost_limbs > 1).then_some(h.lost_limbs as i32), good: Some(false), name: l10n.t(&key), help: help(l10n, &key) });
+                out.push(Chip { icon: "status/lost_limb".into(), n: (h.lost_limbs > 1).then_some(h.lost_limbs as i32), shown: None, good: Some(false), name: l10n.t(&key), help: help(l10n, &key) });
             }
             for flag in ["marked", "blind", "coiled", "confused", "mired", "asleep", "charmed", "frozen", "winter", "draw_less", "energy_less", "no_intents"] {
                 if let Some(n) = real.flags.get(flag) {
                     let key = format!("trait-{flag}");
-                    out.push(Chip { icon: format!("status/{flag}"), n: (*n > 1).then_some(*n), good: Some(false), name: l10n.t(&key), help: help(l10n, &key) });
+                    out.push(Chip { icon: format!("status/{flag}"), n: (*n > 1).then_some(*n), shown: None, good: Some(false), name: l10n.t(&key), help: help(l10n, &key) });
                 }
             }
             status(&mut out, &h.statuses);
@@ -123,17 +125,17 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             // the real state carries the traits and the countdown
             if let Some(real) = session.truth.enemy(uid) {
                 if real.flags.contains_key("immortal") {
-                    out.push(Chip { icon: "status/immortal".into(), n: None, good: Some(true), name: l10n.t("trait-immortal"), help: help(l10n, "trait-immortal") });
+                    out.push(Chip { icon: "status/immortal".into(), n: None, shown: None, good: Some(true), name: l10n.t("trait-immortal"), help: help(l10n, "trait-immortal") });
                 }
                 // what its kind does, while it can: the hare's dodge is gone once spent this round
                 for flag in ["dodge", "flying", "hiding", "enrage", "lifesteal", "piercing", "rises", "hunter", "pack", "spores", "vengeful", "burning", "greedy", "hollow", "growing"] {
                     if real.flags.contains_key(flag) && !(flag == "dodge" && real.flags.contains_key("turn_dodged")) {
                         let key = format!("trait-{flag}");
-                        out.push(Chip { icon: format!("status/{flag}"), n: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
+                        out.push(Chip { icon: format!("status/{flag}"), n: None, shown: None, good: Some(true), name: l10n.t(&key), help: help(l10n, &key) });
                     }
                 }
                 if let Some(n) = real.flags.get("last_breath") {
-                    out.push(Chip { icon: "status/last_breath".into(), n: Some(*n), good: None, name: l10n.n("trait-last-breath", *n), help: String::new() });
+                    out.push(Chip { icon: "status/last_breath".into(), n: Some(*n), shown: None, good: None, name: l10n.n("trait-last-breath", *n), help: String::new() });
                 }
             }
             status(&mut out, &e.statuses);
@@ -203,7 +205,7 @@ fn sync_rows(
             if let Some(n) = c.n {
                 commands.spawn((
                     Node { position_type: PositionType::Absolute, right: px(1), bottom: px(-2), ..default() },
-                    theme::text(n.to_string(), &fonts.num, 19.0, theme::BONE),
+                    theme::text(c.shown.clone().unwrap_or_else(|| n.to_string()), &fonts.num, 19.0, theme::BONE),
                     TextShadow { offset: Vec2::new(1.5, 1.5), color: Color::BLACK },
                     ChildOf(chip),
                 ));

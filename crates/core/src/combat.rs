@@ -61,6 +61,11 @@ pub fn start(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64) -> (C
 pub const WEAPON_ARM: u8 = 1;
 pub const SHIELD_ARM: u8 = 2;
 
+/// Fear is kept in tenths of a percent, so the Mara mask can add half a percent.
+pub const FEAR_CAP: i32 = 750;
+/// What each blow struck in the Mara mask adds: 7.5 percent.
+pub const MARA_FEAR: i32 = 75;
+
 /// What a body has left to fight with once this arm is gone.
 pub fn stump_cards(arm: u8) -> &'static [&'static str] {
     if arm == WEAPON_ARM {
@@ -239,7 +244,7 @@ impl<'a> Exec<'a> {
     fn exists(&self, u: UnitRef) -> bool {
         match u {
             UnitRef::Hero(i) => self.s.hero(i).is_some_and(|h| !h.downed),
-            UnitRef::Enemy(i) => self.s.enemy(i).is_some_and(|e| e.alive),
+            UnitRef::Enemy(i) => self.s.enemy(i).is_some_and(|e| e.alive && !e.flags.contains_key(crate::state::BONES)),
         }
     }
 
@@ -285,7 +290,7 @@ impl<'a> Exec<'a> {
             total = total.max(0);
         }
         if st == S::Fear {
-            total = total.min(75);
+            total = total.min(FEAR_CAP);
         }
         if total == 0 {
             map.remove(&st);
@@ -389,8 +394,9 @@ impl<'a> Exec<'a> {
                 d /= 2;
                 self.add_status(dst, S::Mist, -1);
             }
+            // every blow that lands, not every card played: a card of three hits gives three times
             if mara && matches!(dst, UnitRef::Enemy(_)) {
-                self.add_status(dst, S::Fear, 25);
+                self.add_status(dst, S::Fear, MARA_FEAR);
             }
         }
         self.hurt(src, dst, d.max(0), attack)
@@ -670,12 +676,21 @@ impl<'a> Exec<'a> {
     }
 
     fn kill(&mut self, idx: usize, src: Option<UnitRef>) {
-        // the kostomakha gets up once, at half its bones
+        // the kostomakha falls apart once and lies as bones until its next turn, when it gets
+        // up at half its strength: the heroes get a turn's grace, and see it coming
         if self.s.enemies[idx].flags.remove("rises").is_some() {
+            let reassemble = self.c.enemies.get(&self.s.enemies[idx].def).and_then(|d| d.moves.iter().position(|m| m.id == "reassemble"));
             let e = &mut self.s.enemies[idx];
-            e.hp = (e.max_hp / 2).max(1);
-            let (unit, hp) = (UnitRef::Enemy(e.uid), e.hp);
-            self.ev.push(Event::Heal { unit, amount: hp, hp });
+            e.hp = 0;
+            e.block = 0;
+            e.statuses.clear();
+            e.flags.insert(crate::state::BONES.into(), 1);
+            e.intent = reassemble.map(|mv| Intent { mv, target: None });
+            let uid = e.uid;
+            self.ev.push(Event::Collapsed { enemy: uid });
+            if let Some(mv) = reassemble {
+                self.ev.push(Event::Intent { enemy: uid, mv, target: None });
+            }
             return;
         }
         let e = &mut self.s.enemies[idx];
@@ -1167,7 +1182,11 @@ impl<'a> Exec<'a> {
                     }
                 }
                 Effect::Apply(st, a, t) => {
-                    let n = self.amount(ctx, a);
+                    let mut n = self.amount(ctx, a);
+                    // cards speak of Fear in whole percent; it is kept in tenths
+                    if *st == S::Fear {
+                        n *= 10;
+                    }
                     for u in self.targets(ctx, *t) {
                         self.add_status(u, *st, n);
                     }
@@ -1180,7 +1199,8 @@ impl<'a> Exec<'a> {
                 Effect::Consume(st, t) => {
                     ctx.consumed = 0;
                     for u in self.targets(ctx, *t) {
-                        ctx.consumed += self.clear_status(u, *st);
+                        let n = self.clear_status(u, *st);
+                        ctx.consumed += if *st == S::Fear { n / 10 } else { n };
                     }
                 }
                 Effect::Cleanse(t) => {
@@ -1643,6 +1663,15 @@ impl<'a> Exec<'a> {
                 continue;
             }
             self.s.enemies[idx].block = 0;
+            // bones lying since the heroes' turn come together instead of striking
+            if self.s.enemies[idx].flags.remove(crate::state::BONES).is_some() {
+                let e = &mut self.s.enemies[idx];
+                e.hp = (e.max_hp / 2).max(1);
+                e.intent = None;
+                let (unit, hp) = (UnitRef::Enemy(e.uid), e.hp);
+                self.ev.push(Event::Heal { unit, amount: hp, hp });
+                continue;
+            }
             let Some(intent) = self.s.enemies[idx].intent.clone() else { continue };
             self.s.enemies[idx].step += 1;
             let me = UnitRef::Enemy(uid);
@@ -1654,7 +1683,7 @@ impl<'a> Exec<'a> {
             if self.s.status(me, S::Stun) > 0 {
                 self.add_status(me, S::Stun, -1);
                 self.ev.push(Event::EnemySkipped { enemy: uid, fear: false });
-            } else if attacks && fear > 0 && self.s.rng.chance(fear) {
+            } else if attacks && fear > 0 && (self.s.rng.below(1000) as i32) < fear {
                 self.clear_status(me, S::Fear);
                 self.ev.push(Event::EnemySkipped { enemy: uid, fear: true });
             } else {
@@ -1740,7 +1769,7 @@ impl<'a> Exec<'a> {
         if self.s.standing_heroes().next().is_none() {
             self.s.phase = Phase::Lost;
             self.ev.push(Event::Ended { won: false });
-        } else if self.s.living_enemies().next().is_none() {
+        } else if self.s.enemies.iter().all(|e| !e.alive) {
             self.s.phase = Phase::Won;
             let has_curse = self.c.cards.contains_key(NAV_MARK);
             for h in &mut self.s.heroes {

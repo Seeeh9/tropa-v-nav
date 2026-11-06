@@ -115,6 +115,15 @@ impl L10n {
         L10n { lang, bundle }
     }
 
+    /// A status amount as a player reads it: Fear is kept in tenths of a percent.
+    pub fn status_amount(&self, st: nav_core::StatusKind, n: i32) -> String {
+        if st != nav_core::StatusKind::Fear || n % 10 == 0 {
+            return if st == nav_core::StatusKind::Fear { (n / 10).to_string() } else { n.to_string() };
+        }
+        let sep = if self.lang.code() == "en" { "." } else { "," };
+        format!("{}{sep}{}", n / 10, (n % 10).abs())
+    }
+
     pub fn has(&self, key: &str) -> bool {
         self.bundle.has_message(key)
     }

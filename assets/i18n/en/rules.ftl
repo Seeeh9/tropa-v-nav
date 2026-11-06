@@ -157,7 +157,7 @@ mask-Bear-help = Attacks deal +3 damage.
 mask-Goat = Goat
 mask-Goat-help = Every card you play gives a random ally 2 Block.
 mask-Mara = Mara
-mask-Mara-help = Attacks apply Fear.
+mask-Mara-help = Every blow applies 7.5% Fear.
 
 fx-consumecurses = Echo: consume every Curse on the target.
 fx-once = Once per combat: { $body }

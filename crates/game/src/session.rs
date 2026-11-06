@@ -99,7 +99,23 @@ fn show(shown: &mut Combat, truth: &Combat, e: &Event) {
     match e {
         Event::Damage { dst, hp, block, .. } => set(shown, *dst, Some(*hp), Some(*block)),
         Event::Block { unit, total, .. } => set(shown, *unit, None, Some(*total)),
-        Event::Heal { unit, hp, .. } => set(shown, *unit, Some(*hp), None),
+        Event::Heal { unit, hp, .. } => {
+            set(shown, *unit, Some(*hp), None);
+            // bones that got up
+            if let UnitRef::Enemy(uid) = unit {
+                if let Some(en) = shown.enemies.iter_mut().find(|x| x.uid == *uid) {
+                    en.flags.remove(nav_core::state::BONES);
+                }
+            }
+        }
+        Event::Collapsed { enemy } => {
+            if let Some(en) = shown.enemies.iter_mut().find(|x| x.uid == *enemy) {
+                en.hp = 0;
+                en.block = 0;
+                en.statuses.clear();
+                en.flags.insert(nav_core::state::BONES.into(), 1);
+            }
+        }
         Event::Status { unit, status, total, .. } => {
             let map = match unit {
                 UnitRef::Hero(i) => shown.heroes.get_mut(*i as usize).map(|h| &mut h.statuses),

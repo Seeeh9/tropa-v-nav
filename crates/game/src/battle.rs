@@ -1259,6 +1259,18 @@ fn animate_sprites(
                 pose.breath = 0.006;
             }
         }
+        if let UnitRef::Enemy(uid) = s.unit {
+            if session.shown.enemy(uid).is_some_and(|e| e.flags.contains_key(nav_core::state::BONES)) {
+                // fallen apart, a heap about to get up: low, dark and still
+                tint = s.base.mix(&Color::srgb(0.08, 0.07, 0.06), 0.6);
+                offset.y += s.height * 0.3;
+                scale *= Vec2::new(1.08, 0.55);
+                pose.nod = 0.5;
+                pose.swing = 0.6;
+                pose.sway = 0.0;
+                pose.breath = 0.0;
+            }
+        }
         if s.alive < 1.0 {
             // dying: the knees give first and the body sinks on them, the head drops, the arms
             // go slack and swing; then it goes over (see `gore`) and lies
@@ -2121,7 +2133,7 @@ fn update_tooltip(
         // everything the row under the unit shows, by name, with what it does
         for c in status_row::chips(&l10n, &session, w.unit) {
             let name = match c.n {
-                Some(n) => format!("{} {n}", c.name),
+                Some(n) => format!("{} {}", c.name, c.shown.unwrap_or_else(|| n.to_string())),
                 None => c.name,
             };
             lines.push((name, c.help));
@@ -2274,7 +2286,7 @@ fn cue_effects(
                     fx.0.push(if status.debuff() { fx::Burst::Smoke { at: foot, color: Color::srgb(0.2, 0.3, 0.12) } } else { fx::Burst::Motes { at: foot, color: Color::srgb(1.0, 0.82, 0.4) } });
                 }
                 let color = if status.debuff() { theme::ROTLIGHT } else { theme::CANDLE };
-                float(&mut commands, *unit, format!("{} +{delta}", l10n.t(&format!("status-{status:?}"))), color, 24.0, 30.0)
+                float(&mut commands, *unit, format!("{} +{}", l10n.t(&format!("status-{status:?}")), l10n.status_amount(*status, *delta)), color, 24.0, 30.0)
             }
             Event::EnemySkipped { enemy, .. } => float(&mut commands, UnitRef::Enemy(*enemy), "…".into(), theme::BONE, 44.0, 0.0),
             // a card played is seen in the hand that held it (`held`)

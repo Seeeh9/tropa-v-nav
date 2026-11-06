@@ -62,6 +62,7 @@ pub const CARDS: &str = r#"[
 pub const ENEMIES: &str = r#"[
     (id: "dummy", hp: (100, 100), moves: [(id: "wait", intent: Defend, effects: [])], pattern: [0]),
     (id: "weakling", hp: (10, 10), moves: [(id: "wait", intent: Defend, effects: [])], pattern: [0]),
+    (id: "bones", hp: (10, 10), flags: ["rises"], moves: [(id: "hit", intent: Attack, targeted: true, effects: [Damage(N(10), Target)]), (id: "reassemble", intent: Buff, effects: [])], pattern: [0]),
     (id: "hitter", hp: (100, 100), moves: [(id: "hit", intent: Attack, targeted: true, effects: [Damage(N(10), Target)])], pattern: [0]),
     (id: "brute", hp: (100, 100), moves: [(id: "hit", intent: Attack, targeted: true, effects: [Damage(N(60), Target)])], pattern: [0]),
     (id: "armored", hp: (100, 100), moves: [(id: "wall", intent: Defend, effects: [Block(N(20), Me)])], pattern: [0]),

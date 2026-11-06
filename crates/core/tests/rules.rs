@@ -202,7 +202,7 @@ fn fear_caps_at_75_and_sometimes_skips() {
         let t = foe(&s, 0);
         play(&c, &mut s, 0, "t_fear", Some(t));
         play(&c, &mut s, 0, "t_fear", Some(t));
-        assert_eq!(s.status(t, S::Fear), 75);
+        assert_eq!(s.status(t, S::Fear), 750, "kept in tenths: 75%");
         end_round(&c, &mut s);
         if s.heroes[0].hp == 50 {
             skipped += 1;
@@ -602,7 +602,7 @@ fn masks() {
     let t = foe(&s, 0);
     play(&c, &mut s, 0, "t_mara", None);
     play(&c, &mut s, 0, "t_hit", Some(t));
-    assert_eq!(s.status(t, S::Fear), 25);
+    assert_eq!(s.status(t, S::Fear), 75, "a blow in the Mara mask gives 7.5% Fear");
 }
 
 // ---- falling and rising ----
@@ -1084,6 +1084,8 @@ fn the_kostomakha_gets_up_once() {
     s.enemies[0].hp = 1;
     play(&c, &mut s, 0, "t_hit", Some(k));
     assert!(s.enemies[0].alive);
+    assert_eq!(s.enemies[0].hp, 0, "bones first, up on its turn");
+    end_round(&c, &mut s);
     assert_eq!(s.enemies[0].hp, 27);
     s.enemies[0].hp = 1;
     play(&c, &mut s, 0, "t_hit", Some(k));
@@ -1334,4 +1336,22 @@ fn the_shadow_can_mirror_every_card_in_the_game() {
         assert!(s.heroes[0].hp <= 500, "{}", def.id);
         assert_eq!(s.phase, Phase::Heroes, "{}", def.id);
     }
+}
+
+#[test]
+fn bones_lie_a_turn_before_they_get_up() {
+    let (c, mut s) = solo(&["t_hit", "t_hit"], &["bones"]);
+    let t = foe(&s, 0);
+    play(&c, &mut s, 0, "t_hit", Some(t));
+    assert_eq!(s.phase, nav_core::Phase::Heroes, "a heap of bones is not a won fight");
+    assert_eq!(s.status(t, S::Strength), 0);
+    let e = &s.enemies[0];
+    assert!(e.alive && e.hp == 0 && e.flags.contains_key(nav_core::state::BONES));
+    assert_eq!(e.intent.as_ref().map(|i| i.mv), Some(1), "it shows that it is getting up");
+    assert!(try_play(&c, &mut s, 0, "t_hit", Some(t)).is_err(), "bones cannot be struck");
+    let hp = s.heroes[0].hp;
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].hp, hp, "getting up is all it does that turn");
+    assert_eq!(s.enemies[0].hp, 5, "up at half");
+    assert!(!s.enemies[0].flags.contains_key(nav_core::state::BONES));
 }

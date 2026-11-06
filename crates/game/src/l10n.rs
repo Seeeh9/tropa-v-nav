@@ -206,7 +206,25 @@ impl L10n {
     }
 
     fn effects(&self, list: &[Effect]) -> String {
-        list.iter().map(|e| self.effect(e)).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ")
+        let lines: Vec<String> = list.iter().map(|e| self.effect(e)).filter(|s| !s.is_empty()).collect();
+        // the same thing done again and again reads once, with how many times
+        let mut out: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < lines.len() {
+            let mut k = 1;
+            while i + k < lines.len() && lines[i + k] == lines[i] {
+                k += 1;
+            }
+            out.push(if k == 1 { lines[i].clone() } else { self.times(&lines[i], k) });
+            i += k;
+        }
+        out.join(" ")
+    }
+
+    /// One line of a card's text done `k` times: "Deal 3 damage 2 times."
+    fn times(&self, line: &str, k: usize) -> String {
+        let body = line.trim_end().trim_end_matches('.');
+        self.tf("fx-times", &[("body", body.to_string().into()), ("k", (k as i32).into())])
     }
 
     fn effect(&self, e: &Effect) -> String {
@@ -377,6 +395,24 @@ mod once_tests {
                 for up in [false, true] {
                     let t = l.card_text(&def.id, def, &def.view(up, nav_core::Form::Human));
                     assert!(!t.contains("hook-") && !t.contains("fx-") && !t.contains("trigger-"), "{}: {t}", def.id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_blow_struck_again_reads_once_with_how_many_times() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        let c = nav_core::Content::load_dir(&root.join("data")).expect("content");
+        for lang in [Lang::Ru, Lang::En] {
+            let l = L10n::load(&root, lang);
+            for def in c.cards.values() {
+                let view = def.view(false, nav_core::Form::Human);
+                let twice = view.effects.windows(2).any(|w| w[0] == w[1] && matches!(w[0], nav_core::Effect::Damage(..)));
+                if twice {
+                    let t = l.card_text(&def.id, def, &view);
+                    println!("{lang:?} {}: {t}", def.id);
+                    assert!(t.matches(&l.effect(&view.effects[0])).count() <= 1, "{}: {t}", def.id);
                 }
             }
         }

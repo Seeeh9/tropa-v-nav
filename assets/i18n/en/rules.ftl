@@ -345,3 +345,4 @@ trait-lost-both-emelya = Both arms lost
 trait-lost-both-emelya-help = Until the run ends or they are sewn back: the pike went with the bucket: no attacks; no block; sleeping goes on as before. 1 card and 1 energy fewer each turn.
 kw-Armless = Armless
 kw-Armless-help = This card can be played with no arms left.
+fx-times = { $body } { $k } times.

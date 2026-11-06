@@ -363,3 +363,6 @@ fx-times = { $body } { $k } { $k ->
     [few] раза
    *[many] раз
 }.
+rarity-Common = Обычная
+rarity-Uncommon = Необычная
+rarity-Rare = Редкая

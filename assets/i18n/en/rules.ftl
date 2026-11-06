@@ -346,3 +346,6 @@ trait-lost-both-emelya-help = Until the run ends or they are sewn back: the pike
 kw-Armless = Armless
 kw-Armless-help = This card can be played with no arms left.
 fx-times = { $body } { $k } times.
+rarity-Common = Common
+rarity-Uncommon = Uncommon
+rarity-Rare = Rare

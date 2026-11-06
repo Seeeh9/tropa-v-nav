@@ -1595,6 +1595,19 @@ pub fn card_frame(def: &CardDef) -> Color {
     }
 }
 
+/// The ink of a card's rarity, for the ones that have one worth telling.
+fn rarity_ink(def: &CardDef) -> Option<Color> {
+    if matches!(def.kind, CardType::Curse | CardType::Status) {
+        return None;
+    }
+    match def.rarity {
+        Rarity::Common => Some(Color::srgb(0.66, 0.48, 0.30)),
+        Rarity::Uncommon => Some(Color::srgb(0.72, 0.78, 0.86)),
+        Rarity::Rare => Some(Color::srgb(0.98, 0.78, 0.30)),
+        _ => None,
+    }
+}
+
 /// Spawns a card face under `parent`: free-floating at `pos`, or in the parent's flow when `pos` is `None`.
 /// `extra` carries whatever makes the card behave (drag in the hand, a button in a reward).
 /// The cost of a card made free, and its glow.
@@ -1676,13 +1689,20 @@ pub fn card_face(c: &mut ChildSpawnerCommands, card: &Card, def: &CardDef, form:
                 TextLayout::new(Justify::Center, LineBreak::NoWrap),
                 Node { width: px(170), height: px(28), margin: UiRect::left(px(28)), align_items: AlignItems::Center, ..default() },
             ));
+            // rarity in the picture's frame and the line under it: bronze, silver, gold
+            let gem = rarity_ink(def);
             c.spawn((
-                Node { width: px(196), height: px(147), border: UiRect::all(px(2)), ..default() },
+                Node { width: px(196), height: px(147), border: UiRect::all(px(if gem.is_some() { 3 } else { 2 })), ..default() },
                 art.node(assets, &format!("cards/{}", card.def), Color::srgb(0.10, 0.09, 0.08)),
-                BorderColor::all(theme::SOOT),
+                BorderColor::all(gem.unwrap_or(theme::SOOT)),
                 Pickable::IGNORE,
             ));
-            c.spawn((theme::text(l10n.t(&format!("type-{:?}", view.kind)), &fonts.body, 14.0, theme::DIM), Node { margin: UiRect::vertical(px(2)), ..default() }));
+            let kind = l10n.t(&format!("type-{:?}", view.kind));
+            let line = match gem {
+                Some(_) => format!("{kind} · {}", l10n.t(&format!("rarity-{:?}", def.rarity))),
+                None => kind,
+            };
+            c.spawn((theme::text(line, &fonts.body, 14.0, gem.unwrap_or(theme::DIM)), Node { margin: UiRect::vertical(px(2)), ..default() }));
             // a long text shrinks to stay on the card: about 110 letters fit at full size, and
             // what this guess misses is measured and brought in by `fit_text`
             let text = l10n.card_text(&card.def, def, &view);

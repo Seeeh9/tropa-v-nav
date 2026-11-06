@@ -712,7 +712,8 @@ pub fn shown_card(commands: &mut Commands, slot: Entity, uid: usize, id: &str, u
     let card = Card { uid: uid as u32, def: id.to_string(), upgraded: up, free: false };
     let at = Vec2::new(-CARD_W * (1.0 - k) / 2.0, -CARD_H * (1.0 - k) / 2.0);
     let mut hints = l10n.card_glossary(&def.view(up, Form::Human));
-    let turns = !up && crate::card_flip::upgrades(def, Form::Human, l10n);
+    // turned over on the right button: an upgrade shown beside what it was, and the other way
+    let turns = crate::card_flip::upgrades(def, Form::Human, l10n);
     if turns {
         hints.push((l10n.t("card-flip-hint"), String::new()));
     }

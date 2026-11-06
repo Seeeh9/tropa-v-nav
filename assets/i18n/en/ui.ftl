@@ -99,7 +99,7 @@ reward-skip = Skip
 rest-title = The Fire
 rest-sleep = Rest (+{ $n } HP)
 rest-upgrade = Upgrade a card
-rest-upgrade-hint = Which card? Shown as it will become.
+rest-upgrade-hint = Which card? Shown as it will become; the right mouse button turns it over to compare with what it is now.
 
 end-victory = The needle is broken
 end-defeat = The path has ended

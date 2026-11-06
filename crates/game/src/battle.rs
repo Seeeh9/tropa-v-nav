@@ -67,7 +67,7 @@ pub fn plugin(app: &mut App) {
                 (sync_units, gore::lay_out_the_headless, sync_hand, sync_potions, cue_effects).chain(),
                 no_eyes,
                 (pick_hover, layout_hand, layout_units, swap_form_art, animate_sprites, update_labels, update_intent_icons, update_bars, update_tooltip),
-                (floaters, fly_ghosts, dying, style_buttons, impact::shake_screen, turn_timer, send_pings, show_pings),
+                (floaters, fly_ghosts, dying, style_buttons, impact::shake_screen, turn_timer, send_pings, show_pings, light_bonuses),
             )
                 .chain()
                 .run_if(in_state(AppState::Battle))
@@ -1768,6 +1768,38 @@ fn sync_hand(
                 Pickable { should_block_lower: false, is_hoverable: true },
             );
             spawn_card(&mut commands, *layer, card, h.form, Some(from), blind, widget, &db.0, &l10n, &fonts, &art, &assets);
+        }
+    }
+}
+
+/// A card of the hand whose bonus would come off if played now: ringed in candlelight.
+#[derive(Component)]
+struct BonusLit;
+
+/// Rings the cards whose condition is met, and takes the ring off once it is not. The rules
+/// decide, on a copy of the fight; worked out only when the fight has changed.
+fn light_bonuses(mut commands: Commands, session: Res<Session>, db: Res<Db>, cards: Query<(Entity, &CardWidget, Has<BonusLit>)>, mut last: Local<Option<(u64, usize)>>) {
+    let h = session.my_hero();
+    // the hand and the log of plays are what a condition reads
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        session.truth.hash(&mut hasher);
+        (hasher.finish(), cards.iter().count())
+    };
+    if *last == Some(key) {
+        return;
+    }
+    *last = Some(key);
+    let blind = sees_nothing(&session);
+    for (e, w, lit) in &cards {
+        let Some(card) = h.hand.iter().find(|c| c.uid == w.uid) else { continue };
+        let ready = !blind
+            && db.0.cards.get(&card.def).is_some_and(|def| nav_core::combat::bonus_ready(&db.0, &session.truth, session.me, &def.view(card.upgraded, h.form).effects));
+        if ready && !lit {
+            commands.entity(e).insert((BonusLit, Outline::new(px(4), px(1), theme::CANDLE)));
+        } else if !ready && lit {
+            commands.entity(e).remove::<(BonusLit, Outline)>();
         }
     }
 }

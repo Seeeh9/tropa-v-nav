@@ -33,6 +33,50 @@ const MOST_LIMBS: u8 = 2;
 /// A killing blow with this much (percent of whole health) still to spend takes the head.
 const BEHEAD_PAST: i32 = 40;
 
+/// Whether a card held by `slot` would meet the condition of a bonus it carries, played now: what
+/// the hand lights up. A condition on the target counts when some unit it may land on meets it; one
+/// that only the playing can tell (a killing blow) never lights.
+pub fn bonus_ready(c: &Content, s: &Combat, slot: u8, effects: &[Effect]) -> bool {
+    fn conds(list: &[Effect], out: &mut Vec<Cond>) {
+        for e in list {
+            match e {
+                Effect::If(c, then, other) => {
+                    out.push(c.clone());
+                    conds(then, out);
+                    conds(other, out);
+                }
+                Effect::Repeat(_, body) | Effect::Once(_, body) | Effect::OncePerTurn(_, body) => conds(body, out),
+                _ => {}
+            }
+        }
+    }
+    fn knowable(c: &Cond) -> bool {
+        match c {
+            Cond::Fatal => false,
+            Cond::Not(inner) => knowable(inner),
+            _ => true,
+        }
+    }
+    let mut found = Vec::new();
+    conds(effects, &mut found);
+    found.retain(knowable);
+    if found.is_empty() {
+        return false;
+    }
+    let mut copy = s.clone();
+    copy.foretelling = true;
+    let mut targets: Vec<Option<UnitRef>> = vec![None];
+    targets.extend(copy.living_enemies().map(|e| Some(UnitRef::Enemy(e.uid))));
+    targets.extend(copy.standing_heroes().map(|h| Some(UnitRef::Hero(h.slot))));
+    let mut ex = Exec { s: &mut copy, c, ev: Vec::new(), depth: 0 };
+    found.iter().any(|cond| {
+        targets.iter().any(|t| {
+            let ctx = Ctx { src: UnitRef::Hero(slot), target: *t, x: 0, consumed: 0, fatal: false, attack: false, card: true, bled: false };
+            ex.cond(&ctx, cond)
+        })
+    })
+}
+
 /// One blow from no one in particular, for tests.
 #[doc(hidden)]
 pub fn test_hit_hero(c: &Content, s: &mut Combat, slot: u8, n: i32) -> Vec<Event> {

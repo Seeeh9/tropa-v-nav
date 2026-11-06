@@ -655,6 +655,8 @@ impl<'a> Exec<'a> {
         if cursed {
             self.hero(i).new_curses += 1;
             self.add_card(i, NAV_MARK, Pile::Discard);
+            // one mark a fall: lying on until the fight ends does not mark them again
+            self.hero(i).flags.insert("marked_fall".into(), 1);
         }
         for h in &mut self.s.heroes {
             if h.guard_by == Some(i) {
@@ -669,6 +671,7 @@ impl<'a> Exec<'a> {
             return;
         }
         h.downed = false;
+        h.flags.remove("marked_fall");
         h.hp = (h.max_hp * pct / 100).max(1);
         let hp = h.hp;
         self.ev.push(Event::Raised { player: i, by, hp });
@@ -1779,7 +1782,7 @@ impl<'a> Exec<'a> {
                     // still on the edge when the fight ends: up at 1 HP, marked
                     h.downed = false;
                     h.hp = 1;
-                    if has_curse {
+                    if has_curse && h.flags.remove("marked_fall").is_none() {
                         h.new_curses += 1;
                     }
                 }

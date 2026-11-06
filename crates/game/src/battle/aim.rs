@@ -29,6 +29,7 @@ pub(super) fn plugin(app: &mut App) {
         Update,
         (track, (draw_arrow, forecast)).chain().after(pick_hover).before(layout_hand).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>),
     );
+    app.add_systems(Update, raise_hint.run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>));
     // the energy line is refreshed by update_labels; the forecast goes over it
     app.add_systems(Update, forecast_energy.after(update_labels).run_if(in_state(AppState::Battle)).run_if(resource_exists::<Session>));
 }
@@ -353,5 +354,45 @@ fn forecast_energy(session: Res<Session>, db: Res<Db>, aim: Res<Aim>, mut labels
                 text.0 = line;
             }
         }
+    }
+}
+
+/// The line over the hand that says how a fallen ally is got up, while one lies and this
+/// hero can do it: nothing else on the screen tells it.
+#[derive(Component)]
+struct RaiseHint;
+
+fn raise_hint(
+    mut commands: Commands,
+    session: Res<Session>,
+    l10n: Res<L10n>,
+    fonts: Res<Fonts>,
+    stage: Single<Entity, With<crate::Stage>>,
+    mut hint: Query<(&mut Visibility, &mut Text), With<RaiseHint>>,
+) {
+    let me = session.my_hero();
+    let someone_down = !me.downed && session.truth.heroes.iter().any(|h| h.slot != session.me && h.downed && !h.beheaded);
+    let line = l10n.tf("battle-raise-hint", &[("n", session.truth.raise_cost.into())]);
+    let Ok((mut vis, mut text)) = hint.single_mut() else {
+        commands.spawn((
+            RaiseHint,
+            Node { position_type: PositionType::Absolute, top: px(AIM_SPOT.y - 60.0), width: px(STAGE_W), justify_content: JustifyContent::Center, ..default() },
+            theme::text(line, &fonts.body, 24.0, theme::CANDLE),
+            TextLayout::new(Justify::Center, LineBreak::WordBoundary),
+            TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::BLACK },
+            Visibility::Hidden,
+            GlobalZIndex(40),
+            Pickable::IGNORE,
+            DespawnOnExit(AppState::Battle),
+            ChildOf(*stage),
+        ));
+        return;
+    };
+    let want = if someone_down { Visibility::Inherited } else { Visibility::Hidden };
+    if *vis != want {
+        *vis = want;
+    }
+    if text.0 != line {
+        text.0 = line;
     }
 }

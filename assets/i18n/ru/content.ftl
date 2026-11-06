@@ -133,7 +133,6 @@ move-branch_blow = Удар веткой
 move-bark = Кора
 move-pilfer-desc = Крадёт 15 золота. Убейте её — золото вернётся.
 move-vanish-desc = Убегает с награбленным.
-move-delusion-desc = Накладывает Немоту 2.
 move-swell-desc = Получает Силу 2.
 move-rage-desc = Получает Силу 3 и 10 щита.
 move-call_trees-desc = Призывает двух Древ-стражей.

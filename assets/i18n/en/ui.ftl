@@ -23,7 +23,7 @@ battle-victory = The unclean are scattered
 battle-defeat = The party has fallen
 battle-to-menu = To menu
 battle-downed = On the Edge
-battle-raise-hint = Drag any card onto a fallen ally: 2 Energy and that card is discarded.
+battle-raise-hint = Any card raises a fallen ally: drag it onto them. Costs { $n } energy, the card is discarded.
 battle-waiting = Waiting…
 
 intent-Attack = Attack
@@ -164,7 +164,7 @@ fx-run-random-Rare = A random rare card.
 fx-run-relic = A relic.
 fx-run-potion = A potion.
 fx-run-remove = A random card leaves your deck.
-fx-run-upgrade = A random card is upgraded.
+fx-run-upgrade = One of your cards, at random, is upgraded. No new card.
 
 shop-title = The Pedlar
 shop-cards = Cards

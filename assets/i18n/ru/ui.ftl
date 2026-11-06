@@ -23,7 +23,7 @@ battle-victory = Нечисть рассеяна
 battle-defeat = Отряд пал
 battle-to-menu = В меню
 battle-downed = На краю
-battle-raise-hint = Перетащите любую карту на павшего: 2 энергии и сброс этой карты.
+battle-raise-hint = Павшего союзника поднимает любая карта: перетащите её на него. Стоит { $n } энергии, карта уходит в сброс.
 battle-waiting = Ждём…
 
 intent-Attack = Атака
@@ -164,7 +164,7 @@ fx-run-random-Rare = Случайная редкая карта.
 fx-run-relic = Реликвия.
 fx-run-potion = Снадобье.
 fx-run-remove = Случайная карта уходит из колоды.
-fx-run-upgrade = Случайная карта улучшается.
+fx-run-upgrade = Одна из ваших карт, случайная, улучшается. Новой карты нет.
 
 shop-title = Коробейник
 shop-cards = Карты

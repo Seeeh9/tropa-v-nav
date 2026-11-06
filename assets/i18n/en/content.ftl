@@ -133,7 +133,6 @@ move-branch_blow = Branch Blow
 move-bark = Bark
 move-pilfer-desc = Steals 15 gold. Kill it to get the gold back.
 move-vanish-desc = Runs off with the loot.
-move-delusion-desc = Applies Muted 2.
 move-swell-desc = Gains Strength 2.
 move-rage-desc = Gains Strength 3 and 10 Block.
 move-call_trees-desc = Summons two Tree Guards.

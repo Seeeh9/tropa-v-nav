@@ -1190,6 +1190,15 @@ impl Run {
             }
             self.act += 1;
             self.at = None;
+            // a new land, rested: everyone still on their feet starts it whole
+            for q in 0..self.players.len() {
+                let pl = &mut self.players[q];
+                if !pl.beheaded && pl.hp < pl.max_hp {
+                    let delta = pl.max_hp - pl.hp;
+                    pl.hp = pl.max_hp;
+                    ev.push(RunEvent::Hp { player: q as u8, delta });
+                }
+            }
             // the traveller's satchel: there is always something still in it
             for q in 0..self.players.len() {
                 if self.players[q].relics.iter().any(|r| r == SECRET_RELICS[0]) {
@@ -1533,8 +1542,13 @@ impl Run {
                 RunFx::RandomCard(rarity) => {
                     let hero = self.players[p].hero.clone();
                     let coop = self.players.len() > 1;
-                    let pool: Vec<&CardDef> =
-                        c.cards.values().filter(|d| d.hero == hero && d.rarity == *rarity && (coop || !d.keywords.contains(&Keyword::Coop)) && self.unlocks.card_ok(p, d.rarity)).collect();
+                    let fits = |d: &&CardDef| d.hero == hero && d.rarity == *rarity && (coop || !d.keywords.contains(&Keyword::Coop));
+                    let mut pool: Vec<&CardDef> = c.cards.values().filter(fits).filter(|d| self.unlocks.card_ok(p, d.rarity)).collect();
+                    // the omen promised a card of this rarity: it keeps its word even before the
+                    // hero's level opens that rarity to the rewards
+                    if pool.is_empty() {
+                        pool = c.cards.values().filter(fits).collect();
+                    }
                     if let Some(card) = self.rng.pick(&pool).map(|d| d.id.clone()) {
                         self.players[p].deck.push((card.clone(), false));
                         ev.push(RunEvent::CardGained { player, card });

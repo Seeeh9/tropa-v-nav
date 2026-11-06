@@ -27,7 +27,7 @@ impl Ctx {
     }
 }
 
-/// A blow taking this share (percent) of a hero's whole health at once may take a limb too.
+/// A blow taking this share (percent) of the health a hero had before it may take a limb too.
 const MAIM_FROM: i32 = 30;
 const MOST_LIMBS: u8 = 2;
 /// A killing blow with this much (percent of whole health) still to spend takes the head.
@@ -516,6 +516,7 @@ impl<'a> Exec<'a> {
         // what the blow had left over once there was no more hero to take it
         let past = d - blocked - lost;
         let max_hp = h.max_hp;
+        let hp_before = h.hp;
         h.hp -= lost;
         let fell = h.hp <= 0;
         let mut valor = 0;
@@ -546,7 +547,8 @@ impl<'a> Exec<'a> {
             }
         }
         if !fell && attack && !self.s.foretelling && self.hero(i).lost_limbs < MOST_LIMBS {
-            let share = lost * 100 / max_hp.max(1);
+            // measured against the health there was, not the whole: worn down, a hero comes apart sooner
+            let share = lost * 100 / hp_before.max(1);
             if share >= MAIM_FROM && self.s.rng.chance(((share - MAIM_FROM) * 2 + 25).min(70)) {
                 // whichever arm is still there, by lot when both are
                 let first = if self.s.rng.chance(50) { WEAPON_ARM } else { SHIELD_ARM };

@@ -185,8 +185,20 @@ fn track(
             });
             next = Aim { what: Some(Aimed::Card(w.uid)), from: AIM_SPOT + Vec2::new(CARD_W / 2.0, 0.0), to: cursor.unwrap_or_default(), target, action };
         } else if lifted {
-            // an untargeted card held up over the field: no arrow, but the forecast
-            next = Aim { what: None, action: Some(CombatAction::Play { card: w.uid, target: None }), ..default() };
+            // an untargeted card held over a fallen ally raises them, paid with the card: say so
+            // with the arrow, or letting go looks like the card's own doing
+            let fallen = under.filter(|u| matches!(u, UnitRef::Hero(i) if *i != session.me && session.truth.hero(*i).is_some_and(|a| a.downed)));
+            next = match fallen {
+                Some(UnitRef::Hero(ally)) => Aim {
+                    what: Some(Aimed::Card(w.uid)),
+                    from: AIM_SPOT + Vec2::new(CARD_W / 2.0, 0.0),
+                    to: cursor.unwrap_or_default(),
+                    target: fallen,
+                    action: Some(CombatAction::Raise { ally, discard: w.uid }),
+                },
+                // no arrow, but the forecast
+                _ => Aim { what: None, action: Some(CombatAction::Play { card: w.uid, target: None }), ..default() },
+            };
         }
     }
     for (chip, _, at, node) in &chips {

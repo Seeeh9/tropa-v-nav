@@ -29,6 +29,9 @@ fn mirror(effects: &[Effect]) -> Vec<Effect> {
     out
 }
 
+/// Mara's turns without her crown before she forges a new one.
+const CROWN_BACK_AFTER: i32 = 3;
+
 pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
     match name {
         // Vorozheya's "Transfer": every debuff on the heroes moves onto the targeted enemy
@@ -332,11 +335,22 @@ pub(crate) fn run(ex: &mut Exec, ctx: &mut Ctx, name: &str) {
             }
         }
         // Mara's winter deepens while her crown stands: one card fewer each turn, three at most
+        // and once it is broken she forges it anew: on her third turn without it, the crown is back
         "winter" => {
             if ex.s.enemies.iter().any(|e| e.alive && e.def == "ice_crown") {
                 for h in ex.s.heroes.iter_mut().filter(|h| !h.downed) {
                     let w = h.flags.entry("winter".into()).or_insert(0);
                     *w = (*w + 1).min(3);
+                }
+            } else if let UnitRef::Enemy(uid) = ctx.src {
+                let Some(idx) = ex.s.enemies.iter().position(|e| e.uid == uid) else { return };
+                let gone = ex.s.enemies[idx].flags.entry("crown_gone".into()).or_insert(0);
+                *gone += 1;
+                if *gone >= CROWN_BACK_AFTER {
+                    ex.s.enemies[idx].flags.remove("crown_gone");
+                    if let Some(crown) = ex.spawn(&"ice_crown".into()) {
+                        ex.ev.push(Event::Summoned { enemy: crown, def: "ice_crown".into() });
+                    }
                 }
             }
         }

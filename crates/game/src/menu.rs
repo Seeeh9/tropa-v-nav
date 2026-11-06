@@ -13,6 +13,7 @@ use bevy::ui_widgets::{observe, Activate, Button};
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), enter_menu)
         .add_systems(OnEnter(AppState::Settings), enter_settings)
+        .add_systems(Update, drag_sliders.run_if(in_state(AppState::Settings)))
         .add_systems(OnEnter(AppState::Village), enter_village)
         .add_systems(OnEnter(AppState::Chronicle), enter_chronicle)
         .add_systems(Update, crate::profile::note_enemies)
@@ -195,10 +196,6 @@ fn enter_settings(
         (format!("{}: {}x", l10n.t("settings-speed"), s.anim_speed), |s| s.anim_speed = if s.anim_speed < 1.25 { 1.5 } else if s.anim_speed < 1.75 { 2.0 } else { 1.0 }),
         (format!("{}: {}", l10n.t("settings-shake"), on_off(s.less_shake)), |s| s.less_shake = !s.less_shake),
         (format!("{}: {}", l10n.t("settings-ink"), on_off(s.ink)), |s| s.ink = !s.ink),
-        (format!("{}: {}", l10n.t("settings-music"), pct(s.music)), |s| s.music = if s.music >= 0.95 { 0.0 } else { (s.music + 0.2).min(1.0) }),
-        (format!("{}: {}", l10n.t("settings-narrator"), pct(s.narrator)), |s| s.narrator = if s.narrator >= 0.95 { 0.0 } else { (s.narrator + 0.2).min(1.0) }),
-        (format!("{}: {}", l10n.t("settings-voices"), pct(s.voices)), |s| s.voices = if s.voices >= 0.95 { 0.0 } else { (s.voices + 0.2).min(1.0) }),
-        (format!("{}: {}", l10n.t("settings-sfx"), pct(s.sfx)), |s| s.sfx = if s.sfx >= 0.95 { 0.0 } else { (s.sfx + 0.2).min(1.0) }),
         (format!("{}: {}", l10n.t("settings-voice-lang"), l10n.t(&format!("settings-voice-lang-{}", s.voice_lang.min(3)))), |s| s.voice_lang = (s.voice_lang.min(3) + 1) % 4),
     ];
     commands.spawn((DespawnOnExit(AppState::Settings), backdrop(&art, &assets, "bg/menu", 0.45), ChildOf(*stage)));
@@ -220,6 +217,25 @@ fn enter_settings(
                 )],
             ));
         }
+        // the volumes are sliders: a bar of steps, set by a click or dragged along with the button held
+        for (which, key) in [(0u8, "settings-music"), (1, "settings-narrator"), (2, "settings-voices"), (3, "settings-sfx")] {
+            let v = volume(&s, which);
+            p.spawn((Node { align_items: AlignItems::Center, column_gap: px(18), margin: UiRect::vertical(px(2)), ..default() }, Pickable::IGNORE)).with_children(|row| {
+                row.spawn((theme::text(l10n.t(key), &fonts.body, 26.0, theme::BONE), Node { width: px(260), ..default() }));
+                row.spawn((Node { column_gap: px(3), ..default() }, Pickable::IGNORE)).with_children(|bar| {
+                    for step in 1..=SLIDER_STEPS {
+                        bar.spawn((
+                            SliderStep { which, step },
+                            Hovered::default(),
+                            Node { width: px(20), height: px(30), border: UiRect::all(px(2)), border_radius: BorderRadius::all(px(3)), ..default() },
+                            BackgroundColor(step_color(step, v)),
+                            BorderColor::all(Color::srgb(0.42, 0.33, 0.22)),
+                        ));
+                    }
+                });
+                row.spawn((SliderValue(which), theme::text(pct(v), &fonts.num, 26.0, theme::CANDLE), Node { width: px(80), ..default() }));
+            });
+        }
         p.spawn((
             menu_button(l10n.t("coop-back"), &fonts),
             observe(|_: On<Activate>, mut next: ResMut<NextState<AppState>>| next.set(AppState::Menu)),
@@ -233,6 +249,86 @@ fn enter_settings(
             )],
         ));
     });
+}
+
+const SLIDER_STEPS: u8 = 20;
+
+/// One step of a volume bar: `which` volume, and its share at `step` of `SLIDER_STEPS`.
+#[derive(Component)]
+struct SliderStep {
+    which: u8,
+    step: u8,
+}
+
+/// The percent shown beside a volume bar.
+#[derive(Component)]
+struct SliderValue(u8);
+
+fn volume(s: &crate::profile::Settings, which: u8) -> f32 {
+    match which {
+        0 => s.music,
+        1 => s.narrator,
+        2 => s.voices,
+        _ => s.sfx,
+    }
+}
+
+fn step_color(step: u8, v: f32) -> Color {
+    if (step as f32) <= (v * SLIDER_STEPS as f32).round() {
+        theme::CANDLE
+    } else {
+        theme::SOOT
+    }
+}
+
+/// While the button is held over a step of a bar, that volume becomes the step's; the first step
+/// pressed twice in a row silences it.
+fn drag_sliders(
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut profile: ResMut<crate::profile::Profile>,
+    mut steps: Query<(&SliderStep, &Hovered, &mut BackgroundColor)>,
+    mut values: Query<(&SliderValue, &mut Text)>,
+    mut commands: Commands,
+    mut unsaved: Local<bool>,
+) {
+    let mut changed = false;
+    if mouse.pressed(MouseButton::Left) {
+        for (st, hovered, _) in &steps {
+            if !hovered.get() {
+                continue;
+            }
+            let now = volume(&profile.settings, st.which);
+            let mut want = st.step as f32 / SLIDER_STEPS as f32;
+            if st.step == 1 && mouse.just_pressed(MouseButton::Left) && (now - want).abs() < 0.01 {
+                want = 0.0;
+            }
+            if (now - want).abs() > 0.001 {
+                let s = &mut profile.settings;
+                match st.which {
+                    0 => s.music = want,
+                    1 => s.narrator = want,
+                    2 => s.voices = want,
+                    _ => s.sfx = want,
+                }
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        *unsaved = true;
+        commands.run_system_cached(apply_settings);
+        for (st, _, mut bg) in &mut steps {
+            bg.0 = step_color(st.step, volume(&profile.settings, st.which));
+        }
+        for (v, mut text) in &mut values {
+            text.0 = format!("{}%", (volume(&profile.settings, v.0) * 100.0).round() as i32);
+        }
+    }
+    // saved once the button is let go, not on every step dragged over
+    if mouse.just_released(MouseButton::Left) && *unsaved {
+        *unsaved = false;
+        profile.save();
+    }
 }
 
 fn enter_village(mut commands: Commands, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, profile: Res<crate::profile::Profile>, art: Res<Art>, assets: Res<AssetServer>) {

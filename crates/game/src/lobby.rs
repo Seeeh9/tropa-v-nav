@@ -377,11 +377,19 @@ fn draw_lobby(
                 ))
                 .with_children(|p| {
                     p.spawn(theme::text(l10n.t(&format!("hero-{hero}")), &fonts.title, 60.0, color.lighter(0.25)));
-                    p.spawn(theme::text(
-                        format!("{}  ·  {}", l10n.n("lobby-hp", def.max_hp), l10n.n("lobby-level", profile.hero_level(hero) as i32)),
-                        &fonts.num,
-                        26.0,
-                        theme::CANDLE,
+                    // the level, with what it gives told on hover: one for solo and the party alike
+                    let level = profile.hero_level(hero);
+                    let next = match profile.hero_progress(hero) {
+                        Some((have, need)) => l10n.tf("lobby-level-next", &[("have", (have as i32).into()), ("need", (need as i32).into())]),
+                        None => l10n.t("lobby-level-top"),
+                    };
+                    p.spawn(theme::text(l10n.n("lobby-hp", def.max_hp), &fonts.num, 26.0, theme::CANDLE));
+                    p.spawn((
+                        theme::text(format!("{} ⓘ", l10n.n("lobby-level", level as i32)), &fonts.num, 26.0, theme::CANDLE),
+                        bevy::picking::hover::Hovered::default(),
+                        crate::run_ui::CardHints::new(vec![(l10n.n("lobby-level", level as i32), format!("{}
+
+{next}", l10n.t("lobby-level-help")))]),
                     ));
                     p.spawn(theme::text(l10n.t(&format!("hero-{hero}-desc")), &fonts.body, 22.0, theme::BONE));
                     p.spawn((theme::text(l10n.t("lobby-relic"), &fonts.body, 18.0, theme::DIM), Node { margin: UiRect::top(px(6)), ..default() }));

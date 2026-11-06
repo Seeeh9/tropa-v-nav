@@ -32,7 +32,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
         .add_systems(Update, (draw_omen, draw_trophy).run_if(in_state(AppState::Omen)))
         .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)))
-        .add_systems(Update, explain_cards);
+        .add_systems(Update, explain_cards)
+        .init_resource::<Banked>()
+        .add_systems(Update, bank_progress);
 }
 
 /// What a card shown away from the fight mentions — its keywords and the statuses it lays — told
@@ -1205,11 +1207,38 @@ fn draw_trophy(
 
 // ---- the end ----
 
+/// What a run in progress has already put on this player's profile: oberegi are booked as they
+/// are earned, so a run left midway, alone or in a party, keeps what it earned.
+#[derive(Resource, Default)]
+pub struct Banked {
+    run: u64,
+    n: u32,
+}
+
+fn bank_progress(net: Option<Res<Net>>, mut banked: ResMut<Banked>, mut profile: ResMut<crate::profile::Profile>) {
+    let Some(net) = net else { return };
+    if net.bot_me || net.ephemeral {
+        return;
+    }
+    let (Some(run), Some(me)) = (net.node.state.as_ref(), net.node.my_slot()) else { return };
+    let Some(pl) = run.players.get(me as usize) else { return };
+    if banked.run != run.seed {
+        *banked = Banked { run: run.seed, n: 0 };
+    }
+    // the win itself is booked with the run at its end
+    let earned = run.floors_cleared + run.elites_slain * 10 + run.bosses_slain * 30;
+    if earned > banked.n {
+        profile.bank(&pl.hero, earned - banked.n);
+        banked.n = earned;
+    }
+}
+
 fn draw_end(
     mut commands: Commands,
     mut status: ResMut<NetStatus>,
     net: Option<ResMut<Net>>,
     mut profile: ResMut<crate::profile::Profile>,
+    banked: Res<Banked>,
     mut opened: Local<Option<u8>>,
     old: Query<Entity, With<ScreenRoot>>,
     canvas: Single<Entity, With<Canvas>>,
@@ -1227,7 +1256,8 @@ fn draw_end(
         // each player books the full sum on their own profile;
         // a run the autopilot played for you (dev build) earns nothing
         if let Some(pl) = me.and_then(|m| run.players.get(m as usize)).filter(|_| !net.bot_me && !net.ephemeral) {
-            *opened = profile.record_run(&pl.hero, run.oberegi(), won, run.circle, run.floors_cleared, run.act);
+            let already = if banked.run == run.seed { banked.n } else { 0 };
+            *opened = profile.record_run(&pl.hero, run.oberegi().saturating_sub(already), won, run.circle, run.floors_cleared, run.act);
         }
         status.run_dirty = true;
     }

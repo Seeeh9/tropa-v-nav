@@ -149,6 +149,30 @@ impl Profile {
         true
     }
 
+    /// Experience gathered towards the next level, and what that level takes; `None` at the top.
+    pub fn hero_progress(&self, hero: &str) -> Option<(u32, u32)> {
+        let mut left = self.hero_xp.get(hero).copied().unwrap_or(0);
+        let mut need = 40;
+        for _ in 1..10 {
+            if left < need {
+                return Some((left, need));
+            }
+            left -= need;
+            need += 20;
+        }
+        None
+    }
+
+    /// Adds what a run in progress has earned so far, so leaving it midway loses none of it.
+    pub fn bank(&mut self, hero: &str, oberegi: u32) {
+        if oberegi == 0 {
+            return;
+        }
+        self.oberegi += oberegi;
+        *self.hero_xp.entry(hero.to_string()).or_insert(0) += oberegi;
+        self.save();
+    }
+
     /// Hero level 1..=10 from experience; each level takes a little more.
     pub fn hero_level(&self, hero: &str) -> u32 {
         let xp = self.hero_xp.get(hero).copied().unwrap_or(0);

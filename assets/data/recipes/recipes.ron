@@ -2,6 +2,31 @@
 // Точные рецепты проверяются раньше рецептов со звёздочкой, большие — раньше малых.
 // Цвет папоротника ("fern") подменяет любую траву и удваивает варево (в коде).
 [
+    // новые травы: крапива — кровь, белена — страх и гниль, валериана — слабость и щит,
+    // зверобой — сила и лечение. Пары с разрыв-травой стоят выше "burst_any".
+    (id: "triple_nettle", herbs: ["nettle", "nettle", "nettle"], effects: [Apply(Bleed, N(8), AllFoes), Apply(Thorns, N(3), AllFriends)]),
+    (id: "triple_henbane", herbs: ["henbane", "henbane", "henbane"], effects: [Apply(Fear, N(35), AllFoes), Apply(Rot, N(5), AllFoes)]),
+    (id: "triple_valerian", herbs: ["valerian", "valerian", "valerian"], effects: [Apply(Weak, N(3), AllFoes), Block(N(10), AllFriends)]),
+    (id: "triple_st_john", herbs: ["st_john", "st_john", "st_john"], effects: [Apply(Strength, N(2), AllFriends), Heal(N(6), AllFriends)]),
+    (id: "nettle_burst", herbs: ["nettle", "burst"], effects: [Damage(N(16), Target), Apply(Bleed, N(4), Target)]),
+    (id: "henbane_burst", herbs: ["henbane", "burst"], effects: [Damage(N(14), Target), Apply(Fear, N(25), Target)]),
+    (id: "valerian_burst", herbs: ["valerian", "burst"], effects: [Damage(N(14), Target), Apply(Weak, N(3), Target)]),
+    (id: "st_john_burst", herbs: ["st_john", "burst"], effects: [Damage(N(14), Target), Apply(Strength, N(1), Me)]),
+    (id: "double_nettle", herbs: ["nettle", "nettle"], effects: [Apply(Bleed, N(5), AllFoes), Apply(Thorns, N(2), Me)]),
+    (id: "double_henbane", herbs: ["henbane", "henbane"], effects: [Apply(Fear, N(20), AllFoes), Apply(Rot, N(3), AllFoes)]),
+    (id: "double_valerian", herbs: ["valerian", "valerian"], effects: [Apply(Weak, N(2), AllFoes), Block(N(6), AllFriends)]),
+    (id: "double_st_john", herbs: ["st_john", "st_john"], effects: [Apply(Strength, N(1), Me), Heal(N(5), AllFriends)]),
+    (id: "nettle_wormwood", herbs: ["nettle", "wormwood"], effects: [Damage(N(5), AllFoes), Apply(Bleed, N(3), AllFoes)]),
+    (id: "henbane_wormwood", herbs: ["henbane", "wormwood"], effects: [Damage(N(5), AllFoes), Apply(Rot, N(4), AllFoes)]),
+    (id: "valerian_sleep", herbs: ["valerian", "sleep"], effects: [Block(N(11), AllFriends), Apply(Weak, N(1), AllFoes)]),
+    (id: "st_john_weep", herbs: ["st_john", "weep"], effects: [Heal(N(8), AllFriends), Apply(TempStrength, N(2), AllFriends)]),
+    (id: "nettle_henbane", herbs: ["nettle", "henbane"], effects: [Apply(Bleed, N(4), AllFoes), Apply(Fear, N(15), AllFoes)]),
+    (id: "st_john_valerian", herbs: ["st_john", "valerian"], effects: [Heal(N(4), AllFriends), Block(N(6), AllFriends)]),
+    (id: "single_nettle", herbs: ["nettle"], effects: [Apply(Bleed, N(3), AllFoes)]),
+    (id: "single_henbane", herbs: ["henbane"], effects: [Apply(Fear, N(10), AllFoes), Apply(Rot, N(1), AllFoes)]),
+    (id: "single_valerian", herbs: ["valerian"], effects: [Apply(Weak, N(2), AllFoes)]),
+    (id: "single_st_john", herbs: ["st_john"], effects: [Apply(TempStrength, N(3), Me), Heal(N(2), Me)]),
+
     // из дизайн-документа
     (id: "double_wormwood", herbs: ["wormwood", "wormwood"], effects: [Damage(N(6), AllFoes)]),
     (id: "sleep_weep", herbs: ["sleep", "weep"], effects: [Heal(N(5), AllFriends)]),

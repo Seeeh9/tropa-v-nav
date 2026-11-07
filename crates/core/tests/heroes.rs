@@ -334,11 +334,11 @@ fn death_dance_counts_the_whole_partys_cards() {
 }
 
 #[test]
-fn every_hero_has_eighty_four_cards_five_of_them_for_company() {
+fn every_hero_has_ninety_four_cards_five_of_them_for_company() {
     let c = content();
     for hero in ["bogatyr", "vorozheya", "volhv", "volkolak", "znaharka", "skomoroh"] {
         let mine: Vec<&CardDef> = c.cards.values().filter(|d| d.hero == hero).collect();
-        assert_eq!(mine.len(), 84, "{hero}");
+        assert_eq!(mine.len(), 94, "{hero}");
         assert!(mine.iter().filter(|d| d.keywords.contains(&Keyword::Coop)).count() >= 5, "{hero}");
         let free = mine.iter().filter(|d| d.cost == 0 && !d.x_cost && d.rarity != Rarity::Starter).count();
         assert!(free <= 8, "{hero} has {free} free cards");

@@ -226,13 +226,21 @@ impl Unlocks {
         }
     }
 
-    fn card_ok(&self, player: usize, rarity: Rarity) -> bool {
+    fn card_ok(&self, player: usize, def: &CardDef) -> bool {
         let level = self.hero_levels.get(player).copied().unwrap_or(1);
-        match rarity {
-            Rarity::Rare => level >= 4,
-            Rarity::Uncommon => level >= 2,
-            _ => true,
-        }
+        level >= card_level(def) as u32
+    }
+}
+
+/// The hero level that opens a card to the rewards: its own, or the one its rarity asks.
+pub fn card_level(def: &CardDef) -> u8 {
+    if def.level > 0 {
+        return def.level;
+    }
+    match def.rarity {
+        Rarity::Rare => 4,
+        Rarity::Uncommon => 2,
+        _ => 1,
     }
 }
 
@@ -1420,7 +1428,7 @@ impl Run {
                 .values()
                 .filter(|d| &d.hero == hero && d.rarity == rarity && (coop || !d.keywords.contains(&Keyword::Coop)))
                 .filter(|d| !matches!(d.kind, CardType::Curse | CardType::Status))
-                .filter(|d| self.unlocks.card_ok(p, d.rarity))
+                .filter(|d| self.unlocks.card_ok(p, d))
                 .collect()
         };
         let (common, uncommon, rare) = (pool(Rarity::Common), pool(Rarity::Uncommon), pool(Rarity::Rare));
@@ -1543,7 +1551,7 @@ impl Run {
                     let hero = self.players[p].hero.clone();
                     let coop = self.players.len() > 1;
                     let fits = |d: &&CardDef| d.hero == hero && d.rarity == *rarity && (coop || !d.keywords.contains(&Keyword::Coop));
-                    let mut pool: Vec<&CardDef> = c.cards.values().filter(fits).filter(|d| self.unlocks.card_ok(p, d.rarity)).collect();
+                    let mut pool: Vec<&CardDef> = c.cards.values().filter(fits).filter(|d| self.unlocks.card_ok(p, d)).collect();
                     // the omen promised a card of this rarity: it keeps its word even before the
                     // hero's level opens that rarity to the rewards
                     if pool.is_empty() {
@@ -1607,7 +1615,7 @@ impl Run {
             .cards
             .values()
             .filter(|d| d.hero == hero && !matches!(d.rarity, Rarity::Starter | Rarity::Special) && (coop || !d.keywords.contains(&Keyword::Coop)))
-            .filter(|d| self.unlocks.card_ok(p, d.rarity))
+            .filter(|d| self.unlocks.card_ok(p, d))
             .collect();
         let neutral: Vec<&CardDef> = c.cards.values().filter(|d| d.hero.is_empty() && !matches!(d.kind, CardType::Curse | CardType::Status) && d.rarity != Rarity::Special).collect();
         for (pool, want) in [(&mine, 5), (&neutral, 2)] {

@@ -349,3 +349,40 @@ fx-times = { $body } { $k } times.
 rarity-Common = Common
 rarity-Uncommon = Uncommon
 rarity-Rare = Rare
+
+# discarding and burning cards
+fx-discard = Discard { $n ->
+    [one] { $n } random card
+   *[other] { $n } random cards
+}.
+fx-discardhand = Discard your hand.
+fx-exhaustcards = Exhaust { $n ->
+    [one] { $n } random card
+   *[other] { $n } random cards
+} in your hand.
+fx-recall = Return { $n ->
+    [one] { $n } random card
+   *[other] { $n } random cards
+} from your discard pile to your hand.
+trigger-Discarded = Whenever you discard a card: { $fx }
+trigger-Exhausted = Whenever a card of yours is exhausted: { $fx }
+trigger-OnDiscard = If this card is discarded: { $fx }
+amount-discarded = card discarded
+amount-discarded-turn = card discarded this turn
+amount-hand = card in hand
+amount-exhausted = card exhausted this fight
+kw-Discard = Discard
+kw-Discard-help = The card goes from your hand to the discard pile. Its "If this card is discarded" and powers waiting for a discard fire. The end of a turn does not count.
+
+herb-nettle = Nettle
+herb-henbane = Henbane
+herb-valerian = Valerian
+herb-st_john = St John's Wort
+herb-nettle-help = In a brew: Bleed on enemies and Thorns. Spilt: 1 Bleed to all enemies.
+herb-henbane-help = In a brew: Fear and Rot on enemies. Spilt: 5% Fear to all enemies.
+herb-valerian-help = In a brew: Weak on enemies and Block for allies. Spilt: 1 Weak to a random enemy.
+herb-st_john-help = In a brew: Strength and healing. Spilt: 1 temporary Strength.
+herb-nettle-spill = 1 Bleed to all enemies
+herb-henbane-spill = 5% Fear to all enemies
+herb-valerian-spill = 1 Weak to a random enemy
+herb-st_john-spill = 1 temporary Strength

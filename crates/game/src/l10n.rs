@@ -176,6 +176,10 @@ impl L10n {
             Amount::Curses(_, m) => scaled(*m, self.t("amount-curses")),
             Amount::Pack(base, _) => base.to_string(),
             Amount::MissingHp(pct) => self.tf("amount-missing", &[("pct", (*pct).into())]),
+            Amount::Discarded(m) => scaled(*m, self.t("amount-discarded")),
+            Amount::DiscardedThisTurn(m) => scaled(*m, self.t("amount-discarded-turn")),
+            Amount::HandSize(m) => scaled(*m, self.t("amount-hand")),
+            Amount::ExhaustPile(m) => scaled(*m, self.t("amount-exhausted")),
         }
     }
 
@@ -279,6 +283,10 @@ impl L10n {
             Effect::Herb(herb) => self.tf("fx-herb", &[("h", self.t(&format!("herb-{herb}")).into()), ("spill", self.t(&format!("herb-{herb}-spill")).into())]),
             Effect::Brew => self.t("fx-brew"),
             Effect::Provoke => self.t("fx-provoke"),
+            Effect::Discard(a) => self.fx("discard", None, &[("n", n(a))]),
+            Effect::DiscardHand => self.t("fx-discardhand"),
+            Effect::ExhaustCards(a) => self.fx("exhaustcards", None, &[("n", n(a))]),
+            Effect::Recall(a) => self.fx("recall", None, &[("n", n(a))]),
             // a hook with nothing to say to the player says nothing, not its key
             Effect::Hook(name) if !self.has(&format!("hook-{name}")) => String::new(),
             Effect::Hook(name) => self.t(&format!("hook-{name}")),
@@ -301,6 +309,9 @@ impl L10n {
             }
             if !def.in_hand_end.is_empty() {
                 parts.push(self.tf("trigger-InHand", &[("fx", self.effects(&def.in_hand_end).into())]));
+            }
+            if !view.on_discard.is_empty() {
+                parts.push(self.tf("trigger-OnDiscard", &[("fx", self.effects(&view.on_discard).into())]));
             }
         }
         for k in &view.keywords {
@@ -345,6 +356,8 @@ impl L10n {
                         keys.push("kw-Brew".into());
                     }
                     Effect::Brew => keys.push("kw-Brew".into()),
+                    Effect::Discard(_) | Effect::DiscardHand | Effect::Damage(Amount::Discarded(_) | Amount::DiscardedThisTurn(_), _) => keys.push("kw-Discard".into()),
+                    Effect::ExhaustCards(_) => keys.push("kw-Exhaust".into()),
                     Effect::Hook(name) if name == "kolyada" => keys.push("kw-Rune".into()),
                     Effect::Hook(name) if name == "random_herb" => keys.push("kw-Brew".into()),
                     Effect::Damage(Amount::Runes(kind, _), _) | Effect::Block(Amount::Runes(kind, _), _) => {
@@ -357,7 +370,14 @@ impl L10n {
         }
         walk(&view.effects, &mut keys);
         for p in &view.passives {
+            if matches!(p.on, nav_core::Trigger::Discarded) {
+                keys.push("kw-Discard".into());
+            }
             walk(&p.effects, &mut keys);
+        }
+        if !view.on_discard.is_empty() {
+            keys.push("kw-Discard".into());
+            walk(&view.on_discard, &mut keys);
         }
         keys.dedup();
         let mut seen = Vec::new();

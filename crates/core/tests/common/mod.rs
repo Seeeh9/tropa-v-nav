@@ -56,6 +56,13 @@ pub const CARDS: &str = r#"[
     (id: "t_mara", kind: Skill, cost: 0, effects: [Mask(Mara)]),
     (id: "t_played", kind: Attack, cost: 0, target: Enemy, effects: [Damage(PlayedThisRound(3), Target)]),
     (id: "t_power", kind: Power, cost: 0, passives: [(on: TurnStart, effects: [Apply(Strength, N(1), Me)])]),
+    (id: "t_toss", kind: Skill, cost: 0, effects: [DiscardHand, Damage(Discarded(2), RandomFoe)]),
+    (id: "t_toss1", kind: Skill, cost: 0, effects: [Discard(N(1))]),
+    (id: "t_sly", kind: Skill, cost: 3, effects: [Block(N(1), Me)], on_discard: [Damage(N(7), AllFoes)]),
+    (id: "t_on_discard", kind: Power, cost: 0, passives: [(on: Discarded, effects: [Block(N(2), Me)])]),
+    (id: "t_on_exhaust", kind: Power, cost: 0, passives: [(on: Exhausted, effects: [Block(N(3), Me)])]),
+    (id: "t_burn", kind: Skill, cost: 0, effects: [ExhaustCards(N(2))]),
+    (id: "t_recall", kind: Skill, cost: 0, effects: [Recall(N(1))]),
     (id: "t_up", kind: Attack, cost: 1, target: Enemy, effects: [Damage(N(6), Target)], up: (cost: 0, effects: [Damage(N(9), Target)])),
 ]"#;
 

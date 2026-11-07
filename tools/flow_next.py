@@ -18,6 +18,7 @@ LOOK = {
     "O": "a tall old man in animal hides and a birch-bark mask, a long beard with woven charms, dark red rune marks painted on his arms, a staff of lightning-split oak, ",
     "W": "a wiry hunter with a wolf pelt on his shoulders and a silver chain around his neck ",
     "Z": "a stooped middle-aged woman in a dark headscarf with old burn scars on her face, bundles of dried herbs on her back, a sickle and two clay jugs at her belt, ",
+    "E": "Yemelya, a plump clean-shaven grown peasant man with a round face and a blond bowl haircut, in a patched off-white linen shirt with a red collar and a red sash, grey trousers and bast shoes, ",
     "S": "a thin Slavic skomorokh jester in a patchwork coat sewn with small bells, bare-headed with a white grinning wooden mask on his face and three wooden masks on his belt, ",
 }
 STYLE = (
@@ -35,7 +36,7 @@ RELIC_STYLE = (
 
 def cards():
     out = []
-    order = ["volhv3", "volkolak3", "znaharka3", "skomoroh3", "neutral3"]
+    order = ["volhv3", "volkolak3", "znaharka3", "skomoroh3", "neutral3", "bogatyr4", "vorozheya4", "volhv4", "volkolak4", "znaharka4", "skomoroh4", "emelya4"]
     for name in order:
         j = json.load(open(os.path.join(ROOT, "docs", "prompts", "plots", name + ".json"), encoding="utf-8"))
         look = LOOK.get(j.get("_look", ""), "")

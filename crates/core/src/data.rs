@@ -91,6 +91,14 @@ pub enum Amount {
     Pack(i32, i32),
     /// This percent of the health the source has lost.
     MissingHp(i32),
+    /// Cards the last discard of the source hero threw away, times the multiplier.
+    Discarded(i32),
+    /// Cards the source hero has discarded this round, times the multiplier.
+    DiscardedThisTurn(i32),
+    /// Cards in the source hero's hand, times the multiplier.
+    HandSize(i32),
+    /// Cards the source hero has exhausted this fight, times the multiplier.
+    ExhaustPile(i32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -156,6 +164,14 @@ pub enum Effect {
     Brew,
     /// The targeted enemy now aims its move at the source hero.
     Provoke,
+    /// Throws this many random cards from the source hero's hand onto the discard pile.
+    Discard(Amount),
+    /// Throws the whole hand onto the discard pile.
+    DiscardHand,
+    /// Burns this many random cards from the source hero's hand.
+    ExhaustCards(Amount),
+    /// Brings this many random cards back from the discard pile into the hand.
+    Recall(Amount),
     /// Escape hatch into named Rust code for one-off mechanics.
     Hook(String),
 }
@@ -178,6 +194,9 @@ data_enum!(Trigger {
     Shifted,
     MaskChanged,
     AllyRaised,
+    // a card of yours was thrown away by a card or a power, not by the end of the turn
+    Discarded,
+    Exhausted,
 });
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -196,6 +215,7 @@ pub struct CardPatch {
     pub effects: Option<Vec<Effect>>,
     pub passives: Option<Vec<Passive>>,
     pub keywords: Option<Vec<Keyword>>,
+    pub on_discard: Option<Vec<Effect>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -223,6 +243,12 @@ pub struct CardDef {
     /// Runs at end of turn while the card sits in hand (curses).
     #[serde(default)]
     pub in_hand_end: Vec<Effect>,
+    /// Runs when a card or a power throws this card out of the hand.
+    #[serde(default)]
+    pub on_discard: Vec<Effect>,
+    /// Hero level that opens this card in rewards; 0 means by its rarity.
+    #[serde(default)]
+    pub level: u8,
     #[serde(default)]
     pub up: Option<CardPatch>,
     #[serde(default)]
@@ -248,6 +274,7 @@ pub struct CardView {
     pub effects: Vec<Effect>,
     pub passives: Vec<Passive>,
     pub keywords: Vec<Keyword>,
+    pub on_discard: Vec<Effect>,
 }
 
 impl CardView {
@@ -266,6 +293,7 @@ impl CardDef {
             effects: self.effects.clone(),
             passives: self.passives.clone(),
             keywords: self.keywords.clone(),
+            on_discard: self.on_discard.clone(),
         };
         let mut layer = |p: &Option<CardPatch>| {
             let Some(p) = p else { return };
@@ -286,6 +314,9 @@ impl CardDef {
             }
             if let Some(k) = &p.keywords {
                 v.keywords = k.clone();
+            }
+            if let Some(e) = &p.on_discard {
+                v.on_discard = e.clone();
             }
         };
         let beast = form == Form::Beast && self.beast.is_some();

@@ -24,7 +24,8 @@ from PIL import Image
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DOWNLOADS = os.path.join(os.path.expanduser("~"), "Downloads")
-STAMP = re.compile(r"_\d{14}( \(\d+\))?\.(jpe?g|png)$", re.I)
+# Flow ends a name with a time stamp, or (since 2026-11) with eight hex digits
+STAMP = re.compile(r"_(\d{14}|[0-9a-f]{8})( \(\d+\))?\.(jpe?g|png)$", re.I)
 
 
 def waiting():

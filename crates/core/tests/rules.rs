@@ -1355,3 +1355,46 @@ fn bones_lie_a_turn_before_they_get_up() {
     assert_eq!(s.enemies[0].hp, 5, "up at half");
     assert!(!s.enemies[0].flags.contains_key(nav_core::state::BONES));
 }
+
+
+#[test]
+fn a_hand_thrown_away_counts_and_fires_what_waits_for_it() {
+    let (c, mut s) = solo(&["t_on_discard", "t_toss", "t_sly", "t_block", "t_block"], &["dummy"]);
+    play(&c, &mut s, 0, "t_on_discard", None);
+    let before = s.enemies[0].hp;
+    play(&c, &mut s, 0, "t_toss", None);
+    let h = &s.heroes[0];
+    assert!(h.hand.is_empty());
+    // three thrown: 2 each, the sly card's 7, and the power's block for each
+    assert_eq!(s.enemies[0].hp, before - 7 - 3 * 2);
+    assert_eq!(h.block, 3 * 2);
+    assert_eq!(h.discard.len(), 4);
+}
+
+#[test]
+fn the_end_of_a_turn_is_no_discard() {
+    let (c, mut s) = solo(&["t_sly", "t_sly", "t_sly", "t_sly", "t_sly"], &["dummy"]);
+    end_round(&c, &mut s);
+    assert_eq!(s.enemies[0].hp, 100);
+}
+
+#[test]
+fn burnt_cards_go_for_good_and_powers_hear_them() {
+    let (c, mut s) = solo(&["t_on_exhaust", "t_burn", "t_block", "t_block", "t_block"], &["dummy"]);
+    play(&c, &mut s, 0, "t_on_exhaust", None);
+    play(&c, &mut s, 0, "t_burn", None);
+    let h = &s.heroes[0];
+    assert_eq!(h.exhaust.len(), 2);
+    assert_eq!(h.hand.len(), 1);
+    assert_eq!(h.block, 6);
+}
+
+#[test]
+fn a_card_is_called_back_from_the_discard_pile() {
+    let (c, mut s) = solo(&["t_recall", "t_toss1", "t_cost3", "t_cost3", "t_cost3"], &["dummy"]);
+    play(&c, &mut s, 0, "t_toss1", None);
+    assert_eq!(s.heroes[0].hand.len(), 3);
+    play(&c, &mut s, 0, "t_recall", None);
+    // the recall card is in hand no more, and one card came back
+    assert_eq!(s.heroes[0].hand.len(), 3);
+}

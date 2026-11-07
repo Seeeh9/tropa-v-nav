@@ -250,6 +250,8 @@ pub enum Event {
     Missed { unit: UnitRef },
     CardAdded { player: u8, card: Id, pile: Pile },
     Exhausted { player: u8, card: Id },
+    /// Thrown out of the hand by a card or a power.
+    Discarded { player: u8, card: Id },
     EnemyMove { enemy: u32, mv: usize },
     EnemySkipped { enemy: u32, fear: bool },
     EnemyDied { enemy: u32 },

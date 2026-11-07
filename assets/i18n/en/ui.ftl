@@ -494,6 +494,10 @@ settings-logs = Log folder
 coop-join-lan = Join
 lobby-address = IP for friends: { $code }
 error-NoArm = You have no arm for this card
-lobby-level-help = The level grows with the oberegi this hero earns, alike alone and in a party; they are counted after every fight. Level 2 opens uncommon cards in rewards and at the pedlar, level 4 rare ones. Above that it adds nothing yet.
+lobby-level-help = The level grows with the oberegi this hero earns, alike alone and in a party; they are counted after every fight. New cards in rewards and at the pedlar open with the level: uncommon ones at 2, rare ones at 4, and from 3 to 10 new combos: discarding, burning, new herbs and healing.
 lobby-level-next = To the next level: { $have } of { $need } oberegi.
 lobby-level-top = The highest level.
+lobby-level-opens = Level { $n } opens { $k ->
+    [one] { $k } new card
+   *[other] { $k } new cards
+}.

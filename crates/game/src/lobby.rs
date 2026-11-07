@@ -383,6 +383,10 @@ fn draw_lobby(
                         Some((have, need)) => l10n.tf("lobby-level-next", &[("have", (have as i32).into()), ("need", (need as i32).into())]),
                         None => l10n.t("lobby-level-top"),
                     };
+                    // what the next level opens, counted from the cards themselves
+                    let opens = db.0.cards.values().filter(|d| d.hero == *hero && !matches!(d.rarity, nav_core::Rarity::Starter | nav_core::Rarity::Special) && nav_core::card_level(d) as u32 == level + 1).count();
+                    let next = if opens > 0 { format!("{next}
+{}", l10n.tf("lobby-level-opens", &[("n", ((level + 1) as i32).into()), ("k", (opens as i32).into())])) } else { next };
                     p.spawn(theme::text(l10n.n("lobby-hp", def.max_hp), &fonts.num, 26.0, theme::CANDLE));
                     p.spawn((
                         theme::text(format!("{} ⓘ", l10n.n("lobby-level", level as i32)), &fonts.num, 26.0, theme::CANDLE),

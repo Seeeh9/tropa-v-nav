@@ -925,8 +925,7 @@ impl<'a> Exec<'a> {
         if view.kind == CardType::Power {
             h.powers.extend(view.passives.iter().cloned());
         } else if view.has(Keyword::Exhaust) || card.free {
-            h.exhaust.push(card.clone());
-            self.ev.push(Event::Exhausted { player: p, card: card.def.clone() });
+            self.exhaust_card(p, card.clone());
         } else {
             h.discard.push(card.clone());
         }
@@ -1158,7 +1157,64 @@ impl<'a> Exec<'a> {
                 let n: usize = self.s.heroes.iter().map(|h| h.runes.iter().filter(|r| *r == kind).count()).sum();
                 n as i32 * m
             }
+            Amount::Discarded(m) => self.hero_flag(ctx.src, "last_discarded") * m,
+            Amount::DiscardedThisTurn(m) => self.hero_flag(ctx.src, "turn_discarded") * m,
+            Amount::HandSize(m) => match ctx.src {
+                UnitRef::Hero(i) => self.s.heroes[i as usize].hand.len() as i32 * m,
+                UnitRef::Enemy(_) => 0,
+            },
+            Amount::ExhaustPile(m) => match ctx.src {
+                UnitRef::Hero(i) => self.s.heroes[i as usize].exhaust.len() as i32 * m,
+                UnitRef::Enemy(_) => 0,
+            },
         }
+    }
+
+    fn hero_flag(&self, u: UnitRef, key: &str) -> i32 {
+        match u {
+            UnitRef::Hero(i) => self.s.heroes[i as usize].flags.get(key).copied().unwrap_or(0),
+            UnitRef::Enemy(_) => 0,
+        }
+    }
+
+    /// Throws the card at `pos` of a hero's hand away, and runs what it does when thrown.
+    fn discard_at(&mut self, slot: u8, pos: usize) {
+        let card = self.hero(slot).hand.remove(pos);
+        let on_discard = self.c.cards.get(&card.def).map(|d| d.view(card.upgraded, self.s.heroes[slot as usize].form).on_discard).unwrap_or_default();
+        self.ev.push(Event::Discarded { player: slot, card: card.def.clone() });
+        self.hero(slot).discard.push(card);
+        *self.hero(slot).flags.entry("turn_discarded".into()).or_insert(0) += 1;
+        if self.depth < 6 && !on_discard.is_empty() {
+            self.depth += 1;
+            let mut ctx = Ctx::passive(UnitRef::Hero(slot));
+            ctx.card = true;
+            self.run(&on_discard, &mut ctx);
+            self.depth -= 1;
+        }
+        self.fire(slot, Trigger::Discarded);
+    }
+
+    /// Discards `n` random cards from a hero's hand (all of it when `n` is `None`); returns how many went.
+    fn discard_cards(&mut self, slot: u8, n: Option<i32>) -> i32 {
+        let mut gone = 0;
+        loop {
+            let left = self.s.heroes[slot as usize].hand.len();
+            if left == 0 || n.is_some_and(|n| gone >= n) || self.s.heroes[slot as usize].downed {
+                break;
+            }
+            let pos = if n.is_none() { left - 1 } else { self.s.rng.below(left as u32) as usize };
+            self.discard_at(slot, pos);
+            gone += 1;
+        }
+        self.hero(slot).flags.insert("last_discarded".into(), gone);
+        gone
+    }
+
+    /// Burns a card out of play for this fight and lets the hero's powers know.
+    fn exhaust_card(&mut self, slot: u8, card: Card) {
+        self.ev.push(Event::Exhausted { player: slot, card: card.def.clone() });
+        self.hero(slot).exhaust.push(card);
+        self.fire(slot, Trigger::Exhausted);
     }
 
     fn cond(&mut self, ctx: &Ctx, c: &Cond) -> bool {
@@ -1484,6 +1540,48 @@ impl<'a> Exec<'a> {
                     }
                 }
                 Effect::Hook(name) => crate::hooks::run(self, ctx, name),
+                Effect::Discard(a) => {
+                    let n = self.amount(ctx, a);
+                    if let UnitRef::Hero(me) = ctx.src {
+                        self.discard_cards(me, Some(n));
+                    }
+                }
+                Effect::DiscardHand => {
+                    if let UnitRef::Hero(me) = ctx.src {
+                        self.discard_cards(me, None);
+                    }
+                }
+                Effect::ExhaustCards(a) => {
+                    let n = self.amount(ctx, a);
+                    if let UnitRef::Hero(me) = ctx.src {
+                        for _ in 0..n.max(0) {
+                            let left = self.s.heroes[me as usize].hand.len();
+                            if left == 0 {
+                                break;
+                            }
+                            let pos = self.s.rng.below(left as u32) as usize;
+                            let card = self.hero(me).hand.remove(pos);
+                            self.exhaust_card(me, card);
+                        }
+                    }
+                }
+                Effect::Recall(a) => {
+                    let n = self.amount(ctx, a);
+                    if let UnitRef::Hero(me) = ctx.src {
+                        for _ in 0..n.max(0) {
+                            let h = &self.s.heroes[me as usize];
+                            let can: Vec<usize> = (0..h.discard.len()).filter(|i| self.c.cards.get(&h.discard[*i].def).is_some_and(|d| !matches!(d.kind, CardType::Curse | CardType::Status))).collect();
+                            if can.is_empty() || h.hand.len() >= HAND_LIMIT {
+                                break;
+                            }
+                            let i = can[self.s.rng.below(can.len() as u32) as usize];
+                            let card = self.hero(me).discard.remove(i);
+                            let def = card.def.clone();
+                            self.hero(me).hand.push(card);
+                            self.ev.push(Event::CardAdded { player: me, card: def, pile: Pile::Hand });
+                        }
+                    }
+                }
             }
         }
     }
@@ -1496,6 +1594,10 @@ impl<'a> Exec<'a> {
             "weep" => vec![Effect::Heal(Amount::N(2), Tgt::Me)],
             "burst" => vec![Effect::Damage(Amount::N(5), Tgt::RandomFoe)],
             "fern" => vec![Effect::Draw(Amount::N(1))],
+            "nettle" => vec![Effect::Apply(StatusKind::Bleed, Amount::N(1), Tgt::AllFoes)],
+            "henbane" => vec![Effect::Apply(StatusKind::Fear, Amount::N(5), Tgt::AllFoes)],
+            "valerian" => vec![Effect::Apply(StatusKind::Weak, Amount::N(1), Tgt::RandomFoe)],
+            "st_john" => vec![Effect::Apply(StatusKind::TempStrength, Amount::N(1), Tgt::Me)],
             _ => return,
         };
         self.run(&effects, ctx);
@@ -1511,7 +1613,19 @@ impl<'a> Exec<'a> {
         // fern flower stands in for any herb and doubles the brew
         let ferns = herbs.iter().filter(|h| *h == "fern").count();
         let plain: Vec<&Id> = herbs.iter().filter(|h| *h != "fern").collect();
-        let found = self.c.recipes.iter().find(|r| {
+        // the fern first stands in for the herb already in the pot most, so a pair stays a pair
+        let mut copy: Vec<&Id> = plain.clone();
+        if let Some(most) = plain.iter().max_by_key(|h| plain.iter().filter(|x| x == h).count()) {
+            copy.extend(std::iter::repeat_n(*most, ferns));
+        }
+        let as_copy = |r: &&crate::data::RecipeDef| {
+            let mut need: Vec<&Id> = r.herbs.iter().collect();
+            let mut have = copy.clone();
+            need.sort();
+            have.sort();
+            need == have
+        };
+        let found = self.c.recipes.iter().find(|r| ferns > 0 && !plain.is_empty() && as_copy(r)).or_else(|| self.c.recipes.iter().find(|r| {
             if r.herbs.len() != herbs.len() {
                 return false;
             }
@@ -1530,7 +1644,7 @@ impl<'a> Exec<'a> {
                 }
             }
             have.len() + wild == stars
-        });
+        }));
         let Some(recipe) = found else { return };
         let mut effects = recipe.effects.clone();
         let id = recipe.id.clone();
@@ -1688,8 +1802,7 @@ impl<'a> Exec<'a> {
                 }
                 let h = self.hero(slot);
                 if view.has(Keyword::Ethereal) {
-                    self.ev.push(Event::Exhausted { player: slot, card: card.def.clone() });
-                    self.hero(slot).exhaust.push(card);
+                    self.exhaust_card(slot, card);
                 } else if view.has(Keyword::Retain) && !h.downed {
                     keep.push(card);
                 } else {

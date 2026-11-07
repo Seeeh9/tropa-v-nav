@@ -91,11 +91,7 @@ def main():
                 continue
             model, key = live[0]
             try:
-                laid_out = f"## Style:
-{style}
-
-## Transcript:
-{read}"
+                laid_out = "## Style:\n" + style + "\n\n## Transcript:\n" + read
                 pcm, rate = speak(key, model, SPEAKER, laid_out if model in MARKDOWN else prompt)
                 break
             except urllib.error.HTTPError as e:

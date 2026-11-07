@@ -166,6 +166,9 @@ pub struct Node {
     last_mark: u64,
     out: Vec<(To, Msg)>,
     notes: Vec<Note>,
+    /// How many messages the host has been heard from: a client that stops hearing it has lost
+    /// the connection, whatever the transport says.
+    pub heard: u64,
 }
 
 impl Node {
@@ -190,6 +193,49 @@ impl Node {
         node
     }
 
+    /// Reopens a saved party run as its host. Every other seat waits, played by the autopilot, for
+    /// its player to come back; one who comes back on another address takes the first empty seat.
+    pub fn resume_party(me: Peer, name: &str, mut lobby: Lobby, n: u32, run: Run) -> Node {
+        let mut node = Node::blank(me, name);
+        let old = lobby.host;
+        for p in &mut lobby.players {
+            p.connected = false;
+        }
+        let seat = lobby.players.iter().position(|p| p.peer == old).unwrap_or(0);
+        if let Some(p) = lobby.players.get_mut(seat) {
+            p.peer = me;
+            p.name = name.into();
+            p.connected = true;
+        }
+        lobby.host = me;
+        lobby.started = true;
+        node.lobby = lobby;
+        node.n = n;
+        node.last_mark = mark(&run);
+        node.state = Some(run);
+        node.notes.push(Note::Resynced);
+        node
+    }
+
+    /// Says hello to the host again after the connection was lost: the host gives the seat back
+    /// and sends the whole run as it now stands.
+    pub fn rejoin(&mut self) {
+        if !self.is_host() {
+            self.out.push((To::One(self.lobby.host), Msg::Hello { name: self.name.clone() }));
+        }
+    }
+
+    /// Host: tells everyone where the run stands, so a client hears it is still connected and one
+    /// that missed actions asks for the whole run.
+    pub fn heartbeat(&mut self) {
+        if !self.is_host() {
+            return;
+        }
+        if let Some(state) = &self.state {
+            self.out.push((To::All, Msg::Hash { n: self.n, hash: state.hash64() }));
+        }
+    }
+
     /// Joins the lobby hosted by `host`.
     pub fn join(me: Peer, name: &str, host: Peer) -> Node {
         let mut node = Node::blank(me, name);
@@ -211,6 +257,7 @@ impl Node {
             last_mark: 0,
             out: Vec::new(),
             notes: Vec::new(),
+            heard: 0,
         }
     }
 
@@ -480,10 +527,19 @@ impl Node {
 
     pub fn handle(&mut self, c: &Content, from: Peer, msg: Msg) {
         let host = self.is_host();
+        if from == self.lobby.host {
+            self.heard += 1;
+        }
         match msg {
             Msg::Hello { name } if host => {
                 if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == from) {
                     // a returning player takes the wheel back from the autopilot
+                    p.connected = true;
+                    p.name = name;
+                } else if let Some(p) = self.lobby.players.iter_mut().find(|p| self.lobby.started && !p.connected) {
+                    // a saved party picked up again, or a player back on another address: the
+                    // first seat with no one at it is theirs
+                    p.peer = from;
                     p.connected = true;
                     p.name = name;
                 } else if !self.lobby.started && self.lobby.players.len() < MAX_PLAYERS {
@@ -592,7 +648,9 @@ impl Node {
                 self.notes.push(Note::Refused(error));
             }
             Msg::Hash { n, hash } => {
-                if n == self.n && self.state.as_ref().is_some_and(|s| s.hash64() != hash) {
+                // a different run, or actions that never arrived: ask for the whole of it
+                let off = n == self.n && self.state.as_ref().is_some_and(|s| s.hash64() != hash);
+                if off || n > self.n {
                     self.out.push((To::One(self.lobby.host), Msg::Resync));
                 }
             }

@@ -79,6 +79,13 @@ pub struct NetStatus {
     /// The other players' cursors over the map and their nudges, as last heard.
     pub pointers: Vec<(u8, [f32; 2])>,
     pub nudges: Vec<(u8, u8)>,
+    /// Seconds the host has not been heard from, once that is long enough to call it lost.
+    pub lost: Option<f32>,
+    /// The connection is lost: the transport is to try again (Steam joins the lobby anew, the
+    /// local network dials the host again).
+    pub redial: bool,
+    /// A saved party to pick up in the next lobby this machine opens as host.
+    pub resume: Option<crate::profile::PartySave>,
 }
 
 enum SteamEv {
@@ -383,6 +390,15 @@ fn steam_events(
 ) {
     let events: Vec<SteamEv> = inbox.0.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
     let mm = steam.client.matchmaking();
+    // the connection is lost: knock at the lobby's door again
+    if status.redial {
+        if let Some(lobby) = net.as_ref().and_then(|n| n.lobby) {
+            status.redial = false;
+            info!("trying to get back into the lobby");
+            let q = inbox.clone();
+            mm.join_lobby(lobby, move |r| q.push(SteamEv::Joined(r.map_err(|_| "join failed".to_string()))));
+        }
+    }
     let me = steam.client.user().steam_id();
     let name = steam.client.friends().name();
     for e in events {
@@ -391,7 +407,12 @@ fn steam_events(
                 let code = new_code(lobby.raw() ^ time.elapsed().as_nanos() as u64);
                 mm.set_lobby_data(lobby, GAME_KEY, GAME_VALUE);
                 mm.set_lobby_data(lobby, CODE_KEY, &code);
-                commands.insert_resource(Net { node: Node::host(me.raw(), &name), lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral: false });
+                // a saved party is picked up in the new lobby; its players come back to their seats
+                let node = match status.resume.take() {
+                    Some(save) => Node::resume_party(me.raw(), &name, save.lobby, save.n, save.run),
+                    None => Node::host(me.raw(), &name),
+                };
+                commands.insert_resource(Net { node, lobby: Some(lobby), code, locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral: false });
                 status.busy = false;
                 status.dirty = true;
                 next.set(AppState::Lobby);
@@ -411,6 +432,16 @@ fn steam_events(
                     status.busy = true;
                     let q = inbox.clone();
                     mm.join_lobby(lobby, move |r| q.push(SteamEv::Joined(r.map_err(|_| "join failed".to_string()))));
+                }
+            }
+            // back in the lobby after the connection dropped: hello again, and the run goes on
+            SteamEv::Joined(Ok(lobby)) if net.as_ref().is_some_and(|n| n.lobby == Some(lobby)) => {
+                if let Ok(mut set) = allowed.0.lock() {
+                    set.extend(mm.lobby_members(lobby).iter().map(|m| m.raw()));
+                }
+                if let Some(net) = net.as_mut() {
+                    info!("rejoined the lobby; asking the host for the run");
+                    net.node.rejoin();
                 }
             }
             SteamEv::Joined(Ok(lobby)) => {
@@ -440,10 +471,20 @@ fn steam_events(
             SteamEv::Member { lobby, user, left } => {
                 let Some(net) = net.as_mut().filter(|n| n.lobby == Some(lobby)) else { continue };
                 if left {
+                    info!("player {} left the lobby", user.raw());
                     net.node.peer_left(user.raw());
                 }
-                // Steam picks the new owner itself when the host goes
-                net.node.host_changed(&db.0, mm.lobby_owner(lobby).raw());
+                // a client cut off sees everyone leave and itself made owner: that is its own
+                // connection gone, not the host's, and it waits to get back in
+                let owner = mm.lobby_owner(lobby).raw();
+                let alone = mm.lobby_members(lobby).len() <= 1;
+                if owner == net.me() && !net.node.is_host() && alone && net.node.state.is_some() {
+                    warn!("cut off from the party: everyone seems gone, waiting to get back in");
+                    status.lost.get_or_insert(0.0);
+                } else {
+                    // Steam picks the new owner itself when the host goes
+                    net.node.host_changed(&db.0, owner);
+                }
                 status.dirty = true;
             }
         }
@@ -577,6 +618,16 @@ fn notes(
             Some(run) if matches!(run.stage, Stage::Victory | Stage::Defeat) => profile.clear_run(),
             Some(run) => profile.save_run(run),
             None => {}
+        }
+    }
+    // the host of a party keeps its run too, after each fight and each step between them (not in
+    // the middle of a fight, which is picked up from its start)
+    let party = !solo && net.node.is_host() && !net.ephemeral && net.locals.is_empty() && net.node.lobby.players.len() > 1;
+    if party && notes.iter().any(|n| matches!(n, Note::Applied { .. } | Note::Started)) {
+        match net.node.state.as_ref() {
+            Some(run) if matches!(run.stage, Stage::Victory | Stage::Defeat) => profile.clear_party(),
+            Some(run) if run.stage != Stage::Combat => profile.save_party(&crate::profile::PartySave { lobby: net.node.lobby.clone(), n: net.node.n, run: run.clone() }),
+            _ => {}
         }
     }
     for note in notes {

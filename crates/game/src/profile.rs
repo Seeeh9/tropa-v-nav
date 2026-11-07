@@ -249,11 +249,49 @@ impl Profile {
         (!matches!(run.stage, nav_core::Stage::Victory | nav_core::Stage::Defeat)).then_some(run)
     }
 
+    fn party_path(&self) -> Option<PathBuf> {
+        self.path.as_ref().map(|p| p.with_extension("party.ron"))
+    }
+
+    /// Keeps the party's run as its host has it, after every fight and every step on the map, so
+    /// a dropped game or an evening's end can be picked up again by the same friends.
+    pub fn save_party(&self, save: &PartySave) {
+        let Some(path) = self.party_path() else { return };
+        let Ok(text) = ron::to_string(save) else { return };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let tmp = path.with_extension("ron.tmp");
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+
+    pub fn load_party(&self) -> Option<PartySave> {
+        let text = std::fs::read_to_string(self.party_path()?).ok()?;
+        let save: PartySave = ron::from_str(&text).ok()?;
+        (!matches!(save.run.stage, nav_core::Stage::Victory | nav_core::Stage::Defeat)).then_some(save)
+    }
+
+    pub fn clear_party(&self) {
+        if let Some(path) = self.party_path() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     pub fn clear_run(&self) {
         if let Some(path) = self.run_path() {
             let _ = std::fs::remove_file(path);
         }
     }
+}
+
+/// A party's run as its host saved it: who sat where, how far the shared log had got, the run.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PartySave {
+    pub lobby: nav_net::Lobby,
+    pub n: u32,
+    pub run: nav_core::Run,
 }
 
 /// Village buildings and how many levels each has. Only the ones that already do something

@@ -39,7 +39,7 @@ mod fx;
 mod gore;
 mod held;
 mod impact;
-mod piles;
+pub(crate) mod piles;
 mod rig;
 mod stands;
 mod stature;

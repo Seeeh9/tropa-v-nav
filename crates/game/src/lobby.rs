@@ -67,14 +67,35 @@ fn enter_coop(
     mut entry: ResMut<CodeEntry>,
     mut status: ResMut<NetStatus>,
     steam: Option<Res<Steam>>,
+    profile: Res<crate::profile::Profile>,
 ) {
     entry.0.clear();
-    status.error = std::mem::take(&mut status.host_gone).then(|| "coop-error-host-gone".into());
+    // a party given up after the line dropped says so here
+    let lost = status.error.take().filter(|e| e == "coop-error-lost");
+    status.error = std::mem::take(&mut status.host_gone).then(|| "coop-error-host-gone".into()).or(lost);
     status.busy = false;
     let has_steam = steam.is_some();
     commands.spawn(column(AppState::Coop, *stage)).with_children(|p| {
         p.spawn(crate::menu::backdrop(&art, &assets, "bg/coop", 0.7));
         p.spawn(theme::text(l10n.t("coop-title"), &fonts.title, 72.0, theme::BONE));
+        // the party's last run, as this machine hosted it, can be carried on: a lobby opens with
+        // it, and the friends who come in take their seats back
+        if let Some(save) = profile.load_party() {
+            p.spawn((
+                menu_button(l10n.tf("menu-continue-party", &[("act", (save.run.act as i32).into())]), &fonts),
+                observe(|_: On<Activate>, mut commands: Commands, profile: Res<crate::profile::Profile>, steam: Option<Res<Steam>>, inbox: Option<Res<Inbox>>, mut status: ResMut<NetStatus>, mut next: ResMut<NextState<AppState>>| {
+                    status.resume = profile.load_party();
+                    match (steam, inbox) {
+                        (Some(steam), Some(inbox)) => net::create_lobby(&steam, &mut status, &inbox),
+                        _ => {
+                            if crate::lan::host(&mut commands, &mut status) {
+                                next.set(AppState::Lobby);
+                            }
+                        }
+                    }
+                }),
+            ));
+        }
         if has_steam {
             p.spawn((
                 menu_button(l10n.t("coop-create"), &fonts),

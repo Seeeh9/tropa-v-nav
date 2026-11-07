@@ -39,7 +39,7 @@ const EVERYONE: Peer = 0;
 
 pub fn plugin(app: &mut App) {
     app.add_systems(PreUpdate, receive.run_if(resource_exists::<Lan>))
-        .add_systems(Update, (answered.run_if(resource_exists::<Dial>), hang_up.run_if(resource_exists::<Lan>)))
+        .add_systems(Update, (answered.run_if(resource_exists::<Dial>), hang_up.run_if(resource_exists::<Lan>), redial.run_if(resource_exists::<Lan>)))
         .add_systems(PostUpdate, transmit.run_if(resource_exists::<Lan>).before(crate::net::send));
     #[cfg(feature = "dev")]
     app.add_systems(OnEnter(AppState::Menu), open).add_systems(Update, (auto_lobby, open_on_fight).chain().run_if(resource_exists::<Lan>));
@@ -47,7 +47,7 @@ pub fn plugin(app: &mut App) {
 
 /// A knock at a host's door, waited for off to the side so the game does not freeze on it.
 #[derive(Resource)]
-struct Dial(Mutex<Receiver<std::io::Result<TcpStream>>>);
+struct Dial(Mutex<Receiver<std::io::Result<TcpStream>>>, String);
 
 fn net_of(node: Node, code: String, ephemeral: bool) -> Net {
     Net { node, lobby: None, code, locals: vec![], timer: 0.0, bot_me: false, booked: false, ephemeral }
@@ -66,8 +66,13 @@ pub fn host(commands: &mut Commands, status: &mut NetStatus) -> bool {
     let _ = listener.set_nonblocking(true);
     let code = my_addresses().join("  /  ");
     info!("LAN: hosting on {PORT}, at {code}");
-    commands.insert_resource(net_of(Node::host(HOST, &String::from("host")), code, false));
-    commands.insert_resource(Lan { listener: Some(listener), links: vec![], me: HOST });
+    // a saved party is picked up as the lobby opens; its players come back to their seats
+    let node = match status.resume.take() {
+        Some(save) => Node::resume_party(HOST, "host", save.lobby, save.n, save.run),
+        None => Node::host(HOST, "host"),
+    };
+    commands.insert_resource(net_of(node, code, false));
+    commands.insert_resource(Lan { listener: Some(listener), links: vec![], me: HOST, addr: None, redial: None });
     status.error = None;
     status.dirty = true;
     true
@@ -78,11 +83,12 @@ pub fn dial(commands: &mut Commands, typed: &str, status: &mut NetStatus) {
     let addr = if typed.contains(':') { typed.to_string() } else { format!("{typed}:{PORT}") };
     let (tx, rx) = channel();
     info!("LAN: calling {addr}");
+    let kept = addr.clone();
     std::thread::spawn(move || {
         let reached = addr.to_lowercase().to_socket_addrs().and_then(|mut found| found.next().ok_or_else(|| ErrorKind::NotFound.into())).and_then(|at| TcpStream::connect_timeout(&at, DIAL_WAIT));
         let _ = tx.send(reached);
     });
-    commands.insert_resource(Dial(Mutex::new(rx)));
+    commands.insert_resource(Dial(Mutex::new(rx), kept));
     status.busy = true;
     status.error = None;
 }
@@ -90,6 +96,7 @@ pub fn dial(commands: &mut Commands, typed: &str, status: &mut NetStatus) {
 fn answered(mut commands: Commands, dial: Res<Dial>, state: Res<State<AppState>>, mut status: ResMut<NetStatus>, mut next: ResMut<NextState<AppState>>) {
     let Ok(rx) = dial.0.lock() else { return };
     let Ok(reached) = rx.try_recv() else { return };
+    let addr = dial.1.clone();
     commands.remove_resource::<Dial>();
     status.busy = false;
     // the player has since walked away from the screen
@@ -109,7 +116,7 @@ fn answered(mut commands: Commands, dial: Res<Dial>, state: Res<State<AppState>>
     let me = fresh_peer();
     info!("LAN: joined as {me}");
     commands.insert_resource(net_of(Node::join(me, &format!("guest{}", me % 100), HOST), "LAN".into(), false));
-    commands.insert_resource(Lan { listener: None, links: vec![Link { stream, peer: Some(HOST), buf: vec![] }], me });
+    commands.insert_resource(Lan { listener: None, links: vec![Link { stream, peer: Some(HOST), buf: vec![] }], me, addr: Some(addr), redial: None });
     status.dirty = true;
     next.set(AppState::Lobby);
 }
@@ -160,6 +167,10 @@ struct Lan {
     listener: Option<TcpListener>,
     links: Vec<Link>,
     me: Peer,
+    /// A guest: where the host was reached, to call it again if the line drops.
+    addr: Option<String>,
+    /// A call back to the host under way.
+    redial: Option<Mutex<Receiver<std::io::Result<TcpStream>>>>,
 }
 
 struct Link {
@@ -212,7 +223,7 @@ fn open(mut commands: Commands, mut done: Local<bool>, mut next: ResMut<NextStat
         };
         let _ = listener.set_nonblocking(true);
         info!("LAN: hosting on {port}");
-        (Node::host(HOST, "host"), Lan { listener: Some(listener), links: vec![], me: HOST })
+        (Node::host(HOST, "host"), Lan { listener: Some(listener), links: vec![], me: HOST, addr: None, redial: None })
     } else if let Some(addr) = spec.strip_prefix("join:") {
         // the host may still be starting: keep knocking for a while
         let until = Instant::now() + Duration::from_secs(30);
@@ -230,7 +241,7 @@ fn open(mut commands: Commands, mut done: Local<bool>, mut next: ResMut<NextStat
         let _ = stream.set_nodelay(true);
         let me = 1000 + std::process::id() as Peer;
         info!("LAN: joined {addr} as {me}");
-        (Node::join(me, &format!("guest{}", me % 100), HOST), Lan { listener: None, links: vec![Link { stream, peer: Some(HOST), buf: vec![] }], me })
+        (Node::join(me, &format!("guest{}", me % 100), HOST), Lan { listener: None, links: vec![Link { stream, peer: Some(HOST), buf: vec![] }], me, addr: Some(addr.to_string()), redial: None })
     } else {
         error!("LAN: TROPA_LAN is host:<port> or join:<addr>:<port>, not {spec}");
         return;
@@ -319,6 +330,11 @@ fn receive(mut commands: Commands, mut lan: ResMut<Lan>, net: Option<ResMut<Net>
         warn!("LAN: {:?} left", lan.links[k].peer);
         let link = lan.links.remove(k);
         match link.peer {
+            // the line to the host dropped in the middle of a run: it is called again (see
+            // `redial`), and the party is not given up until that has gone on long enough
+            Some(HOST) if lan.listener.is_none() && net.node.state.is_some() && lan.addr.is_some() => {
+                status.lost.get_or_insert(0.0);
+            }
             // the host is the party: without it there is nothing left to play
             Some(HOST) if lan.listener.is_none() => {
                 status.host_gone = true;
@@ -393,4 +409,50 @@ fn auto_lobby(net: Option<ResMut<Net>>, db: Res<Db>, profile: Res<crate::profile
         net.node.secrets = profile.secret_relics();
         net.node.start(&db.0, seed, profile.village());
     }
+}
+
+/// A guest cut off from the host calls it again when asked to (see `reconnect`), and on getting
+/// through says hello: the host hands back the seat and the run as it stands.
+fn redial(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>, mut status: ResMut<NetStatus>) {
+    let Some(mut net) = net else { return };
+    let lan = &mut *lan;
+    if lan.listener.is_some() {
+        return;
+    }
+    if let Some(rx) = &lan.redial {
+        let got = rx.lock().ok().and_then(|r| r.try_recv().ok());
+        match got {
+            Some(Ok(stream)) => {
+                let _ = stream.set_nonblocking(true);
+                let _ = stream.set_nodelay(true);
+                info!("LAN: got through to the host again");
+                lan.links.clear();
+                lan.links.push(Link { stream, peer: Some(HOST), buf: vec![] });
+                lan.redial = None;
+                net.node.rejoin();
+            }
+            Some(Err(e)) => {
+                warn!("LAN: the host does not answer yet: {e}");
+                lan.redial = None;
+            }
+            None => {}
+        }
+        return;
+    }
+    if !status.redial {
+        return;
+    }
+    let Some(addr) = lan.addr.clone() else { return };
+    status.redial = false;
+    // whatever is left of the old line is hung up; a new one is dialled off to the side
+    for link in &lan.links {
+        let _ = link.stream.shutdown(Shutdown::Both);
+    }
+    lan.links.clear();
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let reached = addr.to_socket_addrs().and_then(|mut found| found.next().ok_or_else(|| ErrorKind::NotFound.into())).and_then(|at| TcpStream::connect_timeout(&at, DIAL_WAIT));
+        let _ = tx.send(reached);
+    });
+    lan.redial = Some(Mutex::new(rx));
 }

@@ -31,7 +31,7 @@ pub(super) enum PileKind {
 
 /// The spread-out pile, over everything until it is clicked away.
 #[derive(Component)]
-struct PileView(PileKind);
+pub(crate) struct PileView(PileKind);
 
 /// Something flying between places on the stage: a card back in a reshuffle, a gained card.
 #[derive(Component)]

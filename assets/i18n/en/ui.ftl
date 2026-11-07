@@ -512,3 +512,15 @@ battle-choose-discard = Pick { $n ->
     [one] a card
    *[other] { $n } cards
 } in your hand to discard.
+
+coop-reconnecting = The connection to the party is lost. Getting back in… { $s } s left; the autopilot plays for you meanwhile.
+coop-player-away = Dropped out: { $who }. The autopilot plays for them until they come back to their seats.
+coop-error-lost = The connection to the party did not come back. The host has the run saved: it can be carried on together.
+menu-continue-party = Carry on with the party: act { $act }
+
+pause-title = Paused
+pause-resume = Back to the run
+pause-to-menu = Out to the main menu
+pause-leave-solo-hint = The run is kept: carry it on from the main menu.
+pause-leave-party-hint = The party goes on without you, the autopilot playing for you; come back to the lobby to take your seat again. The host keeps the run saved after every fight.
+pause-quit = Quit the game

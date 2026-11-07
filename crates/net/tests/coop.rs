@@ -338,3 +338,56 @@ fn a_chosen_starting_relic_reaches_the_run() {
     assert_eq!(run.players[0].relics, vec!["bog_alt_brother_bracelet".to_string()]);
     assert_eq!(run.players[1].relics, vec!["vol_alt_carved_bone".to_string()]);
 }
+
+
+#[test]
+fn a_client_cut_off_comes_back_with_rejoin_and_is_caught_up() {
+    let c = content();
+    let mut hub = party(&c, 2, 9);
+    into_combat(&c, &mut hub);
+    // the client's internet goes: it hears nothing while the host plays on for it
+    hub.offline.push(2);
+    hub.node(1).peer_left(2);
+    for _ in 0..40 {
+        step(&c, &mut hub);
+    }
+    let heard = hub.node(2).heard;
+    hub.offline.clear();
+    // back again: the same machine says hello, and is handed the run as it stands
+    hub.node(2).rejoin();
+    hub.pump(&c);
+    assert!(hub.node(2).heard > heard);
+    assert!(hub.node(1).lobby.players[1].connected);
+    assert_in_sync(&hub);
+}
+
+#[test]
+fn a_heartbeat_catches_up_a_client_that_missed_actions() {
+    let c = content();
+    let mut hub = party(&c, 2, 4);
+    into_combat(&c, &mut hub);
+    hub.offline.push(2);
+    for _ in 0..10 {
+        step(&c, &mut hub);
+    }
+    hub.offline.clear();
+    hub.node(1).heartbeat();
+    hub.pump(&c);
+    assert_in_sync(&hub);
+}
+
+#[test]
+fn a_saved_party_is_picked_up_and_its_players_take_their_seats_again() {
+    let c = content();
+    let mut hub = party(&c, 2, 5);
+    into_combat(&c, &mut hub);
+    let (lobby, n, run) = { let h = hub.node(1); (h.lobby.clone(), h.n, h.state.clone().unwrap()) };
+    // a new evening: the host opens the save on another address, the friend comes on yet another
+    let mut again = Hub::default();
+    again.nodes.push(Node::resume_party(10, "host", lobby, n, run.clone()));
+    assert!(!again.node(10).lobby.players[1].connected, "the friend's seat waits");
+    again.nodes.push(Node::join(20, "friend", 10));
+    again.pump(&c);
+    assert_eq!(again.node(20).my_slot(), Some(1));
+    assert_eq!(again.node(20).state.as_ref().unwrap().hash64(), run.hash64());
+}

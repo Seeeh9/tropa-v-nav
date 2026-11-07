@@ -16,6 +16,12 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
+# the game crate is big: few codegen units and thin debug info keep a build within a busy
+# machine's memory
+[profile.dev.package.tropa]
+codegen-units = 4
+debug = "line-tables-only"
+
 # bevy_audio with an output that can be reopened on the default device (see patches/bevy_audio)
 [patch.crates-io]
 bevy_audio = { path = "patches/bevy_audio" }

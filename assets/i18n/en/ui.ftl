@@ -525,3 +525,7 @@ pause-leave-solo-hint = The run is kept: carry it on from the main menu.
 pause-leave-party-hint = The party goes on without you, the autopilot playing for you; come back to the lobby to take your seat again. The host keeps the run saved after every fight.
 pause-quit = Quit the game
 lobby-copy-code = Copy the code
+map-ink-title = Pencil (right button)
+map-ink-pencil = Pencil
+map-ink-eraser = Eraser
+map-ink-clear = Wipe my marks

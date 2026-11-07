@@ -102,6 +102,8 @@ pub enum Amount {
     HandSize(i32),
     /// Cards the source hero has exhausted this fight, times the multiplier.
     ExhaustPile(i32),
+    /// `.0` and `.1` percent of the gold the source foe holds: the more it throws, the harder it hits.
+    Hoard(i32, i32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -150,6 +152,10 @@ pub enum Effect {
     Mask(MaskKind),
     Summon(Id, #[serde(default = "one")] i32),
     StealGold(i32),
+    /// Takes this percent of the gold the targeted hero still has.
+    StealGoldPct(i32),
+    /// The source throws away all the gold it holds: what it took is gone for good.
+    ScatterHoard,
     Flee,
     /// Adds to a named counter on the source hero (`turn_*` counters reset every round).
     Flag(String, i32),

@@ -220,6 +220,7 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
             cauldron: Vec::new(),
             potions: h.potions.clone(),
             gold_lost: 0,
+            gold: 0,
             flags: BTreeMap::new(),
             choosing: None,
         });
@@ -779,6 +780,7 @@ impl<'a> Exec<'a> {
         // a dead thief drops what it took
         for (slot, gold) in std::mem::take(&mut e.stolen) {
             self.s.heroes[slot as usize].gold_lost -= gold;
+            self.ev.push(Event::GoldReturned { player: slot, amount: gold });
         }
         self.ev.push(Event::EnemyDied { enemy: uid });
         if let Some(d) = self.c.enemies.get(&def) {
@@ -1211,6 +1213,10 @@ impl<'a> Exec<'a> {
                 UnitRef::Hero(i) => self.s.heroes[i as usize].exhaust.len() as i32 * m,
                 UnitRef::Enemy(_) => 0,
             },
+            Amount::Hoard(base, pct) => match ctx.src {
+                UnitRef::Enemy(u) => base + self.s.enemy(u).map_or(0, |e| e.stolen.values().sum::<i32>()) * pct / 100,
+                UnitRef::Hero(_) => *base,
+            },
         }
     }
 
@@ -1514,6 +1520,29 @@ impl<'a> Exec<'a> {
                             *self.s.enemies[idx].stolen.entry(i).or_insert(0) += n;
                         }
                         self.ev.push(Event::GoldStolen { player: i, amount: *n });
+                    }
+                }
+                Effect::StealGoldPct(pct) => {
+                    if let (UnitRef::Enemy(uid), Some(UnitRef::Hero(i))) = (ctx.src, ctx.target) {
+                        let h = self.s.heroes[i as usize].clone();
+                        let n = (h.gold - h.gold_lost).max(0) * pct / 100;
+                        if n > 0 {
+                            self.hero(i).gold_lost += n;
+                            if let Some(idx) = self.enemy_idx(uid) {
+                                *self.s.enemies[idx].stolen.entry(i).or_insert(0) += n;
+                            }
+                            self.ev.push(Event::GoldStolen { player: i, amount: n });
+                        }
+                    }
+                }
+                Effect::ScatterHoard => {
+                    if let UnitRef::Enemy(uid) = ctx.src {
+                        if let Some(idx) = self.enemy_idx(uid) {
+                            let n: i32 = std::mem::take(&mut self.s.enemies[idx].stolen).values().sum();
+                            if n > 0 {
+                                self.ev.push(Event::GoldScattered { enemy: uid, amount: n });
+                            }
+                        }
                     }
                 }
                 Effect::Flee => {

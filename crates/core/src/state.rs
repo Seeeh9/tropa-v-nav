@@ -78,6 +78,9 @@ pub struct Hero {
     pub cauldron: Vec<Id>,
     pub potions: Vec<Id>,
     pub gold_lost: i32,
+    /// The gold this hero came into the fight with (what a thief can take a share of).
+    #[serde(default)]
+    pub gold: i32,
     pub flags: BTreeMap<String, i32>,
     /// A card has asked this player to pick cards from the hand to throw away; nothing else is
     /// done until they have.
@@ -309,6 +312,10 @@ pub enum Event {
     MaskChanged { player: u8, mask: MaskKind },
     Taunt { player: u8 },
     GoldStolen { player: u8, amount: i32 },
+    /// A thief killed drops what it took back to its owner.
+    GoldReturned { player: u8, amount: i32 },
+    /// A foe threw the gold it held: it is lost to its owners.
+    GoldScattered { enemy: u32, amount: i32 },
     Ended { won: bool },
 }
 

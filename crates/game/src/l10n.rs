@@ -180,6 +180,7 @@ impl L10n {
             Amount::DiscardedThisTurn(m) => scaled(*m, self.t("amount-discarded-turn")),
             Amount::HandSize(m) => scaled(*m, self.t("amount-hand")),
             Amount::ExhaustPile(m) => scaled(*m, self.t("amount-exhausted")),
+            Amount::Hoard(base, _) => base.to_string(),
         }
     }
 
@@ -273,7 +274,7 @@ impl L10n {
             Effect::Invoke => self.t("fx-invoke"),
             Effect::Shift => self.t("fx-shift"),
             Effect::Mask(m) => self.tf("fx-mask", &[("m", self.t(&format!("mask-{m:?}")).into())]),
-            Effect::Summon(..) | Effect::StealGold(_) | Effect::Flee => String::new(),
+            Effect::Summon(..) | Effect::StealGold(_) | Effect::StealGoldPct(_) | Effect::ScatterHoard | Effect::Flee => String::new(),
             Effect::ConsumeCurses(t) => self.fx("consumecurses", Some(*t), &[]),
             Effect::Flag(name, _) => self.t(&format!("flag-{name}")),
             Effect::Once(_, body) => self.tf("fx-once", &[("body", self.effects(body).into())]),

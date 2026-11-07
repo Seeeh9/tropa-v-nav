@@ -769,6 +769,10 @@ fn sync_units(
                 }
                 wanted.push((unit, format!("enemies/{}", e.def), l10n.t(&format!("enemy-{}", e.def)), theme::SWAMP));
             }
+            // one that ran off is simply gone from the field, with no body left behind
+            Some((entity, _, _)) if !e.alive && e.fled => {
+                commands.entity(entity).despawn();
+            }
             Some((entity, _, false)) if !e.alive => {
                 commands.entity(entity).insert(Dying(DYING));
             }
@@ -1561,7 +1565,12 @@ fn update_labels(session: Res<Session>, net: Option<Res<crate::net::Net>>, db: R
             Label::Draw => Some(session.my_hero().draw.len().to_string()),
             Label::Discard => Some(session.my_hero().discard.len().to_string()),
             Label::Round => Some(l10n.n("battle-round", shown.round as i32)),
-            Label::Gold => net.as_ref().and_then(|n| n.node.state.as_ref().zip(n.node.my_slot())).and_then(|(run, me)| run.players.get(me as usize)).map(|p| p.gold.to_string()),
+            // what a thief took counts at once, though the run settles it only when the fight ends
+            Label::Gold => net
+                .as_ref()
+                .and_then(|n| n.node.state.as_ref().zip(n.node.my_slot()))
+                .and_then(|(run, me)| run.players.get(me as usize))
+                .map(|p| (p.gold - session.my_hero().gold_lost).max(0).to_string()),
             // whoever has lost their head only watches, and the seal says why it does nothing
             Label::Ready if session.my_hero().beheaded => Some(l10n.t("battle-beheaded")),
             Label::Ready => Some(if session.my_hero().ready {
@@ -2347,6 +2356,10 @@ fn cue_effects(
                 impacts.0.push(impact::Impact::Quake(0.8));
             }
             Event::Missed { unit } => float(&mut commands, *unit, l10n.t("battle-missed"), theme::BONE, 34.0, -70.0),
+            Event::GoldStolen { player, amount } => float(&mut commands, UnitRef::Hero(*player), l10n.n("battle-gold-stolen", *amount), theme::CANDLE, 40.0, -40.0),
+            Event::EnemyFled { enemy } => float(&mut commands, UnitRef::Enemy(*enemy), l10n.t("battle-fled"), theme::BONE, 36.0, -40.0),
+            Event::GoldScattered { enemy, amount } => float(&mut commands, UnitRef::Enemy(*enemy), l10n.n("battle-gold-scattered", *amount), theme::CANDLE, 36.0, -40.0),
+            Event::GoldReturned { player, amount } => float(&mut commands, UnitRef::Hero(*player), l10n.n("battle-gold-returned", *amount), theme::CANDLE, 40.0, -40.0),
             Event::Block { unit, amount, .. } => {
                 play(*unit, Anim::Guarded);
                 float(&mut commands, *unit, format!("+{amount}"), theme::NAV_BLUE.lighter(0.25), 36.0, -70.0)

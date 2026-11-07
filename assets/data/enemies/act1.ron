@@ -18,10 +18,10 @@
         pattern: [0, 1, 1],
     ),
     (
-        // крадёт 15 золота и убегает через 3 хода, если не убита
+        // крадёт пятую часть золота и убегает через 3 хода, если не убита
         id: "lesavka", hp: (18, 18),
         moves: [
-            (id: "pilfer", intent: Debuff, targeted: true, effects: [StealGold(15)]),
+            (id: "pilfer", intent: Debuff, targeted: true, effects: [StealGoldPct(20)]),
             (id: "scratch", intent: Attack, targeted: true, effects: [Damage(N(5), Target)]),
             (id: "vanish", intent: Unknown, effects: [Flee]),
         ],

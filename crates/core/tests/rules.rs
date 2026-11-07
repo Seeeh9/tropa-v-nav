@@ -1506,3 +1506,17 @@ fn every_werewolf_card_has_a_beast_side() {
         assert!(d.two_sided(false), "{}", d.id);
     }
 }
+
+#[test]
+fn the_hoarder_takes_a_share_and_throws_it_away_for_good() {
+    let (c, mut s) = solo(&[], &["kladovik"]);
+    s.heroes[0].gold = 100;
+    end_round(&c, &mut s);
+    assert_eq!(s.heroes[0].gold_lost, 30, "a third of the purse");
+    let hp = s.heroes[0].hp;
+    end_round(&c, &mut s);
+    // three coins, each 3 and a tenth of the thirty thrown
+    assert_eq!(hp - s.heroes[0].hp, 18);
+    assert!(s.enemies[0].stolen.is_empty(), "the gold is scattered");
+    assert_eq!(s.heroes[0].gold_lost, 30, "and gone for good");
+}

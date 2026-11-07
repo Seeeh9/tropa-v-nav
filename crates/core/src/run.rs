@@ -1327,7 +1327,10 @@ impl Run {
             _ => combat::STALL_ROUND,
         } };
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
-        let (combat, events) = combat::start_with(c, &party, &enemies, seed, opts);
+        let (mut combat, events) = combat::start_with(c, &party, &enemies, seed, opts);
+        for (h, p) in combat.heroes.iter_mut().zip(&self.players) {
+            h.gold = p.gold;
+        }
         self.combat = Some(combat);
         self.fighting = Some(kind);
         self.stage = Stage::Combat;
@@ -1354,7 +1357,10 @@ impl Run {
             .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, lost_arms: p.lost_arms, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
             .collect();
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
-        let (combat, _) = combat::start_with(c, &party, enemies, seed, CombatOpts::default());
+        let (mut combat, _) = combat::start_with(c, &party, enemies, seed, CombatOpts::default());
+        for (h, p) in combat.heroes.iter_mut().zip(&self.players) {
+            h.gold = p.gold;
+        }
         self.combat = Some(combat);
         self.fighting = Some(NodeKind::Fight);
         self.stage = Stage::Combat;

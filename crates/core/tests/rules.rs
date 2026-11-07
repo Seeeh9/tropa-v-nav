@@ -564,7 +564,8 @@ fn beast_form_flips_cards_and_bans_own_block() {
     play(&c, &mut s, 0, "t_shift", None);
     assert_eq!(s.heroes[0].form, Form::Beast);
     play(&c, &mut s, 0, "t_claw", Some(t));
-    assert_eq!((s.enemies[0].hp, s.status(t, S::Bleed)), (81, 2));
+    // one moon gathered: a Strength of fury, half again as a beast's blow
+    assert_eq!((s.enemies[0].hp, s.status(t, S::Bleed)), (79, 2));
     play(&c, &mut s, 0, "t_block", None);
     assert_eq!(s.heroes[0].block, 0);
     end_round(&c, &mut s);
@@ -1457,4 +1458,36 @@ fn only_a_werewolf_turns_into_the_beast() {
     assert_eq!(s.heroes[0].form, Form::Human, "an echo of the wolf's card changes no one else");
     play(&c, &mut s, 0, "t_block", None);
     assert_eq!(s.heroes[0].block, 5);
+}
+
+
+#[test]
+fn the_moon_gathered_as_a_man_is_the_beasts_fury() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_moon", &["t_hit", "t_hit", "t_hit", "t_hit", "t_hit", "t_shift"])], &ids(&["dummy"]), 7);
+    s.heroes[0].energy = 10;
+    // the five blows in hand, the shift kept for after
+    let h = &mut s.heroes[0];
+    let mut all: Vec<Card> = h.hand.drain(..).chain(h.draw.drain(..)).collect();
+    let shift = all.iter().position(|c| c.def == "t_shift").unwrap();
+    let shift = all.remove(shift);
+    h.hand = all;
+    for _ in 0..5 {
+        let foe = foe(&s, 0);
+        play(&c, &mut s, 0, "t_hit", Some(foe));
+    }
+    assert_eq!(s.heroes[0].form, Form::Beast);
+    assert_eq!(s.status(UnitRef::Hero(0), StatusKind::Strength), 3, "a full moon: three");
+    s.heroes[0].hand.push(shift);
+    play(&c, &mut s, 0, "t_shift", None);
+    assert_eq!(s.heroes[0].form, Form::Human);
+    assert_eq!(s.status(UnitRef::Hero(0), StatusKind::Strength), 0, "the fury goes with the beast");
+}
+
+#[test]
+fn every_werewolf_card_has_a_beast_side() {
+    let c = content();
+    for d in c.cards.values().filter(|d| d.hero == "volkolak" && d.kind == CardType::Attack) {
+        assert!(d.two_sided(false), "{}", d.id);
+    }
 }

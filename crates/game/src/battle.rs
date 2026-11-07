@@ -1706,7 +1706,14 @@ pub fn card_face(c: &mut ChildSpawnerCommands, card: &Card, def: &CardDef, form:
             c.spawn((theme::text(line, &fonts.body, 14.0, gem.unwrap_or(theme::DIM)), Node { margin: UiRect::vertical(px(2)), ..default() }));
             // a long text shrinks to stay on the card: about 110 letters fit at full size, and
             // what this guess misses is measured and brought in by `fit_text`
-            let text = l10n.card_text(&card.def, def, &view);
+            let mut text = l10n.card_text(&card.def, def, &view);
+            // a werewolf card tells its other side too, so the turn holds no surprise
+            if def.hero == "volkolak" && def.two_sided(card.upgraded) {
+                let other = if form == Form::Beast { Form::Human } else { Form::Beast };
+                let side = l10n.card_text(&card.def, def, &def.view(card.upgraded, other));
+                text = format!("{text}
+{}: {side}", l10n.t(&format!("side-{other:?}")));
+            }
             let size = (18.0 * (110.0 / text.chars().count().max(1) as f32).sqrt()).clamp(12.0, 18.0);
             c.spawn((
                 theme::text(text, &fonts.body, size, theme::BONE),

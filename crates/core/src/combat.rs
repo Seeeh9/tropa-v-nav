@@ -1047,9 +1047,20 @@ impl<'a> Exec<'a> {
             return;
         }
         let h = self.hero(p);
-        h.form = if h.form == Form::Human { Form::Beast } else { Form::Human };
+        let to_beast = h.form == Form::Human;
+        // the moon gathered as a man is the beast's fury: a Strength for every two, kept while it
+        // stays a beast, so waiting for the full moon pays and turning early costs it
+        let fury = if to_beast { (h.moon + 1) / 2 } else { h.flags.remove("lunar_fury").unwrap_or(0) };
+        h.form = if to_beast { Form::Beast } else { Form::Human };
         h.moon = 0;
         let form = h.form;
+        if to_beast && fury > 0 {
+            self.hero(p).flags.insert("lunar_fury".into(), fury);
+            self.add_status(UnitRef::Hero(p), S::Strength, fury);
+        } else if !to_beast && fury > 0 {
+            let has = self.s.status(UnitRef::Hero(p), S::Strength);
+            self.add_status(UnitRef::Hero(p), S::Strength, -fury.min(has.max(0)));
+        }
         self.ev.push(Event::Shifted { player: p, form });
         self.fire(p, Trigger::Shifted);
     }

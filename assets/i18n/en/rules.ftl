@@ -397,10 +397,13 @@ mech-Curse = The Vorozheya lays Hex (the next blows on the target deal +3, from 
 mech-Runes-name = Runes
 mech-Runes = The Volhv carves runes on himself (up to five) or an ally (up to three). Each fires at the end of every turn while it stands. One too many pushes out the oldest, which fires one last time. Invoke fires them all at once.
 mech-Moon-name = Moon
-mech-Moon = As a man the Volkolak gains 1 Moon for every attack he plays; at the fifth he turns into the beast. The beast strikes 50% harder and heals 3 for every foe it finishes, but loses 2 health to hunger at the start of each turn and cannot give itself Block with its own cards. On the turn every card in hand flips to its beast side; Shift cards change form at will.
+mech-Moon = As a man the Volkolak gains 1 Moon for every attack he plays; at the fifth he turns into the beast. The Moon gathered becomes Lunar Fury: +1 Strength for every two, while he stays the beast, so waiting for the full moon pays better than turning early. The beast strikes 50% harder and heals 3 for every foe it finishes, but loses 2 health to hunger at the start of each turn and cannot give itself Block with its own cards. On the turn every card in hand flips to its beast side; Shift cards change form at will.
 mech-Brew-name = Cauldron
 mech-Brew = A herb does a little at once and goes into the Cauldron, up to four. Brew turns the herbs into a potion by recipe. Fern flower stands in for any herb and doubles the brew. One herb too many spills the oldest, which works weakly.
 mech-Masks-name = Masks
 mech-Masks = The Skomoroh wears one mask at a time. Bear: attacks deal +3 damage. Goat: every card played gives a random ally 2 Block. Mara: every blow gives the foe 7.5% Fear, up to 75%; a frightened foe may miss its attack.
 mech-Sloth-name = Drowse
 mech-Sloth = Every Energy left unspent in a turn gives Yemelya 1 Drowse. His cards spend Drowse on blows and Block. None of his cards strike a chosen target: only a random foe, or all of them.
+
+side-Human = As a man
+side-Beast = As the beast

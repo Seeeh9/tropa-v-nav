@@ -331,9 +331,54 @@ impl CardDef {
             if upgraded {
                 layer(&self.beast_up);
             }
+        } else if form == Form::Beast && self.hero == "volkolak" {
+            // every card of the werewolf has a beast side: one written for it, or this one
+            let mut fx = beastly(&v.effects, v.cost);
+            // a blow that bleeds no one in particular is struck the harder instead
+            if v.kind == CardType::Attack && fx == v.effects {
+                fx.insert(0, Effect::Apply(StatusKind::TempStrength, Amount::N(2), Tgt::Me));
+            }
+            v.effects = fx;
         }
         v
     }
+
+    /// Whether this card reads differently in the two forms, so both sides are worth telling.
+    pub fn two_sided(&self, upgraded: bool) -> bool {
+        let (a, b) = (self.view(upgraded, Form::Human), self.view(upgraded, Form::Beast));
+        a.effects != b.effects || a.cost != b.cost || a.kind != b.kind || a.target != b.target || a.keywords != b.keywords
+    }
+}
+
+/// The beast side of a werewolf card with none of its own: its blows tear and leave the wound
+/// bleeding, and the block it would give itself (the beast gets none from its own cards)
+/// bristles into thorns instead. Help for others, draws and powers stay as they are.
+fn beastly(effects: &[Effect], cost: i32) -> Vec<Effect> {
+    let bleed = if cost >= 2 { 2 } else { 1 };
+    let mut out = Vec::new();
+    let mut bled = false;
+    for e in effects {
+        match e {
+            Effect::Block(a, Tgt::Me) => {
+                let n = match a {
+                    Amount::N(n) => (*n / 3).max(1),
+                    _ => 2,
+                };
+                out.push(Effect::Apply(StatusKind::Thorns, Amount::N(n), Tgt::Me));
+            }
+            Effect::Damage(_, t) | Effect::Hits(_, _, t) => {
+                out.push(e.clone());
+                if !bled && matches!(t, Tgt::Target | Tgt::AllFoes | Tgt::WeakestFoe) {
+                    bled = true;
+                    out.push(Effect::Apply(StatusKind::Bleed, Amount::N(bleed), *t));
+                }
+            }
+            Effect::If(c, a, b) => out.push(Effect::If(c.clone(), beastly(a, cost), beastly(b, cost))),
+            Effect::Repeat(n, body) => out.push(Effect::Repeat(n.clone(), beastly(body, cost))),
+            other => out.push(other.clone()),
+        }
+    }
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

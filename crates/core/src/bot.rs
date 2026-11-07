@@ -49,6 +49,23 @@ fn blocks_self(view: &CardView) -> bool {
 
 pub fn choose(c: &Content, s: &Combat, slot: u8) -> CombatAction {
     let Some(h) = s.hero(slot) else { return CombatAction::Ready(true) };
+    // a discard to pick for: throw a card that pays for being thrown, or the least use
+    if h.choosing.is_some() {
+        let worth = |card: &Card| -> i32 {
+            let Some(def) = c.cards.get(&card.def) else { return -100 };
+            let v = def.view(card.upgraded, h.form);
+            if !v.on_discard.is_empty() {
+                -50
+            } else if matches!(v.kind, CardType::Curse | CardType::Status) || v.has(Keyword::Unplayable) {
+                -40
+            } else {
+                v.cost * 3 + v.effects.len() as i32 + if card.upgraded { 2 } else { 0 }
+            }
+        };
+        if let Some(card) = h.hand.iter().min_by_key(|card| worth(card)) {
+            return CombatAction::Discard { card: card.uid };
+        }
+    }
     // sunk in the mire or asleep: nothing to do but wait
     if h.flags.contains_key("mired") || h.flags.contains_key("asleep") {
         return CombatAction::Ready(true);

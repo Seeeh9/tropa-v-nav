@@ -1393,8 +1393,39 @@ fn burnt_cards_go_for_good_and_powers_hear_them() {
 fn a_card_is_called_back_from_the_discard_pile() {
     let (c, mut s) = solo(&["t_recall", "t_toss1", "t_cost3", "t_cost3", "t_cost3"], &["dummy"]);
     play(&c, &mut s, 0, "t_toss1", None);
+    // the player picks what goes
+    let pick = s.heroes[0].hand.iter().find(|c| c.def == "t_cost3").unwrap().uid;
+    apply(&c, &mut s, 0, &CombatAction::Discard { card: pick }).unwrap();
     assert_eq!(s.heroes[0].hand.len(), 3);
     play(&c, &mut s, 0, "t_recall", None);
     // the recall card is in hand no more, and one card came back
     assert_eq!(s.heroes[0].hand.len(), 3);
+}
+
+
+#[test]
+fn a_discard_waits_for_the_player_to_pick_and_the_card_goes_on_after() {
+    let (c, mut s) = solo(&["t_toss_pick", "t_sly", "t_block", "t_block", "t_block"], &["dummy"]);
+    let before = s.enemies[0].hp;
+    play(&c, &mut s, 0, "t_toss_pick", None);
+    assert!(s.heroes[0].choosing.is_some());
+    // nothing else is done meanwhile
+    assert_eq!(try_play(&c, &mut s, 0, "t_block", None), Err(ActionError::Choosing));
+    assert_eq!(s.enemies[0].hp, before, "the blow waits for the pick");
+    let sly = s.heroes[0].hand.iter().find(|c| c.def == "t_sly").unwrap().uid;
+    apply(&c, &mut s, 0, &CombatAction::Discard { card: sly }).unwrap();
+    let block = s.heroes[0].hand.iter().find(|c| c.def == "t_block").unwrap().uid;
+    apply(&c, &mut s, 0, &CombatAction::Discard { card: block }).unwrap();
+    assert!(s.heroes[0].choosing.is_none());
+    // the sly card's 7 on being thrown, then 3 for each of the two thrown
+    assert_eq!(s.enemies[0].hp, before - 7 - 6);
+    assert_eq!(s.heroes[0].hand.len(), 2);
+}
+
+#[test]
+fn a_discard_of_more_than_the_hand_takes_it_all_without_asking() {
+    let (c, mut s) = solo(&["t_toss_pick", "t_block"], &["dummy"]);
+    play(&c, &mut s, 0, "t_toss_pick", None);
+    assert!(s.heroes[0].choosing.is_none());
+    assert!(s.heroes[0].hand.is_empty());
 }

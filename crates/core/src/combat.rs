@@ -212,6 +212,7 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
             potions: h.potions.clone(),
             gold_lost: 0,
             flags: BTreeMap::new(),
+            choosing: None,
         });
     }
     let mut s = Combat {
@@ -249,8 +250,13 @@ pub fn apply(c: &Content, s: &mut Combat, player: u8, action: &CombatAction) -> 
     if h.downed {
         return Err(ActionError::Downed);
     }
+    let choosing = h.choosing.is_some();
+    if choosing != matches!(action, CombatAction::Discard { .. }) {
+        return Err(if choosing { ActionError::Choosing } else { ActionError::NotChoosing });
+    }
     let mut ex = Exec { s, c, ev: Vec::new(), depth: 0 };
     match action {
+        CombatAction::Discard { card } => ex.pick_discard(player, *card)?,
         CombatAction::Play { card, target } => ex.play(player, *card, *target)?,
         CombatAction::Ready(r) => {
             ex.s.heroes[player as usize].ready = *r;
@@ -1194,6 +1200,24 @@ impl<'a> Exec<'a> {
         self.fire(slot, Trigger::Discarded);
     }
 
+    /// The player picks one card to throw for a discard under way; the last pick lets the card go on.
+    fn pick_discard(&mut self, p: u8, uid: u32) -> Result<(), ActionError> {
+        let pos = self.s.heroes[p as usize].hand.iter().position(|c| c.uid == uid).ok_or(ActionError::NoSuchCard)?;
+        self.discard_at(p, pos);
+        let Some(mut ch) = self.hero(p).choosing.take() else { return Ok(()) };
+        ch.left -= 1;
+        ch.picked += 1;
+        let empty = self.s.heroes[p as usize].hand.is_empty();
+        if ch.left > 0 && !empty && !self.s.heroes[p as usize].downed {
+            self.hero(p).choosing = Some(ch);
+            return Ok(());
+        }
+        self.hero(p).flags.insert("last_discarded".into(), ch.picked as i32);
+        let mut ctx = Ctx { src: UnitRef::Hero(p), target: ch.target.filter(|t| self.exists(*t)), x: ch.x, consumed: 0, fatal: false, attack: ch.attack, card: true, bled: false };
+        self.run(&ch.rest, &mut ctx);
+        Ok(())
+    }
+
     /// Discards `n` random cards from a hero's hand (all of it when `n` is `None`); returns how many went.
     fn discard_cards(&mut self, slot: u8, n: Option<i32>) -> i32 {
         let mut gone = 0;
@@ -1247,7 +1271,18 @@ impl<'a> Exec<'a> {
     }
 
     pub(crate) fn run(&mut self, effects: &[Effect], ctx: &mut Ctx) {
-        for e in effects {
+        for (at, e) in effects.iter().enumerate() {
+            // "discard N": the player picks them, and the rest of the card waits for that
+            if let (Effect::Discard(a), UnitRef::Hero(me)) = (e, ctx.src) {
+                let n = self.amount(ctx, a).max(0) as usize;
+                let h = &self.s.heroes[me as usize];
+                if n > 0 && h.hand.len() > n && h.choosing.is_none() && !h.downed {
+                    self.hero(me).flags.insert("last_discarded".into(), 0);
+                    self.hero(me).choosing = Some(crate::state::Choosing { left: n as u8, picked: 0, rest: effects[at + 1..].to_vec(), target: ctx.target, x: ctx.x, attack: ctx.attack });
+                    self.ev.push(Event::Choose { player: me, count: n as u8 });
+                    return;
+                }
+            }
             match e {
                 Effect::Damage(a, t) | Effect::Hits(a, _, t) => {
                     let times = if let Effect::Hits(_, k, _) = e { *k } else { 1 };
@@ -1790,6 +1825,8 @@ impl<'a> Exec<'a> {
             if self.s.heroes[slot as usize].downed {
                 continue;
             }
+            // a pick left unmade when the round closes is let go
+            self.hero(slot).choosing = None;
             let hand = std::mem::take(&mut self.hero(slot).hand);
             let mut keep = Vec::new();
             for card in hand {

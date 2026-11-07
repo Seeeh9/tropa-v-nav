@@ -255,6 +255,9 @@ pub struct Run {
     pub map: Map,
     /// `(floor, node)` the party stands on; `None` before the first step of an act.
     pub at: Option<(u8, u8)>,
+    /// Every `(floor, node)` the party has stood on in this act, in order.
+    #[serde(default)]
+    pub trail: Vec<(u8, u8)>,
     pub players: Vec<Player>,
     pub stage: Stage,
     pub combat: Option<Combat>,
@@ -550,6 +553,7 @@ impl Run {
             act: 1,
             map,
             at: None,
+            trail: vec![],
             players,
             stage: Stage::Map { votes: vec![None; n] },
             combat: None,
@@ -1198,6 +1202,7 @@ impl Run {
             }
             self.act += 1;
             self.at = None;
+            self.trail.clear();
             // a new land, rested: everyone still on their feet starts it whole
             for q in 0..self.players.len() {
                 let pl = &mut self.players[q];
@@ -1233,6 +1238,7 @@ impl Run {
         };
         if kind != NodeKind::Boss && !self.map.floors.is_empty() {
             self.at = Some((floor, node));
+            self.trail.push((floor, node));
         }
         ev.push(RunEvent::Moved { floor, node, kind });
         match kind {

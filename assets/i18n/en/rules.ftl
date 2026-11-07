@@ -352,9 +352,9 @@ rarity-Rare = Rare
 
 # discarding and burning cards
 fx-discard = Discard { $n ->
-    [one] { $n } random card
-   *[other] { $n } random cards
-}.
+    [one] { $n } card
+   *[other] { $n } cards
+} of your choice.
 fx-discardhand = Discard your hand.
 fx-exhaustcards = Exhaust { $n ->
     [one] { $n } random card
@@ -372,7 +372,7 @@ amount-discarded-turn = card discarded this turn
 amount-hand = card in hand
 amount-exhausted = card exhausted this fight
 kw-Discard = Discard
-kw-Discard-help = The card goes from your hand to the discard pile. Its "If this card is discarded" and powers waiting for a discard fire. The end of a turn does not count.
+kw-Discard-help = You choose which cards go from your hand to the discard pile; the rest of the card waits for your choice. A thrown card's "If this card is discarded" fires, and so do powers waiting for a discard. The end of a turn does not count.
 
 herb-nettle = Nettle
 herb-henbane = Henbane

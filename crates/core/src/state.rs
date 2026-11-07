@@ -79,6 +79,23 @@ pub struct Hero {
     pub potions: Vec<Id>,
     pub gold_lost: i32,
     pub flags: BTreeMap<String, i32>,
+    /// A card has asked this player to pick cards from the hand to throw away; nothing else is
+    /// done until they have.
+    #[serde(default)]
+    pub choosing: Option<Choosing>,
+}
+
+/// What a card that says "discard" waits on: how many more cards the player is to pick, and what
+/// the card goes on to do once they have.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Choosing {
+    pub left: u8,
+    /// How many have been picked for this card so far.
+    pub picked: u8,
+    pub rest: Vec<Effect>,
+    pub target: Option<UnitRef>,
+    pub x: i32,
+    pub attack: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -196,6 +213,8 @@ pub enum CombatAction {
     Pass { card: u32, to: u8 },
     /// Drink the potion in this slot, or throw it at the target.
     UsePotion { slot: u8, target: Option<UnitRef> },
+    /// Throw this card from the hand, as a card that says "discard" asked.
+    Discard { card: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -221,6 +240,10 @@ pub enum ActionError {
     Frozen,
     /// The target hides behind its fellows.
     Hidden,
+    /// Cards are to be picked for a discard first.
+    Choosing,
+    /// No discard is asked for now.
+    NotChoosing,
 }
 
 /// Things that happened, in order, for the renderer and the log. Never read back by rules.
@@ -252,6 +275,8 @@ pub enum Event {
     Exhausted { player: u8, card: Id },
     /// Thrown out of the hand by a card or a power.
     Discarded { player: u8, card: Id },
+    /// This player is to pick `count` cards from the hand to throw away.
+    Choose { player: u8, count: u8 },
     EnemyMove { enemy: u32, mv: usize },
     EnemySkipped { enemy: u32, fear: bool },
     EnemyDied { enemy: u32 },

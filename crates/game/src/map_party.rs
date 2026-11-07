@@ -46,7 +46,7 @@ pub struct MapScroll {
 
 impl MapScroll {
     /// From a point on the sheet to the same point on the stage.
-    fn to_stage(&self, at: Vec2) -> Vec2 {
+    pub fn to_stage(&self, at: Vec2) -> Vec2 {
         at + Vec2::new(0.0, crate::between::BAR_H - self.y)
     }
 }

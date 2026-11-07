@@ -80,7 +80,7 @@ run-party-line = { $name }  ·  HP { $hp }/{ $max }  ·  gold { $gold }  ·  car
 run-waiting = Waiting for the others…
 
 map-title = Act { $act }
-map-hint = Choose the next node on the path. The party goes where most point; a tie is settled by lot.
+map-hint = Choose the next node on the path. The party goes where most point; a tie is settled by lot. The right mouse button draws on the map, with Shift it rubs out, Delete wipes it all.
 map-voted = Your token is placed. You can move it until everyone has voted.
 node-Fight = Fight
 node-Elite = Elite
@@ -507,3 +507,8 @@ settings-screen-0 = window
 settings-screen-1 = borderless full screen
 settings-screen-2 = full screen
 settings-window-size = Window size
+
+battle-choose-discard = Pick { $n ->
+    [one] a card
+   *[other] { $n } cards
+} in your hand to discard.

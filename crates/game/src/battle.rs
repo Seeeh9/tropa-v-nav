@@ -73,6 +73,7 @@ pub fn plugin(app: &mut App) {
                 .run_if(resource_exists::<Session>),
         )
         .add_observer(on_drag_start)
+        .add_observer(on_card_click)
         .add_observer(on_drag)
         .add_observer(on_drag_end)
         .add_observer(on_drop);
@@ -2041,7 +2042,20 @@ let rest = hand_slot(i, n);
     }
 }
 
-fn on_drag_start(ev: On<PointerDragStart>, top: Res<HoverTop>, mut cards: Query<&mut CardWidget>) {
+/// While a discard is being picked for, the card clicked in the hand is thrown.
+fn on_card_click(ev: On<PointerClick>, top: Res<HoverTop>, cards: Query<&CardWidget>, session: Option<Res<Session>>, mut outbox: ResMut<Outbox>) {
+    let Some(session) = session else { return };
+    if session.my_hero().choosing.is_none() {
+        return;
+    }
+    let Ok(w) = cards.get(ev.event_target()) else { return };
+    if top.0.is_some_and(|t| t != w.uid) {
+        return;
+    }
+    outbox.0.push(CombatAction::Discard { card: w.uid });
+}
+
+fn on_drag_start(ev: On<PointerDragStart>, top: Res<HoverTop>, mut cards: Query<&mut CardWidget>, session: Option<Res<Session>>) {
     // one card in the hand at a time: the one on top under the cursor. Overlapping cards each
     // hear the press at their edges, and both used to come away together
     if cards.iter().any(|w| w.dragging) {
@@ -2050,6 +2064,10 @@ fn on_drag_start(ev: On<PointerDragStart>, top: Res<HoverTop>, mut cards: Query<
     let target = ev.event_target();
     let Ok(uid) = cards.get(target).map(|w| w.uid) else { return };
     if top.0.is_some_and(|t| t != uid) {
+        return;
+    }
+    // a discard is being picked for: cards are clicked to be thrown, not dragged to be played
+    if session.as_ref().is_some_and(|s| s.my_hero().choosing.is_some()) {
         return;
     }
     if let Ok(mut w) = cards.get_mut(target) {

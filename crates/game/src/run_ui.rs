@@ -207,6 +207,8 @@ fn hash2(a: f32, b: f32) -> f32 {
 const BOSS_POS: Vec2 = Vec2::new(965.0, 96.0);
 /// The ink the map is drawn in, on its parchment.
 const INK: Color = Color::srgb(0.17, 0.11, 0.07);
+/// The red-brown the party's own road is drawn in.
+const WALKED: Color = Color::srgb(0.55, 0.12, 0.06);
 /// The parchment's own pale colour.
 const PAPER: Color = Color::srgb(0.93, 0.86, 0.71);
 
@@ -331,7 +333,8 @@ fn draw_map(
     party_panel(&mut commands, root, run, me, &fonts, &l10n);
 
     // a path is a row of ink dots, as if pricked out with a pen, leaving room round the nodes
-    let line = |commands: &mut Commands, a: Vec2, b: Vec2, lit: bool| {
+    // a path is walked (the party came along it), open (it leads on from where they stand), or neither
+    let line = |commands: &mut Commands, a: Vec2, b: Vec2, walked: bool, lit: bool| {
         let d = b - a;
         let len = d.length();
         let across = Vec2::new(-d.y, d.x) / len.max(1.0);
@@ -340,6 +343,7 @@ fn draw_map(
         let bow = (seed - 0.5) * 48.0;
         let steps = ((len - 44.0) / 13.0).floor().max(0.0) as i32;
         let (size, color) = match (lit, on_parchment) {
+            _ if walked => (9.0, WALKED.with_alpha(0.95)),
             (true, true) => (7.0, INK.with_alpha(0.95)),
             (false, true) => (6.0, INK.with_alpha(0.78)),
             (true, false) => (6.0, theme::BONE.with_alpha(0.85)),
@@ -369,24 +373,29 @@ fn draw_map(
     };
     let party = run.players.len() > 1;
     // paths first, so the nodes sit on top of them
+    let walked = |a: (u8, u8), b: (u8, u8)| run.trail.windows(2).any(|w| w[0] == a && w[1] == b);
+    let visited = |at: (u8, u8)| run.trail.contains(&at);
     for (f, floor) in run.map.floors.iter().enumerate() {
         for (i, node) in floor.iter().enumerate() {
             let from = map_pos(f, node.col);
+            let me_at = (f as u8, i as u8);
             if f + 1 < run.map.floors.len() {
                 for n in &node.next {
-                    let lit = here == Some((f as u8, i as u8));
-                    line(&mut commands, from, map_pos(f + 1, run.map.floors[f + 1][*n as usize].col), lit);
+                    let lit = here == Some(me_at);
+                    line(&mut commands, from, map_pos(f + 1, run.map.floors[f + 1][*n as usize].col), walked(me_at, (f as u8 + 1, *n)), lit);
                 }
             } else {
-                line(&mut commands, from, BOSS_POS, here == Some((f as u8, i as u8)));
+                line(&mut commands, from, BOSS_POS, false, here == Some(me_at));
             }
         }
     }
-    let spawn_node = |commands: &mut Commands, at: Vec2, kind: NodeKind, choice: Option<u8>, standing: bool, passed: bool| {
+    let spawn_node = |commands: &mut Commands, at: Vec2, kind: NodeKind, choice: Option<u8>, standing: bool, passed: bool, been: bool| {
         let size = if kind == NodeKind::Boss { 76.0 } else { 44.0 };
         if let Some(h) = icon(kind) {
-            // drawn in ink: places behind fade, the one the party stands on is ringed
-            let ink = if passed { node_ink(kind).with_alpha(0.35) } else { node_ink(kind) };
+            // drawn in ink: places passed by fade, those the party stood on keep their ink and a
+            // red ring, the one it stands on now is ringed boldly and carries the party's tokens
+            let ink = if been { node_ink(kind) } else if passed { node_ink(kind).with_alpha(0.3) } else { node_ink(kind) };
+            let size = if standing { size * 1.25 } else { size };
             let side = size * if kind == NodeKind::Boss { 1.7 } else { 1.12 };
             let mut e = commands.spawn((
                 Node {
@@ -395,11 +404,11 @@ fn draw_map(
                     top: px(at.y - side / 2.0),
                     width: px(side),
                     height: px(side),
-                    border: UiRect::all(px(if standing || choice.is_some() { 3.0 } else { 0.0 })),
+                    border: UiRect::all(px(if standing { 5.0 } else if choice.is_some() || been { 3.0 } else { 0.0 })),
                     border_radius: BorderRadius::MAX,
                     ..default()
                 },
-                BorderColor::all(if standing { INK } else { theme::CANDLE.mix(&INK, 0.35) }),
+                BorderColor::all(if standing || been { WALKED } else { theme::CANDLE.mix(&INK, 0.35) }),
                 // a pale wash of paper under every mark, so it stands clear of the map's own drawings
                 BackgroundColor(if choice.is_some() { theme::CANDLE.with_alpha(0.3) } else { PAPER.with_alpha(0.7) }),
                 UiTransform::IDENTITY,
@@ -410,6 +419,21 @@ fn draw_map(
                 ImageNode { color: ink, ..ImageNode::new(h) },
                 Pickable::IGNORE,
             ));
+            if standing {
+                // the party stands here: a token for each of them under the mark
+                let party_colors: Vec<Color> = run.players.iter().map(|pl| theme::hero_color(&pl.hero)).collect();
+                e.with_children(|t| {
+                    let n = party_colors.len() as f32;
+                    for (k, color) in party_colors.into_iter().enumerate() {
+                        t.spawn((
+                            Node { position_type: PositionType::Absolute, left: px(side / 2.0 - n * 9.0 + k as f32 * 18.0), bottom: px(-14), width: px(18), height: px(18), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
+                            BackgroundColor(color.lighter(0.15)),
+                            BorderColor::all(INK),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+            }
             if let Some(c) = choice {
                 e.insert((Button, Hovered::default(), Btn(theme::CANDLE.with_alpha(0.3)), Beckon));
                 let mine = party && votes[me as usize] == Some(c);
@@ -495,11 +519,11 @@ fn draw_map(
         for (i, node) in floor.iter().enumerate() {
             let choice = if f == next_floor { choices.iter().position(|(n, _)| *n as usize == i).map(|c| c as u8) } else { None };
             let standing = here == Some((f as u8, i as u8));
-            spawn_node(&mut commands, map_pos(f, node.col), node.kind, choice, standing, f < next_floor && !standing);
+            spawn_node(&mut commands, map_pos(f, node.col), node.kind, choice, standing, f < next_floor && !standing, !standing && visited((f as u8, i as u8)));
         }
     }
     let boss_choice = (next_floor >= run.map.floors.len()).then_some(0);
-    spawn_node(&mut commands, BOSS_POS, NodeKind::Boss, boss_choice, false, false);
+    spawn_node(&mut commands, BOSS_POS, NodeKind::Boss, boss_choice, false, false, false);
 }
 
 // ---- rewards ----

@@ -372,7 +372,11 @@ fn raise_hint(
 ) {
     let me = session.my_hero();
     let someone_down = !me.downed && session.truth.heroes.iter().any(|h| h.slot != session.me && h.downed && !h.beheaded);
-    let line = l10n.tf("battle-raise-hint", &[("n", session.truth.raise_cost.into())]);
+    // a discard to pick for says so first: until it is made, nothing else can be done
+    let (line, shown) = match &me.choosing {
+        Some(ch) => (l10n.tf("battle-choose-discard", &[("n", (ch.left as i32).into())]), true),
+        None => (l10n.tf("battle-raise-hint", &[("n", session.truth.raise_cost.into())]), someone_down),
+    };
     let Ok((mut vis, mut text)) = hint.single_mut() else {
         commands.spawn((
             RaiseHint,
@@ -388,7 +392,7 @@ fn raise_hint(
         ));
         return;
     };
-    let want = if someone_down { Visibility::Inherited } else { Visibility::Hidden };
+    let want = if shown { Visibility::Inherited } else { Visibility::Hidden };
     if *vis != want {
         *vis = want;
     }

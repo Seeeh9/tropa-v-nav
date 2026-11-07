@@ -40,6 +40,7 @@ const EVERYONE: Peer = 0;
 pub fn plugin(app: &mut App) {
     app.add_systems(PreUpdate, receive.run_if(resource_exists::<Lan>))
         .add_systems(Update, (answered.run_if(resource_exists::<Dial>), hang_up.run_if(resource_exists::<Lan>), redial.run_if(resource_exists::<Lan>)))
+        .add_systems(Update, (beacon, searching.run_if(resource_exists::<Search>)))
         .add_systems(PostUpdate, transmit.run_if(resource_exists::<Lan>).before(crate::net::send));
     #[cfg(feature = "dev")]
     app.add_systems(OnEnter(AppState::Menu), open).add_systems(Update, (auto_lobby, open_on_fight, drop_line).chain().run_if(resource_exists::<Lan>));
@@ -136,19 +137,7 @@ fn hang_up(mut commands: Commands, net: Option<Res<Net>>) {
 
 /// This machine's addresses friends can reach it at, a VPN's first since that is why it is there.
 fn my_addresses() -> Vec<String> {
-    let mut found = Vec::new();
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const NO_WINDOW: u32 = 0x0800_0000;
-        if let Ok(out) = std::process::Command::new("ipconfig").creation_flags(NO_WINDOW).output() {
-            for line in String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("IPv4")) {
-                if let Some(ip) = line.rsplit(':').next().map(str::trim).filter(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok()) {
-                    found.push(ip.to_string());
-                }
-            }
-        }
-    }
+    let mut found = crate::platform::local_ipv4s();
     // Radmin hands out 26.*, Hamachi 25.*
     found.sort_by_key(|ip: &String| match ip.split('.').next() {
         Some("26") => 0,
@@ -469,4 +458,120 @@ fn drop_line(mut lan: ResMut<Lan>, time: Res<Time>, mut done: Local<bool>) {
     warn!("LAN (dev): cutting the line to the host");
     // dropped without a word, as a dead network leaves it: the host sees the link close
     lan.links.clear();
+}
+
+// ---- finding a party nearby ----
+//
+// A host answers on UDP at the party's port: a guest asks the whole network at once (a broadcast)
+// and every address of its own /24 one by one, since a phone's hotspot or a router may hold back
+// broadcasts. Whoever answers is gathering a party there. Nothing leaves the local network.
+
+const ASK: &[u8] = b"TROPA?";
+const ANSWER: &[u8] = b"TROPA!";
+/// How long a search listens for answers.
+const SEARCH_FOR: f32 = 2.5;
+
+/// The host's ear for guests looking for a party.
+#[derive(Resource)]
+struct Beacon(std::net::UdpSocket);
+
+/// A search under way, and the hosts found so far.
+#[derive(Resource)]
+pub struct Search {
+    socket: std::net::UdpSocket,
+    left: f32,
+    asked: u8,
+    pub found: Vec<String>,
+}
+
+/// Starts looking for parties on the local network.
+pub fn search(commands: &mut Commands, status: &mut NetStatus) {
+    let Ok(socket) = std::net::UdpSocket::bind(("0.0.0.0", 0)) else {
+        status.error = Some("coop-error-lan".into());
+        return;
+    };
+    let _ = socket.set_broadcast(true);
+    let _ = socket.set_nonblocking(true);
+    status.busy = true;
+    status.error = None;
+    commands.insert_resource(Search { socket, left: SEARCH_FOR, asked: 0, found: vec![] });
+}
+
+/// The addresses to ask: everyone at once, then each neighbour on every /24 this machine is on.
+fn whom_to_ask() -> Vec<std::net::SocketAddr> {
+    let mut out: Vec<std::net::SocketAddr> = vec![(std::net::Ipv4Addr::BROADCAST, PORT).into()];
+    for ip in crate::platform::local_ipv4s() {
+        let Ok(ip) = ip.parse::<std::net::Ipv4Addr>() else { continue };
+        let [a, b, c, _] = ip.octets();
+        out.push((std::net::Ipv4Addr::new(a, b, c, 255), PORT).into());
+        out.extend((1..=254).map(|d| std::net::SocketAddr::from((std::net::Ipv4Addr::new(a, b, c, d), PORT))));
+    }
+    out
+}
+
+fn searching(mut commands: Commands, time: Res<Time>, mut search: ResMut<Search>, mut status: ResMut<NetStatus>, mut entry: ResMut<crate::lobby::CodeEntry>) {
+    // asked three times, a moment apart: a packet or two may be lost on the air
+    if search.asked < 3 && search.left <= SEARCH_FOR - search.asked as f32 * 0.6 {
+        search.asked += 1;
+        for to in whom_to_ask() {
+            let _ = search.socket.send_to(ASK, to);
+        }
+    }
+    let mut buf = [0u8; 64];
+    while let Ok((n, from)) = search.socket.recv_from(&mut buf) {
+        let ip = from.ip().to_string();
+        if buf[..n].starts_with(ANSWER) && !search.found.contains(&ip) {
+            info!("LAN: a party at {ip}");
+            search.found.push(ip);
+        }
+    }
+    search.left -= time.delta_secs();
+    if search.left > 0.0 {
+        return;
+    }
+    status.busy = false;
+    match search.found.first() {
+        Some(first) => {
+            entry.0 = first.clone();
+            status.error = Some(if search.found.len() == 1 { "coop-found-one".into() } else { "coop-found-many".into() });
+        }
+        None => status.error = Some("coop-found-none".into()),
+    }
+    commands.remove_resource::<Search>();
+}
+
+/// The host listens for guests looking, and answers each.
+fn beacon(mut commands: Commands, lan: Option<Res<Lan>>, beacon: Option<Res<Beacon>>) {
+    let hosting = lan.as_ref().is_some_and(|l| l.listener.is_some());
+    match (hosting, beacon) {
+        (true, None) => {
+            if let Ok(socket) = std::net::UdpSocket::bind(("0.0.0.0", PORT)) {
+                let _ = socket.set_nonblocking(true);
+                commands.insert_resource(Beacon(socket));
+            }
+        }
+        (true, Some(b)) => {
+            let mut buf = [0u8; 64];
+            while let Ok((n, from)) = b.0.recv_from(&mut buf) {
+                if &buf[..n] == ASK {
+                    let _ = b.0.send_to(ANSWER, from);
+                }
+            }
+        }
+        (false, Some(_)) => commands.remove_resource::<Beacon>(),
+        (false, None) => {}
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    #[test]
+    fn a_neighbour_is_asked_on_every_network_this_machine_is_on() {
+        let asked = super::whom_to_ask();
+        assert_eq!(asked[0].to_string(), format!("255.255.255.255:{}", super::PORT));
+        for ip in crate::platform::local_ipv4s() {
+            let net = ip.rsplit_once('.').unwrap().0;
+            assert!(asked.iter().any(|a| a.to_string() == format!("{net}.1:{}", super::PORT)), "{ip}");
+        }
+    }
 }

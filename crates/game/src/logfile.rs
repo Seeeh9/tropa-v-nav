@@ -1,5 +1,5 @@
 //! A log kept on disk in every build, to be sent along with a bug report: what the game did, in
-//! words, and how it died if it did. One file a start in `%APPDATA%/TropaVNav/logs`, the newest few kept.
+//! words, and how it died if it did. One file a start in `logs` under the player's folder (see `platform::user_dir`), the newest few kept.
 
 use bevy::log::tracing_subscriber::{self, Layer};
 use bevy::log::BoxedLayer;
@@ -15,7 +15,7 @@ static FILE: OnceLock<PathBuf> = OnceLock::new();
 
 /// Where the logs lie.
 pub fn dir() -> PathBuf {
-    std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from).join("TropaVNav").join("logs")
+    crate::platform::user_dir().unwrap_or_else(|| std::env::temp_dir().join("TropaVNav")).join("logs")
 }
 
 fn open() -> Option<std::fs::File> {

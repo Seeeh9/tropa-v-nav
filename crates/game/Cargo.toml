@@ -10,11 +10,18 @@ dev = []
 [dependencies]
 nav_core = { path = "../core" }
 nav_net = { path = "../net" }
-bevy = { version = "0.20", default-features = false, features = ["2d", "3d", "ui", "audio", "wav", "vorbis", "png"] }
-steamworks = "0.13"
+bevy = { version = "0.20", default-features = false, features = ["2d", "3d", "ui", "audio", "wav", "vorbis", "flac", "png", "webp"] }
 # the same audio backend rodio plays through: asked which output is the system's default now
 cpal = "0.17"
 serde.workspace = true
 ron.workspace = true
 fluent-bundle = "0.16"
 unic-langid = "0.9"
+
+# Steam runs on the desktops only; elsewhere a stand-in with the same names, which never starts
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+steamworks = "0.13"
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+steam-stub = { path = "../steam_stub" }
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.20", default-features = false, features = ["android-game-activity"] }

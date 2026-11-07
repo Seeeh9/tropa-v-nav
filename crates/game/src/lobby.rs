@@ -17,7 +17,9 @@ use bevy::ui_widgets::{observe, Activate, Button};
 pub fn plugin(app: &mut App) {
     app.init_resource::<CodeEntry>()
         .add_systems(OnEnter(AppState::Coop), enter_coop)
-        .add_systems(Update, (type_code, coop_labels).run_if(in_state(AppState::Coop)))
+        .add_systems(Update, (type_code, typed_on_screen, coop_labels).run_if(in_state(AppState::Coop)))
+        .add_systems(OnEnter(AppState::Coop), |mut w: Single<&mut Window>| w.ime_enabled = crate::touch::enabled())
+        .add_systems(OnExit(AppState::Coop), |mut w: Single<&mut Window>| w.ime_enabled = false)
         .add_systems(OnEnter(AppState::Lobby), |mut status: ResMut<NetStatus>| status.dirty = true)
         .add_systems(Update, (draw_lobby, copy_code).run_if(in_state(AppState::Lobby)));
 }
@@ -27,7 +29,7 @@ const MOST_TYPED: usize = 24;
 
 /// The join code being typed, or the host's address.
 #[derive(Resource, Default)]
-struct CodeEntry(String);
+pub struct CodeEntry(pub String);
 
 #[derive(Component)]
 enum CoopLabel {
@@ -153,6 +155,15 @@ fn enter_coop(
                 next.set(AppState::Lobby);
             }),
         ));
+        // a party on this network, a phone's hotspot among them, found without typing its address
+        p.spawn((
+            menu_button(l10n.t("coop-find-lan"), &fonts),
+            observe(|_: On<Activate>, mut commands: Commands, mut status: ResMut<NetStatus>, searching: Option<Res<crate::lan::Search>>| {
+                if searching.is_none() {
+                    crate::lan::search(&mut commands, &mut status);
+                }
+            }),
+        ));
         p.spawn((CoopLabel::Status, theme::text("", &fonts.body, 24.0, theme::FRESH_BLOOD)));
         p.spawn((
             menu_button(l10n.t("coop-back"), &fonts),
@@ -187,25 +198,7 @@ fn latin(code: KeyCode, shift: bool) -> Option<char> {
     }
 }
 
-/// The system clipboard, through the shell: Bevy here is built without its own.
-fn clipboard_get() -> Option<String> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let out = std::process::Command::new("powershell").args(["-NoProfile", "-Command", "Get-Clipboard"]).creation_flags(0x0800_0000).output().ok()?;
-        return Some(String::from_utf8_lossy(&out.stdout).trim().to_string());
-    }
-    #[allow(unreachable_code)]
-    None
-}
-
-fn clipboard_set(text: &str) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &format!("Set-Clipboard -Value '{}'", text.replace('\'', ""))]).creation_flags(0x0800_0000).spawn();
-    }
-}
+use crate::platform::{clipboard_get, clipboard_set};
 
 /// Ctrl+C in the lobby copies the party's code, or the first address friends can reach.
 fn copy_code(held: Res<ButtonInput<KeyCode>>, net: Option<Res<Net>>) {
@@ -252,6 +245,19 @@ fn type_code(mut keys: MessageReader<KeyboardInput>, held: Res<ButtonInput<KeyCo
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// A phone's on-screen keyboard (and a desktop's input method) hands over whole text, not keys.
+fn typed_on_screen(mut ime: MessageReader<bevy::window::Ime>, mut entry: ResMut<CodeEntry>) {
+    for e in ime.read() {
+        if let bevy::window::Ime::Commit { value, .. } = e {
+            for ch in value.chars().filter(|c| typable(*c)) {
+                if entry.0.len() < MOST_TYPED {
+                    entry.0.push(ch.to_ascii_uppercase());
+                }
+            }
         }
     }
 }
@@ -338,7 +344,7 @@ fn draw_lobby(
     // the faces to pick from sit on a darker band, so they read over the firelight
     // fading in from above, so it reads as the ground darkening away from the fire, not a slab
     commands.spawn((
-        ImageNode { color: theme::SOOT.with_alpha(0.75), ..ImageNode::new(assets.load("fx/fade_down.png")) },
+        ImageNode { color: theme::SOOT.with_alpha(0.75), ..ImageNode::new(assets.load(crate::art::path("fx/fade_down.png"))) },
         Node { position_type: PositionType::Absolute, left: px(0), bottom: px(260), width: px(STAGE_W), height: px(200), ..default() },
         Pickable::IGNORE,
         ChildOf(root),
@@ -455,7 +461,7 @@ fn draw_lobby(
                 // standing on the ground by the fire: a soft shadow under the feet
                 let feet = 222.0 + figure_h * 0.97;
                 commands.spawn((
-                    ImageNode { color: Color::WHITE.with_alpha(0.85), ..ImageNode::new(assets.load("fx/shadow.png")) },
+                    ImageNode { color: Color::WHITE.with_alpha(0.85), ..ImageNode::new(assets.load(crate::art::path("fx/shadow.png"))) },
                     Node { width: px(figure_w * 0.9), height: px(46), ..absolute(560.0 - figure_w * 0.45, feet - 23.0) },
                     Pickable::IGNORE,
                     ChildOf(root),

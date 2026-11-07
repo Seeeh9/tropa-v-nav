@@ -31,6 +31,14 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_rest.run_if(in_state(AppState::Rest)))
         .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
         .add_systems(Update, (draw_omen, draw_trophy, preview_omen_cards, draw_omen_lot).chain().run_if(in_state(AppState::Omen)))
+        .add_systems(Update, speak_omen.run_if(in_state(AppState::Omen)))
+        .add_systems(OnExit(AppState::Omen), |mut commands: Commands, voices: Query<Entity, With<OmenVoice>>, mut said: ResMut<OmenSaid>| {
+            said.0 = None;
+            for e in &voices {
+                commands.entity(e).despawn();
+            }
+        })
+        .init_resource::<OmenSaid>()
         .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)))
         .add_systems(Update, explain_cards)
         .init_resource::<Banked>()
@@ -1059,6 +1067,40 @@ fn omen_picture(commands: &mut Commands, root: Entity, id: &str, act: u8, art: &
             Pickable::IGNORE,
         )],
     ));
+}
+
+/// The omen being read aloud now.
+#[derive(Component)]
+struct OmenVoice;
+/// The omen last read aloud, so it is read once as it opens and not again on every redraw.
+#[derive(Resource, Default)]
+struct OmenSaid(Option<String>);
+
+/// The storyteller reads the omen out as it opens, in the language chosen for speech
+/// (`voice/<lang>/omen-<id>`); an omen with no recording is silent.
+#[allow(clippy::too_many_arguments)]
+fn speak_omen(
+    mut commands: Commands,
+    net: Option<Res<Net>>,
+    mut said: ResMut<OmenSaid>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+    l10n: Res<L10n>,
+    profile: Res<crate::profile::Profile>,
+    mixer: Res<crate::audio::Mixer>,
+) {
+    let Some(Stage::Omen { id, .. }) = net.as_ref().and_then(|n| n.node.state.as_ref()).map(|r| &r.stage) else { return };
+    if said.0.as_deref() == Some(id.as_str()) {
+        return;
+    }
+    said.0 = Some(id.clone());
+    let lang = l10n.lang.voice(profile.settings.voice_lang).code();
+    if mixer.narrator <= 0.0 {
+        return;
+    }
+    if let Some(path) = art.file(&format!("voice/{lang}/omen-{id}.wav")) {
+        commands.spawn((OmenVoice, crate::audio::Narration, AudioPlayer::new(assets.load::<AudioSource>(path)), PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(mixer.narrator))));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

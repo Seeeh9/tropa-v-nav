@@ -162,12 +162,20 @@ pub struct Leaf {
     links: Vec<Link>,
     /// The point a hand holds, and where the hand is.
     pub grab: Option<(usize, Vec3)>,
+    /// Other readers' hands on the same leaf at once, as many as there are: each holds its point
+    /// where it is, so hands pulled apart stretch the paper between them (and tear it).
+    pub others: Vec<(usize, Vec3)>,
     /// How fast the hand has lately been moving, and where it was a step ago.
     hand_speed: f32,
     last_hand: Option<Vec3>,
+    last_others: Vec<(usize, Vec3)>,
     /// Does the paper tear of itself when pulled too far? Not when another reader's machine
     /// holds the leaf: then its tears come from there, edge by edge, in their order.
     pub tearing: bool,
+    /// How far an edge may stretch before it parts, when the book decides it rather than the
+    /// paper: hands pulling a glued pair apart hold it whole up to a point, and past that it gives
+    /// at once (see `Book`'s `lay_on_hands`).
+    pub tear_at: Option<f32>,
     /// Edges torn since last asked, in order.
     fresh: Vec<usize>,
     /// Points glued to the page beneath, while the glue holds.
@@ -221,9 +229,12 @@ impl Leaf {
             cut: vec![false; EDGES],
             links: Vec::new(),
             grab: None,
+            others: Vec::new(),
             hand_speed: 0.0,
             last_hand: None,
+            last_others: Vec::new(),
             tearing: true,
+            tear_at: None,
             fresh: Vec::new(),
             glue: Vec::new(),
             gap,
@@ -274,6 +285,19 @@ impl Leaf {
 
     pub fn home(&self, p: usize) -> (usize, usize) {
         self.home[p]
+    }
+
+    /// How fast the quickest hand on the leaf has lately been moving.
+    pub fn hand_speed(&self) -> f32 {
+        self.hand_speed
+    }
+
+    /// How far apart two points lie on the flat, unstretched sheet.
+    pub fn rest_between(&self, a: usize, b: usize) -> f32 {
+        let ((ai, aj), (bi, bj)) = (self.home[a], self.home[b]);
+        let dx = (ai as f32 - bi as f32) * self.width / (NX - 1) as f32;
+        let dz = (aj as f32 - bj as f32) * self.height / (NZ - 1) as f32;
+        (dx * dx + dz * dz).sqrt()
     }
 
     /// The cells' corners, for drawing: head-spine, head-edge, foot-spine, foot-edge.
@@ -471,12 +495,19 @@ impl Leaf {
         if let Some((held, _)) = self.grab {
             self.glue.retain(|g| g.point != held);
         }
+        for (held, _) in self.others.clone() {
+            self.glue.retain(|g| g.point != held);
+        }
         let moved = match (self.grab, self.last_hand) {
             (Some((_, to)), Some(was)) => to.distance(was) / dt,
             _ => 0.0,
         };
+        // the quickest of all the hands on it: any of them jerking tears it
+        let others_moved = self.others.iter().filter_map(|(p, to)| self.last_others.iter().find(|(q, _)| q == p).map(|(_, was)| to.distance(*was) / dt)).fold(0.0, f32::max);
+        let moved = moved.max(others_moved);
         self.hand_speed += (moved - self.hand_speed) * 0.3;
         self.last_hand = self.grab.map(|(_, to)| to);
+        self.last_others = self.others.clone();
         for p in 0..self.points.len() {
             if self.pinned(p) {
                 continue;
@@ -489,7 +520,11 @@ impl Leaf {
         for _ in 0..ITERATIONS {
             if let Some((p, to)) = self.grab {
                 self.points[p] = to;
-
+            }
+            for &(p, to) in &self.others {
+                if p < self.points.len() {
+                    self.points[p] = to;
+                }
             }
             for l in &self.links {
                 let (a, b) = (self.points[l.a], self.points[l.b]);
@@ -552,7 +587,7 @@ impl Leaf {
             .filter_map(|l| {
                 let e = l.edge?;
                 let s = self.points[l.a].distance(self.points[l.b]) / l.rest - 1.0;
-                if s <= TEAR {
+                if s <= self.tear_at.unwrap_or(TEAR) {
                     return None;
                 }
                 let crossing = Self::crossing(e).into_iter().flatten().filter(|c| !self.cut[*c] && self.at_front(*c));
@@ -563,7 +598,7 @@ impl Leaf {
             .collect();
         // while glue holds the leaf down, the paper strains wherever it is peeled; only a jerk,
         // the hand flying faster than glue can give, tears it
-        let jerked = self.glue.is_empty() || self.hand_speed > JERK;
+        let jerked = self.glue.is_empty() || self.hand_speed > JERK || self.tear_at.is_some();
         if self.tearing && jerked && !strained.is_empty() {
             strained.sort_by(|a, b| b.0.total_cmp(&a.0));
             for (_, e) in strained.into_iter().take(TEARS_PER_STEP) {
@@ -703,7 +738,7 @@ impl Leaf {
 
     /// Has the leaf come to rest?
     pub fn still(&self) -> bool {
-        self.grab.is_none() && self.points.iter().zip(&self.prev).all(|(p, q)| p.distance_squared(*q) < 1e-8)
+        self.grab.is_none() && self.others.is_empty() && self.points.iter().zip(&self.prev).all(|(p, q)| p.distance_squared(*q) < 1e-8)
     }
 
     /// The free particle nearest the hand's line of sight within `within`, for a hand picking

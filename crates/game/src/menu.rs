@@ -121,7 +121,7 @@ fn enter_menu(
             (
                 menu_button(l10n.t("menu-lang"), &fonts),
                 observe(|_: On<Activate>, mut l10n: ResMut<L10n>, art: Res<Art>, mut profile: ResMut<crate::profile::Profile>, mut next: ResMut<NextState<AppState>>| {
-                    *l10n = L10n::load(art.root(), l10n.lang.other());
+                    *l10n = L10n::load(&art, l10n.lang.other());
                     // and it stays so the next time the game starts
                     profile.settings.text_lang = l10n.lang.saved();
                     profile.save();

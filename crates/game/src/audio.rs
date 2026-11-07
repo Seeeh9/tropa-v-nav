@@ -229,7 +229,7 @@ impl Lines {
             .or_insert_with(|| {
                 (1..=TAKES)
                     .map(|k| if k == 1 { format!("voice/{lang}/bark-{who}-{what}.wav") } else { format!("voice/{lang}/bark-{who}-{what}-{k}.wav") })
-                    .filter(|f| art.root().join(f).is_file())
+                    .filter_map(|f| art.file(&f))
                     .collect()
             })
             .clone();

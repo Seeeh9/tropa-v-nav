@@ -1,4 +1,6 @@
-﻿; The Windows installer of the released game: first `cargo build --release -p tropa`, then
+﻿; The Windows installer of the released game: first `cargo build --release -p tropa` and
+; `python -X utf8 tools/pack_assets.py desktop` (the assets with nothing lost, about half the size,
+; only what the game loads), then
 ;   ISCC.exe tools\installer.iss
 ; It comes out as target\dist\TropaVNav-Setup-<version>.exe.
 #define Version "0.1.0"
@@ -45,7 +47,7 @@ Name: "firewall"; Description: "{cm:Firewall}"; GroupDescription: "{cm:Network}"
 [Files]
 Source: "..\target\release\tropa.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\steam_api64.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\target\pack\desktop\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{cm:GameName}"; Filename: "{app}\tropa.exe"

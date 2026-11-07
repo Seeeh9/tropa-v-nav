@@ -192,7 +192,7 @@ fn draw_ink(
         ink.drawing = false;
         return;
     }
-    let Some(pos) = window.cursor_position().or(*cursor) else { return };
+    let Some(pos) = window.cursor_position().or_else(crate::touch::finger).or(*cursor) else { return };
     let stage = crate::stage_point(&window, scale.0, pos);
     // below the top bar only, where the sheet shows
     if stage.y < crate::between::BAR_H {

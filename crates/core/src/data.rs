@@ -641,19 +641,24 @@ impl Content {
 
     /// Loads every `.ron` under `dir/{cards,heroes,relics,enemies,encounters,recipes}`.
     pub fn load_dir(dir: &Path) -> Result<Content, LoadError> {
+        Content::load_with(&|sub| {
+            let Ok(rd) = std::fs::read_dir(dir.join(sub)) else { return Ok(Vec::new()) };
+            let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ron")).collect();
+            files.sort();
+            files
+                .into_iter()
+                .map(|file| std::fs::read_to_string(&file).map(|src| (file.display().to_string(), src)).map_err(|e| LoadError(format!("{}: {e}", file.display()))))
+                .collect()
+        })
+    }
+
+    /// Loads the content from wherever `files` finds it: for each folder (`cards`, `heroes`, ...)
+    /// the name and text of every `.ron` in it, in order. A phone reads them out of its package.
+    pub fn load_with(files: &dyn Fn(&str) -> Result<Vec<(String, String)>, LoadError>) -> Result<Content, LoadError> {
         let mut c = Content::default();
         let each = |sub: &str, f: &mut dyn FnMut(&str) -> Result<(), LoadError>| {
-            let p = dir.join(sub);
-            let Ok(rd) = std::fs::read_dir(&p) else { return Ok(()) };
-            let mut files: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-            files.sort();
-            for file in files {
-                if file.extension().and_then(|e| e.to_str()) != Some("ron") {
-                    continue;
-                }
-                let src = std::fs::read_to_string(&file)
-                    .map_err(|e| LoadError(format!("{}: {e}", file.display())))?;
-                f(&src).map_err(|e| LoadError(format!("{}: {}", file.display(), e.0)))?;
+            for (name, src) in files(sub)? {
+                f(&src).map_err(|e| LoadError(format!("{name}: {}", e.0)))?;
             }
             Ok(())
         };

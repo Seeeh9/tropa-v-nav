@@ -37,7 +37,7 @@ struct Shake {
 struct AfterShake(f32);
 
 fn hand(assets: &AssetServer, hero: &str, shape: u8) -> Handle<Image> {
-    assets.load(format!("hands/{hero}_{}.png", SHAPES[shape.min(2) as usize]))
+    assets.load(crate::art::path(&format!("hands/{hero}_{}.png", SHAPES[shape.min(2) as usize])))
 }
 
 fn draw_chest(

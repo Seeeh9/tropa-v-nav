@@ -380,6 +380,8 @@ fn turn_pages(
     if book.open < 1.0 {
         return;
     }
+    // read together, a page is turned by hand only (the last one is closed by vote)
+    let reading_together = net.as_ref().zip(tale.pages.front()).is_some_and(|(n, p)| shared(n, p)) && tale.pages.len() > 1;
     // the reader turned the leaf by hand
     if turned.read().count() > 0 {
         commands.trigger(Turn::Leaf);
@@ -392,7 +394,7 @@ fn turn_pages(
         } else {
             book.turn_back_unseen();
         }
-    } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) {
+    } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) && !reading_together {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
         commands.trigger(Turn::Skip);
@@ -562,7 +564,7 @@ fn read_secret(
             continue;
         }
         let spoken = format!("voice/{}/story-secret-{}.wav", l10n.lang.voice(profile.settings.voice_lang).code(), f.act);
-        if art.root().join(&spoken).is_file() {
+        if let Some(spoken) = art.file(&spoken) {
             for e in &speaking {
                 commands.entity(e).despawn();
             }
@@ -627,7 +629,7 @@ fn show_page(
     // the page read aloud, in the language chosen for speech; a page with no recording is silent
     let spoken = format!("voice/{}/{}.wav", l10n.lang.voice(profile.settings.voice_lang).code(), page.text);
     // the storyteller waits for the book to lie open before speaking
-    if !page.reread && mixer.narrator > 0.0 && art.root().join(&spoken).is_file() {
+    if let Some(spoken) = art.file(&spoken).filter(|_| !page.reread && mixer.narrator > 0.0) {
         commands.insert_resource(PendingVoice(Some((assets.load::<AudioSource>(spoken), mixer.narrator))));
     }
     let together = net.as_ref().is_some_and(|n| shared(n, page));
@@ -719,7 +721,13 @@ fn show_page(
                                 if last { Visibility::Hidden } else { Visibility::Inherited },
                                 observe(|_: On<Activate>, mut commands: Commands| commands.trigger(Turn::Skip)),
                             ),
-                            (page_button(l10n.t(onward), &fonts), observe(|_: On<Activate>, mut commands: Commands| commands.trigger(Turn::Next))),
+                            (
+                                page_button(l10n.t(onward), &fonts),
+                                // read together, the leaves are turned by hand: hands may meet on
+                                // one, and a glued pair is pulled apart by two of them
+                                if together && !last { Visibility::Hidden } else { Visibility::Inherited },
+                                observe(|_: On<Activate>, mut commands: Commands| commands.trigger(Turn::Next)),
+                            ),
                         ],
                     ),
                 ],

@@ -346,19 +346,19 @@ fn play_frames(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &m
 
 impl BloodArt {
     fn load(assets: &AssetServer) -> BloodArt {
-        let many = |stem: &str, n: usize| (0..n).map(|i| assets.load(format!("blood/{stem}_{i}.png"))).collect();
+        let many = |stem: &str, n: usize| (0..n).map(|i| assets.load(crate::art::path(&format!("blood/{stem}_{i}.png")))).collect();
         BloodArt {
             drops: many("drop", 8),
             splashes: many("splash", 7),
-            big: ["splat_a", "pool", "dried", "spray", "smear", "smear"].iter().map(|s| assets.load(format!("blood/{s}.png"))).collect(),
-            smear: assets.load("blood/smear.png"),
-            spurt: (0..8).map(|i| assets.load(format!("blood/anim/spurt_{i}.png"))).collect(),
-            splash: (0..8).map(|i| assets.load(format!("blood/anim/splash_{i}.png"))).collect(),
-            pool: (0..8).map(|i| assets.load(format!("blood/anim/pool_{i}.png"))).collect(),
-            gush: (0..8).map(|i| assets.load(format!("blood/anim/gush_{i}.png"))).collect(),
-            mist: (0..8).map(|i| assets.load(format!("blood/anim/mist_{i}.png"))).collect(),
-            trickle: (0..8).map(|i| assets.load(format!("blood/anim/trickle_{i}.png"))).collect(),
-            dust: (0..6).map(|i| assets.load(format!("fx/wisp_{i}.png"))).chain(["fx/dust_low.png", "fx/dust_drift.png"].map(|p| assets.load(p))).collect(),
+            big: ["splat_a", "pool", "dried", "spray", "smear", "smear"].iter().map(|s| assets.load(crate::art::path(&format!("blood/{s}.png")))).collect(),
+            smear: assets.load(crate::art::path("blood/smear.png")),
+            spurt: (0..8).map(|i| assets.load(crate::art::path(&format!("blood/anim/spurt_{i}.png")))).collect(),
+            splash: (0..8).map(|i| assets.load(crate::art::path(&format!("blood/anim/splash_{i}.png")))).collect(),
+            pool: (0..8).map(|i| assets.load(crate::art::path(&format!("blood/anim/pool_{i}.png")))).collect(),
+            gush: (0..8).map(|i| assets.load(crate::art::path(&format!("blood/anim/gush_{i}.png")))).collect(),
+            mist: (0..8).map(|i| assets.load(crate::art::path(&format!("blood/anim/mist_{i}.png")))).collect(),
+            trickle: (0..8).map(|i| assets.load(crate::art::path(&format!("blood/anim/trickle_{i}.png")))).collect(),
+            dust: (0..6).map(|i| assets.load(crate::art::path(&format!("fx/wisp_{i}.png")))).chain(["fx/dust_low.png", "fx/dust_drift.png"].map(|p| assets.load(crate::art::path(p)))).collect(),
         }
     }
 }

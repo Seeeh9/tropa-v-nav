@@ -2,6 +2,10 @@
 #![cfg_attr(not(feature = "dev"), windows_subsystem = "windows")]
 //! «Тропа в Навь» — Bevy client. Rules live in `nav_core`; this crate only draws and sends actions.
 
+// where Steam does not run, its names come from a stand-in that never starts
+#[cfg(any(target_os = "android", target_os = "ios"))]
+extern crate steam_stub as steamworks;
+
 mod art;
 mod audio;
 mod battle;
@@ -21,6 +25,7 @@ mod menu;
 mod net;
 mod preload;
 mod pause;
+mod platform;
 mod profile;
 mod reconnect;
 mod run_ui;
@@ -28,6 +33,7 @@ mod session;
 mod steam;
 mod story;
 mod theme;
+mod touch;
 
 use bevy::prelude::*;
 use bevy::window::{WindowPosition, WindowResolution};
@@ -75,29 +81,32 @@ pub struct Config {
     pub lang: Option<String>,
 }
 
-fn load_config(assets: &std::path::Path) -> Config {
-    std::fs::read_to_string(assets.join("config.ron"))
-        .ok()
+fn load_config(art: &art::Art) -> Config {
+    art.read_text("config.ron")
         .and_then(|s| ron::from_str(&s).ok())
         .unwrap_or(Config { steam_app_id: 480, lang: None })
 }
 
 fn main() {
     let assets = art::assets_dir();
-    let config = load_config(&assets);
+    let art = art::Art::new(assets.clone());
+    let config = load_config(&art);
     let steam = steam::init(config.steam_app_id);
     // playing without Steam, everyone on this machine shares one local profile
     let account = steam.as_ref().ok().map(|c| c.user().steam_id().raw()).unwrap_or(0);
     let profile = profile::Profile::load(account);
     // what the player last chose in the game, else what the config says, else the language the game
     // was installed in, else Steam's
-    let installed = std::fs::read_to_string(assets.join("install_lang.txt")).ok().and_then(|word| Lang::from_word(&word));
+    let installed = art.read_text("install_lang.txt").and_then(|word| Lang::from_word(&word));
     let lang = Lang::from_saved(profile.settings.text_lang)
         .or_else(|| config.lang.as_deref().map(|word| Lang::from_word(word).unwrap_or(Lang::Old)))
         .or(installed)
         .or_else(|| steam.as_ref().ok().map(steam::ui_lang))
         .unwrap_or(Lang::Old);
-    let content = match nav_core::Content::load_dir(&assets.join("data")) {
+    let content = match nav_core::Content::load_with(&|sub| {
+        let dir = format!("data/{sub}");
+        Ok(art.list(&dir, "ron").into_iter().filter_map(|name| art.read_text(&format!("{dir}/{name}")).map(|src| (format!("{dir}/{name}"), src))).collect())
+    }) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("content failed to load:\n{e}");
@@ -122,8 +131,8 @@ fn main() {
             .set(AssetPlugin { file_path: assets.to_string_lossy().into_owned(), ..default() }),
     )
     .insert_resource(ClearColor(theme::SOOT))
-    .insert_resource(L10n::load(&assets, lang))
-    .insert_resource(art::Art::new(assets.clone()))
+    .insert_resource(L10n::load(&art, lang))
+    .insert_resource(art)
     .insert_resource(session::Db(content))
     .insert_resource(config)
     .insert_resource(profile)
@@ -132,7 +141,7 @@ fn main() {
     .add_systems(PostStartup, menu::apply_settings)
     .add_systems(Update, fit_stage)
     .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, card_flip::plugin, map_party::plugin, map_ink::plugin, between::plugin, preload::plugin))
-    .add_plugins((reconnect::plugin, pause::plugin));
+    .add_plugins((reconnect::plugin, pause::plugin, touch::plugin));
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);
@@ -191,7 +200,7 @@ fn fit_stage(window: Single<&Window>, mut scale: ResMut<UiScale>) {
 
 /// Cursor position in stage coordinates.
 pub fn stage_cursor(window: &Window, scale: f32) -> Option<Vec2> {
-    Some(stage_point(window, scale, window.cursor_position()?))
+    Some(stage_point(window, scale, window.cursor_position().or_else(touch::finger)?))
 }
 
 /// A point in the window (logical pixels) in stage coordinates.

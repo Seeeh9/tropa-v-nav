@@ -847,7 +847,7 @@ fn sync_units(
                 // the feet are painted a little above the bottom edge of the picture
                 // a soft contact shadow, feathered out to nothing at its edge
                 u.spawn((
-                    ImageNode { color: Color::WHITE.with_alpha(0.75), ..ImageNode::new(assets.load("fx/shadow.png")) },
+                    ImageNode { color: Color::WHITE.with_alpha(0.75), ..ImageNode::new(assets.load(crate::art::path("fx/shadow.png"))) },
                     Node {
                         position_type: PositionType::Absolute,
                         left: px((UNIT_W - size.x * 0.95) / 2.0),

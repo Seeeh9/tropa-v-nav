@@ -320,7 +320,7 @@ pub fn note_enemies(net: Option<Res<crate::net::Net>>, mut profile: ResMut<Profi
 }
 
 fn profile_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("TropaVNav").join("profiles"))
+    crate::platform::user_dir().map(|d| d.join("profiles"))
 }
 
 #[cfg(test)]

@@ -55,7 +55,7 @@ fn ranks_of(spots: &[Vec2]) -> Vec<Vec2> {
 /// A fight opens on this backdrop, lifted so.
 pub(super) fn enter(art: &Art, backdrop: &str, lift: f32) {
     let table = TABLE.get_or_init(|| {
-        let text = std::fs::read_to_string(art.root().join("data/stands.ron")).unwrap_or_default();
+        let text = art.read_text("data/stands.ron").unwrap_or_default();
         ron::from_str(&text).unwrap_or_default()
     });
     let here = table.get(backdrop).map(|s| Here { heroes: place(&s.heroes, lift), ranks: ranks_of(&place(&s.foes, lift)), taken: HashMap::new() });

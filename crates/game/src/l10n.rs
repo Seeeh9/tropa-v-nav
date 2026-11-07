@@ -5,7 +5,6 @@ use bevy::prelude::*;
 use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use nav_core::*;
-use std::path::Path;
 
 mod old_spelling;
 
@@ -85,7 +84,7 @@ pub struct L10n {
 }
 
 impl L10n {
-    pub fn load(assets: &Path, lang: Lang) -> L10n {
+    pub fn load(art: &crate::art::Art, lang: Lang) -> L10n {
         // plural rules come from the base language: the old speech counts as Russian does
         let id: unic_langid::LanguageIdentifier = lang.base().unwrap_or(lang).code().parse().expect("valid language id");
         let mut bundle = FluentBundle::new_concurrent(vec![id]);
@@ -93,22 +92,21 @@ impl L10n {
         bundle.set_use_isolating(false);
         for (from, overriding) in [(lang.base(), false), (Some(lang), lang.base().is_some())] {
             let Some(from) = from else { continue };
-            let dir = assets.join("i18n").join(from.code());
-            let mut files: Vec<_> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
-            files.sort();
-            for file in files {
-                let Ok(src) = std::fs::read_to_string(&file) else { continue };
+            let dir = format!("i18n/{}", from.code());
+            for name in art.list(&dir, "ftl") {
+                let file = format!("{dir}/{name}");
+                let Some(src) = art.read_text(&file) else { continue };
                 let res = match FluentResource::try_new(src) {
                     Ok(r) => r,
                     Err((r, errs)) => {
-                        warn!("{}: {} fluent syntax errors", file.display(), errs.len());
+                        warn!("{file}: {} fluent syntax errors", errs.len());
                         r
                     }
                 };
                 if overriding {
                     bundle.add_resource_overriding(res);
                 } else if let Err(errs) = bundle.add_resource(res) {
-                    warn!("{}: {} duplicate keys", file.display(), errs.len());
+                    warn!("{file}: {} duplicate keys", errs.len());
                 }
             }
         }
@@ -411,7 +409,7 @@ mod once_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
         let c = nav_core::Content::load_dir(&root.join("data")).expect("content");
         for lang in [Lang::Old, Lang::Ru, Lang::En] {
-            let l = L10n::load(&root, lang);
+            let l = L10n::load(&crate::art::Art::new(root.clone()), lang);
             for def in c.cards.values() {
                 for up in [false, true] {
                     let t = l.card_text(&def.id, def, &def.view(up, nav_core::Form::Human));
@@ -426,7 +424,7 @@ mod once_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
         let c = nav_core::Content::load_dir(&root.join("data")).expect("content");
         for lang in [Lang::Ru, Lang::En] {
-            let l = L10n::load(&root, lang);
+            let l = L10n::load(&crate::art::Art::new(root.clone()), lang);
             for def in c.cards.values() {
                 let view = def.view(false, nav_core::Form::Human);
                 let twice = view.effects.windows(2).any(|w| w[0] == w[1] && matches!(w[0], nav_core::Effect::Damage(..)));

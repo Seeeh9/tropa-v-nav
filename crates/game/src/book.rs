@@ -176,6 +176,8 @@ struct Ghost {
     peeling: bool,
     /// The glued corner it pulls at.
     tug: Option<usize>,
+    /// The point it holds on a leaf another hand is turning: one hand of several on it.
+    join: Option<usize>,
     color: Color,
     /// Seconds since it was last heard of.
     quiet: f32,
@@ -247,6 +249,15 @@ const EASE: f32 = 0.6;
 /// leaf; or it holds a leaf being peeled.
 const TUG_BIT: u16 = 0x8000;
 const PEEL_BIT: u16 = 0x4000;
+/// Or it has taken hold of a leaf another reader is already turning: one more hand on it.
+const JOIN_BIT: u16 = 0x2000;
+/// Hands on a glued pair pulled out past its own size (scene units; a page is 1.0 wide): from
+/// PULL_APART on, held there for TUG_TIME, the leaves come apart; past OVERPULL, or with a jerk,
+/// the paper gives at once and tears. A narrow band: pulling for all they are worth is punished.
+const PULL_APART: f32 = 0.05;
+const OVERPULL: f32 = 0.14;
+/// Speed (scene units a second) of any hand on a glued pair past which the pull is a jerk.
+const PULL_JERK: f32 = 5.0;
 
 /// A nail rubbing back and forth: counts the strokes.
 #[derive(Default)]
@@ -382,6 +393,10 @@ pub struct Book {
     pub seat: u8,
     /// The hand is over a glued corner, or at work on it: the story says what can be done.
     pub over_glue: bool,
+    /// This reader's hand on a leaf another reader is turning: the point it holds and where.
+    joined: Option<(usize, Vec3)>,
+    /// How far the hands on a glued pair have worked it apart by pulling, 0..1.
+    pulled: f32,
     /// The tale is at its end: there is nothing left to be sealed.
     pub ending: bool,
 }
@@ -456,6 +471,8 @@ impl Book {
             easing: 0.0,
             seat: 0,
             over_glue: false,
+            joined: None,
+            pulled: 0.0,
             ending: false,
         }
     }
@@ -812,10 +829,20 @@ impl Book {
                 _ => Vec3::ZERO,
             };
             // a hand at a glued corner is not turning the leaf; the marks say which it is
-            let point = hold.map(|h| usize::from(h & !(TUG_BIT | PEEL_BIT)));
+            let point = hold.map(|h| usize::from(h & !(TUG_BIT | PEEL_BIT | JOIN_BIT)));
             let tugging = hold.is_some_and(|h| h & TUG_BIT != 0);
             let peeling = hold.is_some_and(|h| h & PEEL_BIT != 0);
-            *slot = Some(Ghost { at, speed, hold: point.filter(|_| !tugging), peeling, tug: point.filter(|_| tugging), color, quiet: 0.0 });
+            let joining = hold.is_some_and(|h| h & JOIN_BIT != 0);
+            *slot = Some(Ghost {
+                at,
+                speed,
+                hold: point.filter(|_| !tugging && !joining),
+                peeling,
+                tug: point.filter(|_| tugging),
+                join: point.filter(|_| joining),
+                color,
+                quiet: 0.0,
+            });
         }
     }
 
@@ -1391,7 +1418,8 @@ fn hold_leaf(
     mixer: Res<Mixer>,
 ) {
     let Ok((camera, at)) = camera.single() else { return };
-    let mouse = pointers.iter().find(|(id, ..)| id.is_mouse());
+    // the mouse, or the first finger on a touch screen
+    let mouse = pointers.iter().find(|(id, ..)| id.is_mouse() && !crate::touch::enabled()).or_else(|| pointers.iter().find(|(id, ..)| id.is_touch()));
     let cursor = mouse.and_then(|(_, loc, _)| loc.location()).map(|l| crate::stage_point(&window, scale.0, l.position));
     let down = mouse.is_some_and(|(.., press)| press.is_primary_pressed());
     let pressed = down && !state.0;
@@ -1427,6 +1455,34 @@ fn hold_leaf(
             }
         }
         return;
+    }
+    // one more hand on a leaf another reader is turning: any number of hands may hold it at once,
+    // and pulled apart they stretch the paper between them
+    let theirs = matches!(book.turn.as_ref().map(|t| &t.hand), Some(Hand::Remote(_)));
+    if let Some((point, _)) = book.joined {
+        let hand = cursor.and_then(|c| cursor_on(camera, at, c, LEAF_FLOOR.right + LIFT));
+        match hand {
+            Some(hand) if down && theirs && point < book.leaf.points.len() => {
+                book.joined = Some((point, hand));
+                tell_news(book, hand_news(hand, Some(point as u16 | JOIN_BIT)), false);
+            }
+            _ => {
+                book.joined = None;
+                tell_news(book, hand_news(hand.unwrap_or_default(), None), true);
+            }
+        }
+        return;
+    }
+    if pressed && theirs && book.shared && book.open >= 1.0 {
+        if let Some(c) = cursor.filter(|c| c.y <= crate::STAGE_H - BUTTON_BAND) {
+            if let Some(point) = book.leaf.pick(|y| cursor_on(camera, at, c, y), CATCH_REACH, false, TOP) {
+                let hand = book.leaf.points[point];
+                book.joined = Some((point, hand));
+                tell_news(book, hand_news(hand, Some(point as u16 | JOIN_BIT)), true);
+                play(&mut commands, &art, &assets, &mixer, "book_rustle");
+                return;
+            }
+        }
     }
     // paper torn loose is picked up again where it lies, on the book or on the table: first a
     // piece of the leaf in play, then the newest scrap under the hand
@@ -1759,6 +1815,88 @@ fn dev_ghost(time: Res<Time>, mut book: ResMut<Book>, mut since: Local<f32>, mut
     }
 }
 
+/// Every hand on the leaf beside the one turning it: the other readers' (as their machines tell
+/// them) and this reader's own, when it joined a leaf someone else turns. Hands on a glued pair
+/// pulled slowly out past its size work the two leaves apart, and the pair is peeled; pulled
+/// with a jerk the paper tears, as any paper does.
+fn lay_on_hands(book: &mut Book, dt: f32) {
+    let holder = match book.turn.as_ref().map(|t| &t.hand) {
+        Some(Hand::Reader) => None,
+        Some(Hand::Remote(seat)) => Some(*seat),
+        _ => {
+            book.leaf.others.clear();
+            book.joined = None;
+            book.pulled = 0.0;
+            return;
+        }
+    };
+    // a peel under way is the top leaf only: the hands that pulled it loose hold the rest
+    if book.turn.as_ref().is_some_and(|t| t.peel.is_some()) {
+        book.leaf.others.clear();
+        return;
+    }
+    let n = book.leaf.points.len();
+    let mut others: Vec<(usize, Vec3)> = book
+        .ghosts
+        .iter()
+        .enumerate()
+        .filter(|(seat, _)| holder != Some(*seat as u8))
+        .filter_map(|(_, g)| g.as_ref().and_then(|g| g.join.filter(|p| *p < n).map(|p| (p, g.at + g.speed * g.quiet.min(2.0 / HAND_RATE)))))
+        .collect();
+    if holder.is_some() {
+        others.extend(book.joined.filter(|(p, _)| *p < n));
+    }
+    // carried smoothly between tellings, as the turning hand is
+    let k = (dt * 20.0).min(1.0);
+    for (p, to) in &mut others {
+        if let Some((_, was)) = book.leaf.others.iter().find(|(q, _)| q == p) {
+            *to = was.lerp(*to, k);
+        }
+    }
+    book.leaf.others = others;
+    book.leaf.tear_at = None;
+    // a glued pair turned as one: hands pulling it apart, slowly, work the leaves loose
+    let Some((held, hand)) = book.leaf.grab else { return };
+    let glued = book.turn.as_ref().and_then(|t| t.from.secret.as_ref().map(|s| s.0)).filter(|act| !book.opened.contains(act) && !book.loose.contains(act));
+    let Some(act) = glued else { return };
+    if book.leaf.others.is_empty() {
+        book.pulled = (book.pulled - dt / TUG_TIME).max(0.0);
+        return;
+    }
+    let stretch = book.leaf.others.iter().map(|(p, at)| at.distance(hand) - book.leaf.rest_between(held, *p)).fold(f32::MIN, f32::max);
+    // pulled too far or too hard, the pair tears where it is weakest; short of that it holds
+    // whole while the hands work at it (on the holder's machine the tear is decided and told)
+    let overdone = stretch > OVERPULL || book.leaf.hand_speed() > PULL_JERK;
+    book.leaf.tear_at = Some(if overdone { 0.02 } else { f32::MAX });
+    if overdone {
+        book.pulled = 0.0;
+        return;
+    }
+    if stretch > PULL_APART {
+        book.pulled += dt / TUG_TIME;
+    } else {
+        book.pulled = (book.pulled - dt / TUG_TIME).max(0.0);
+    }
+    if book.pulled >= 1.0 {
+        book.pulled = 0.0;
+        book.loose.push(act);
+        book.helped = true;
+        // the turning hand now lifts the top leaf off the secret; the others let go of it
+        let hand_kind = match holder {
+            None => Hand::Reader,
+            Some(seat) => Hand::Remote(seat),
+        };
+        book.turn = None;
+        book.joined = None;
+        book.leaf.others.clear();
+        if book.take_up(hand_kind) {
+            let point = book.leaf.nearest_border(hand);
+            book.leaf.grab = Some((point, hand));
+            book.easing = EASE;
+        }
+    }
+}
+
 /// The other readers' hands: one that takes hold of the page turns the leaf here as there, and
 /// each is shown as a wisp in its hero's colour where it hovers.
 fn follow_ghosts(
@@ -1792,6 +1930,22 @@ fn follow_ghosts(
         }
     }
     // and carries it, smoothly between the few times a second their machine tells of it
+    if let Some(Turning { hand: Hand::Remote(seat), peel: None, .. }) = book.turn.as_ref() {
+        // their hands pulled the glued pair apart there: the top leaf comes off here too
+        let seat8 = *seat;
+        let peeled_there = book.ghosts[*seat as usize].as_ref().filter(|g| g.peeling).and_then(|g| g.hold.map(|p| (p, g.at)));
+        if let (Some((point, at)), Some(act)) = (peeled_there, book.turn.as_ref().and_then(|t| t.from.secret.as_ref().map(|s| s.0)).filter(|a| !book.opened.contains(a))) {
+            if !book.loose.contains(&act) {
+                book.loose.push(act);
+            }
+            book.turn = None;
+            book.joined = None;
+            book.leaf.others.clear();
+            if book.take_up(Hand::Remote(seat8)) && point < book.leaf.points.len() {
+                book.leaf.grab = Some((point, at));
+            }
+        }
+    }
     if let Some(Turning { hand: Hand::Remote(seat), .. }) = book.turn.as_ref() {
         let seat = *seat as usize;
         match book.ghosts[seat].as_ref().and_then(|g| g.hold.map(|p| (p, g.at + g.speed * g.quiet.min(2.0 / HAND_RATE)))) {
@@ -1807,6 +1961,7 @@ fn follow_ghosts(
             }
         }
     }
+    lay_on_hands(book, dt);
     let Ok(cam) = camera.single() else { return };
     for (wisp, mut tf, mut vis, material) in &mut wisps {
         let ghost = book.ghosts[wisp.0 as usize].as_ref();
@@ -2428,6 +2583,63 @@ mod tests {
 
     fn corner() -> usize {
         leaf::at(leaf::NX - 1, leaf::NZ - 1)
+    }
+
+    /// This reader holds a glued pair by its head corner, another by its foot corner, the two
+    /// hands `stretch` further apart than the page is tall, for `secs` seconds.
+    fn pull_glued_pair(stretch: f32, secs: f32) -> Book {
+        let mut b = book_at(spread(2, Some((1, secret(4)))));
+        b.next = Some(spread(6, None));
+        b.shared = true;
+        assert!(b.take_up(Hand::Reader));
+        let head = leaf::at(leaf::NX - 1, 0);
+        let foot = corner();
+        let (x, y) = (GUTTER + PAGE_W * 0.7, LEAF_FLOOR.right + 0.35);
+        let half = (PAGE_H + stretch) / 2.0;
+        let dt = 1.0 / 60.0;
+        for _ in 0..(secs / dt) as usize {
+            if b.turn.as_ref().is_some_and(|t| t.peel.is_some()) {
+                break;
+            }
+            b.leaf.grab = Some((head, Vec3::new(x, y, -half)));
+            b.remote_hand(1, Color::WHITE, [x, y, half], Some(foot as u16 | JOIN_BIT));
+            lay_on_hands(&mut b, dt);
+            b.leaf.step(dt);
+        }
+        b
+    }
+
+    #[test]
+    fn hands_pulling_a_glued_pair_apart_slowly_peel_it() {
+        let b = pull_glued_pair(0.08, 3.0);
+        assert!(b.loose.contains(&1), "worked loose");
+        assert_eq!(b.turn.as_ref().and_then(|t| t.peel), Some(1), "the top leaf comes off the secret");
+    }
+
+    #[test]
+    fn hands_pulling_a_glued_pair_too_hard_tear_it() {
+        let b = pull_glued_pair(0.3, 1.0);
+        assert!(b.leaf.torn(), "pulled past bearing, the paper gives");
+        assert!(!b.loose.contains(&1), "and the secret is not opened by force");
+    }
+
+    #[test]
+    fn hands_holding_a_glued_pair_without_pulling_neither_peel_nor_tear_it() {
+        let b = pull_glued_pair(0.0, 3.0);
+        assert!(!b.loose.contains(&1) && !b.leaf.torn());
+    }
+
+    #[test]
+    fn four_hands_may_hold_one_leaf() {
+        let mut b = book_at(spread(2, None));
+        b.next = Some(spread(4, None));
+        b.shared = true;
+        assert!(b.take_up(Hand::Reader));
+        for seat in 1..4u8 {
+            b.remote_hand(seat, Color::WHITE, [0.5, 0.3, 0.1 * seat as f32], Some(leaf::at(seat as usize, 3) as u16 | JOIN_BIT));
+        }
+        lay_on_hands(&mut b, 1.0 / 60.0);
+        assert_eq!(b.leaf.others.len(), 3);
     }
 
     #[test]

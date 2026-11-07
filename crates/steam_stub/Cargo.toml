@@ -1,0 +1,5 @@
+[package]
+name = "steam-stub"
+description = "The few Steamworks types the game names, for systems Steam does not run on (Android, iOS). Steam never starts there, so nothing here is ever called past `Client::init_app`."
+edition.workspace = true
+version.workspace = true

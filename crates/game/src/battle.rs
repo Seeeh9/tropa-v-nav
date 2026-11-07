@@ -2339,7 +2339,11 @@ fn cue_effects(
             }
             Event::Maimed { player, arm, .. } => {
                 let unit = UnitRef::Hero(*player);
-                severed.0.push((unit, if *arm == nav_core::combat::SHIELD_ARM { rig::Part::Shield } else { rig::Part::Arm }));
+                // Yemelya's "shield" part is the stove's chimney: his other arm has no part to fly
+                let def = session.shown.hero(*player).map(|h| h.def.as_str()).unwrap_or_default();
+                if *arm != nav_core::combat::SHIELD_ARM || rig::shield_is_arm(def) {
+                    severed.0.push((unit, if *arm == nav_core::combat::SHIELD_ARM { rig::Part::Shield } else { rig::Part::Arm }));
+                }
                 float(&mut commands, unit, l10n.t("battle-maimed"), comfort.blood(), 40.0, 60.0);
             }
             Event::Beheaded { player } => {

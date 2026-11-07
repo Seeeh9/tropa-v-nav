@@ -931,14 +931,18 @@ struct PageCanvas(Face);
 
 /// The stage's `UiScale` fits the UI to the window, and it reaches UI drawn into textures too; the
 /// pages undo it so one page pixel stays one texture pixel at any window size.
-fn fit_pages(scale: Res<UiScale>, mut targets: Query<&mut RenderTarget, With<PageCamera>>) {
+fn fit_pages(scale: Res<UiScale>, mut targets: Query<(&mut RenderTarget, &mut Projection), With<PageCamera>>) {
     let want = 1.0 / scale.0;
-    for mut target in &mut targets {
+    for (mut target, mut projection) in &mut targets {
         let stale = matches!(target.as_ref(), RenderTarget::Image(image) if (image.scale_factor - want).abs() > 1e-4);
         if stale {
             if let RenderTarget::Image(image) = target.as_mut() {
                 image.scale_factor = want;
             }
+            // Bevy reads a camera's target again only when its projection changes, not the target
+            // itself: a window resized in the middle of a tale (made full screen) left the pages
+            // drawn at the old scale, stretched
+            projection.set_changed();
         }
     }
 }

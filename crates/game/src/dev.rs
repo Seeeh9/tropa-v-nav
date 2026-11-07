@@ -20,6 +20,7 @@
 //!                               `s <lines>` (turn the wheel, positive up the page), `r` (right click),
 //!                               `rd` / `ru` (the right button down / up)
 //!   TROPA_WINDOW=<w>x<h>        the hidden screenshot window takes this size
+//!   TROPA_RESIZE=<s>:<w>x<h>    that many seconds in, the window is made that size, as a player maximising it
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 //!   TROPA_SHOT_COUNT=<n>        instead a series of n frames, TROPA_SHOT_EVERY seconds apart (default 0.1), as <file>_<i>.png
 //!   TROPA_STORY=<scene>         open a story scene in the book at once (see story.rs), TROPA_STORY_PAGE=<n> on its n-th page
@@ -31,7 +32,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(OnEnter(AppState::Menu), open_screen).add_systems(Update, shot).add_systems(First, robot);
+    app.add_systems(OnEnter(AppState::Menu), open_screen).add_systems(Update, (shot, resize_later)).add_systems(First, robot);
 }
 
 fn env<T: std::str::FromStr>(name: &str) -> Option<T> {
@@ -274,5 +275,24 @@ fn robot(
         *index += 1;
         *elapsed = 0.0;
         *from = *pos;
+    }
+}
+
+/// `TROPA_RESIZE=<seconds>:<w>x<h>`: the window changes size once, as when a player maximises it.
+fn resize_later(time: Res<Time>, mut windows: Query<&mut Window>, mut done: Local<bool>) {
+    if *done {
+        return;
+    }
+    let Ok(spec) = std::env::var("TROPA_RESIZE") else { return };
+    let Some((at, size)) = spec.split_once(':') else { return };
+    let (Ok(at), Some((w, h))) = (at.parse::<f32>(), size.split_once('x')) else { return };
+    if time.elapsed_secs() < at {
+        return;
+    }
+    *done = true;
+    if let (Ok(w), Ok(h)) = (w.parse::<f32>(), h.parse::<f32>()) {
+        for mut window in &mut windows {
+            window.resolution.set(w, h);
+        }
     }
 }

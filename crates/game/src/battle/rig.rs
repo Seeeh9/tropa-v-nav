@@ -133,6 +133,12 @@ const FIGURES: &[(&str, &[Cut])] = &[
 ];
 
 /// The parts `stem` is cut into, with their joints.
+/// Whether a hero's "shield" part is an arm, to fly off and stay hidden once that arm is lost.
+/// Yemelya's is the chimney of his stove.
+pub(crate) fn shield_is_arm(hero: &str) -> bool {
+    hero != "emelya"
+}
+
 pub(super) fn cuts_of(stem: &str) -> &'static [Cut] {
     FIGURES.iter().find(|(s, _)| *s == stem).map(|(_, c)| *c).unwrap_or(&[])
 }

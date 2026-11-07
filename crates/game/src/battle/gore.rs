@@ -243,7 +243,8 @@ fn fly_severed(
 fn hide_lost_limbs(session: Res<Session>, sprites: Query<(&UnitSprite, &Children)>, mut skins: Query<(&rig::RigSkin, &mut Visibility)>) {
     for (sprite, children) in &sprites {
         let UnitRef::Hero(i) = sprite.unit else { continue };
-        let arms = session.shown.hero(i).map_or(0, |h| h.lost_arms);
+        // a "shield" that is no arm (Yemelya's chimney) stays where it is
+        let arms = session.shown.hero(i).map_or(0, |h| if rig::shield_is_arm(&h.def) { h.lost_arms } else { h.lost_arms & !nav_core::combat::SHIELD_ARM });
         let no_head = session.shown.hero(i).is_some_and(|h| h.walks_headless);
         if arms == 0 && !no_head {
             continue;

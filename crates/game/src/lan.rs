@@ -42,7 +42,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, (answered.run_if(resource_exists::<Dial>), hang_up.run_if(resource_exists::<Lan>), redial.run_if(resource_exists::<Lan>)))
         .add_systems(PostUpdate, transmit.run_if(resource_exists::<Lan>).before(crate::net::send));
     #[cfg(feature = "dev")]
-    app.add_systems(OnEnter(AppState::Menu), open).add_systems(Update, (auto_lobby, open_on_fight).chain().run_if(resource_exists::<Lan>));
+    app.add_systems(OnEnter(AppState::Menu), open).add_systems(Update, (auto_lobby, open_on_fight, drop_line).chain().run_if(resource_exists::<Lan>));
 }
 
 /// A knock at a host's door, waited for off to the side so the game does not freeze on it.
@@ -455,4 +455,18 @@ fn redial(mut lan: ResMut<Lan>, net: Option<ResMut<Net>>, mut status: ResMut<Net
         let _ = tx.send(reached);
     });
     lan.redial = Some(Mutex::new(rx));
+}
+
+/// Dev: `TROPA_LAN_DROP=<seconds>` cuts a guest's line to the host once, that long after start,
+/// as a dropped connection would, to watch the guest find its way back.
+#[cfg(feature = "dev")]
+fn drop_line(mut lan: ResMut<Lan>, time: Res<Time>, mut done: Local<bool>) {
+    let Some(at) = std::env::var("TROPA_LAN_DROP").ok().and_then(|v| v.parse::<f32>().ok()) else { return };
+    if *done || lan.listener.is_some() || time.elapsed_secs() < at {
+        return;
+    }
+    *done = true;
+    warn!("LAN (dev): cutting the line to the host");
+    // dropped without a word, as a dead network leaves it: the host sees the link close
+    lan.links.clear();
 }

@@ -1047,10 +1047,6 @@ fn swap_form_art(
                 (format!("enemies/{}", e.def), false)
             }
         };
-        // on the Edge a hero is drawn down on one knee, wounded, when that picture exists
-        if whole && downed && art.image(&assets, &format!("{want}_downed")).is_some() {
-            want = format!("{want}_downed");
-        }
         // through the heart of a lunge the unit is drawn mid-blow, through a skill or power
         // calling on it, and as a blow lands reeling from it, when those pictures exist
         let pose = match s.anim {
@@ -1068,6 +1064,11 @@ fn swap_form_art(
                 want = format!("{want}{mark}");
                 painted = true;
             }
+        }
+        // on the Edge a hero is drawn down on one knee, wounded, when that picture exists: the
+        // maimed too, in a picture of their own short of what they lost
+        if downed && painted && art.image(&assets, &format!("{want}_downed")).is_some() {
+            want = format!("{want}_downed");
         }
         if let Some(pose) = pose.filter(|_| !downed && painted) {
             if art.image(&assets, &format!("{want}{pose}")).is_some() {

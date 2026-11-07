@@ -19,7 +19,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(AppState::Coop), enter_coop)
         .add_systems(Update, (type_code, coop_labels).run_if(in_state(AppState::Coop)))
         .add_systems(OnEnter(AppState::Lobby), |mut status: ResMut<NetStatus>| status.dirty = true)
-        .add_systems(Update, draw_lobby.run_if(in_state(AppState::Lobby)));
+        .add_systems(Update, (draw_lobby, copy_code).run_if(in_state(AppState::Lobby)));
 }
 
 /// The most that can be typed: a Steam code is six letters, an address with its port more.
@@ -161,9 +161,81 @@ fn enter_coop(
     });
 }
 
-fn type_code(mut keys: MessageReader<KeyboardInput>, mut entry: ResMut<CodeEntry>) {
+/// What a code or an address may hold.
+fn typable(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-')
+}
+
+/// The character a key stands for on the US layout, so a code or an address can be typed with
+/// any keyboard layout on (a Russian one gives Cyrillic letters, which no code holds).
+fn latin(code: KeyCode, shift: bool) -> Option<char> {
+    use KeyCode::*;
+    let letters = [KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ];
+    if let Some(i) = letters.iter().position(|k| *k == code) {
+        return Some((b'A' + i as u8) as char);
+    }
+    let digits = [Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7, Digit8, Digit9];
+    let pad = [Numpad0, Numpad1, Numpad2, Numpad3, Numpad4, Numpad5, Numpad6, Numpad7, Numpad8, Numpad9];
+    if let Some(i) = digits.iter().position(|k| *k == code).or_else(|| pad.iter().position(|k| *k == code)) {
+        return Some((b'0' + i as u8) as char);
+    }
+    match code {
+        Period | NumpadDecimal => Some('.'),
+        Semicolon if shift => Some(':'),
+        Minus | NumpadSubtract => Some('-'),
+        _ => None,
+    }
+}
+
+/// The system clipboard, through the shell: Bevy here is built without its own.
+fn clipboard_get() -> Option<String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("powershell").args(["-NoProfile", "-Command", "Get-Clipboard"]).creation_flags(0x0800_0000).output().ok()?;
+        return Some(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn clipboard_set(text: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &format!("Set-Clipboard -Value '{}'", text.replace('\'', ""))]).creation_flags(0x0800_0000).spawn();
+    }
+}
+
+/// Ctrl+C in the lobby copies the party's code, or the first address friends can reach.
+fn copy_code(held: Res<ButtonInput<KeyCode>>, net: Option<Res<Net>>) {
+    let ctrl = held.pressed(KeyCode::ControlLeft) || held.pressed(KeyCode::ControlRight);
+    if let (true, true, Some(net)) = (ctrl, held.just_pressed(KeyCode::KeyC), net) {
+        if !net.code.is_empty() && net.code != "LAN" {
+            clipboard_set(net.code.split("  /  ").next().unwrap_or_default());
+        }
+    }
+}
+
+fn type_code(mut keys: MessageReader<KeyboardInput>, held: Res<ButtonInput<KeyCode>>, mut entry: ResMut<CodeEntry>) {
+    let ctrl = held.pressed(KeyCode::ControlLeft) || held.pressed(KeyCode::ControlRight);
+    let shift = held.pressed(KeyCode::ShiftLeft) || held.pressed(KeyCode::ShiftRight);
     for k in keys.read() {
         if !k.state.is_pressed() {
+            continue;
+        }
+        // Ctrl+V pastes a code or an address copied from a chat; Ctrl+C copies what is typed
+        if ctrl && k.key_code == KeyCode::KeyV {
+            if let Some(text) = clipboard_get() {
+                entry.0 = text.chars().filter(|c| typable(*c)).map(|c| c.to_ascii_uppercase()).take(MOST_TYPED).collect();
+            }
+            continue;
+        }
+        if ctrl && k.key_code == KeyCode::KeyC {
+            clipboard_set(&entry.0);
+            continue;
+        }
+        if ctrl {
             continue;
         }
         match &k.logical_key {
@@ -171,7 +243,9 @@ fn type_code(mut keys: MessageReader<KeyboardInput>, mut entry: ResMut<CodeEntry
                 entry.0.pop();
             }
             Key::Character(s) => {
-                for ch in s.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-')) {
+                // a letter of another layout is the key's Latin letter
+                let typed: Vec<char> = if s.chars().all(typable) { s.chars().collect() } else { latin(k.key_code, shift).into_iter().collect() };
+                for ch in typed {
                     if entry.0.len() < MOST_TYPED {
                         entry.0.push(ch.to_ascii_uppercase());
                     }
@@ -185,7 +259,8 @@ fn type_code(mut keys: MessageReader<KeyboardInput>, mut entry: ResMut<CodeEntry
 fn coop_labels(entry: Res<CodeEntry>, status: Res<NetStatus>, l10n: Res<L10n>, mut labels: Query<(&CoopLabel, &mut Text)>) {
     for (label, mut text) in &mut labels {
         let s = match label {
-            // six slots, the untyped ones shown as dots
+            // a code is six slots, the untyped ones shown as dots; an address is shown as typed
+            CoopLabel::Code if entry.0.len() > 6 || entry.0.contains(['.', ':']) => entry.0.clone(),
             CoopLabel::Code => (0..6).map(|i| entry.0.chars().nth(i).unwrap_or('·').to_string()).collect::<Vec<_>>().join(" "),
             CoopLabel::Status => match (&status.error, status.busy) {
                 (Some(key), _) => l10n.t(key),
@@ -287,6 +362,18 @@ fn draw_lobby(
             p.spawn(theme::text(l10n.tf("lobby-code", &[("code", net.code.clone().into())]), &fonts.num, 34.0, theme::CANDLE));
         }
     });
+    // the code, or the first address friends can reach, goes to the clipboard for a chat
+    if !net.code.is_empty() && net.code != "LAN" {
+        let code = net.code.split("  /  ").next().unwrap_or_default().to_string();
+        commands.spawn((
+            Node { position_type: PositionType::Absolute, right: px(40), top: px(30), ..default() },
+            ChildOf(root),
+            children![(
+                menu_button(l10n.t("lobby-copy-code"), &fonts),
+                observe(move |_: On<Activate>| clipboard_set(&code)),
+            )],
+        ));
+    }
 
     // where friends can reach a party over the local network: under the seats, in plain sight
     if net.lobby.is_none() && net.code != "LAN" && !net.code.is_empty() {

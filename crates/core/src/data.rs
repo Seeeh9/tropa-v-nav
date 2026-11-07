@@ -55,6 +55,9 @@ data_enum!(StatusKind {
     Stun,
     Mist,
     Chained,
+    // the gathering dark of a fight drawn out too long: less block and healing, and HP lost
+    // at each turn's end; laid on the heroes by the fight itself, never cleansed
+    Gloom,
 });
 
 impl StatusKind {

@@ -395,7 +395,12 @@ fn draw_lobby(
 
 {next}", l10n.t("lobby-level-help")))]),
                     ));
-                    p.spawn(theme::text(l10n.t(&format!("hero-{hero}-desc")), &fonts.body, 22.0, theme::BONE));
+                    // what the hero's own mechanic does, told on hover: nothing else says it before a fight
+                    p.spawn((
+                        theme::text(format!("{} ⓘ", l10n.t(&format!("hero-{hero}-desc"))), &fonts.body, 22.0, theme::BONE),
+                        bevy::picking::hover::Hovered::default(),
+                        crate::run_ui::CardHints::new(vec![(l10n.t(&format!("mech-{:?}-name", def.mechanic)), l10n.t(&format!("mech-{:?}", def.mechanic)))]),
+                    ));
                     p.spawn((theme::text(l10n.t("lobby-relic"), &fonts.body, 18.0, theme::DIM), Node { margin: UiRect::top(px(6)), ..default() }));
                     // the shrine lets a hero start with another relic: each choice is a button
                     let shrine = profile.building("shrine").min(2) as usize;

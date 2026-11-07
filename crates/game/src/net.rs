@@ -646,6 +646,7 @@ fn follow_stage(
     mut next: ResMut<NextState<AppState>>,
     time: Res<Time>,
     lot: Option<Res<crate::map_party::MapLot>>,
+    omen_lot: Option<Res<crate::run_ui::OmenLot>>,
     status: Res<NetStatus>,
     mut linger: Local<f32>,
 ) {
@@ -668,6 +669,10 @@ fn follow_stage(
     // (or about to be: the map screen has not yet taken up the lot heard of this frame)
     let drawn = status.map.iter().any(|e| matches!(e, RunEvent::Lot { tied, .. } if !tied.is_empty()));
     if now == AppState::Map && (lot.is_some() || drawn) {
+        return;
+    }
+    // so is one drawn over an omen's tied options, on the omen's own window
+    if now == AppState::Omen && (omen_lot.is_some() || drawn) {
         return;
     }
     if now == AppState::Battle {

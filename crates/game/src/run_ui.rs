@@ -30,7 +30,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, draw_reward.run_if(in_state(AppState::Reward)))
         .add_systems(Update, draw_rest.run_if(in_state(AppState::Rest)))
         .add_systems(Update, draw_shop.run_if(in_state(AppState::Shop)))
-        .add_systems(Update, (draw_omen, draw_trophy).run_if(in_state(AppState::Omen)))
+        .add_systems(Update, (draw_omen, draw_trophy, preview_omen_cards, draw_omen_lot).chain().run_if(in_state(AppState::Omen)))
         .add_systems(Update, draw_end.run_if(in_state(AppState::RunEnd)))
         .add_systems(Update, explain_cards)
         .init_resource::<Banked>()
@@ -1131,6 +1131,12 @@ fn draw_omen(
             ChildOf(column),
         ));
         b.observe(move |_: On<Activate>, mut out: ResMut<RunOutbox>| out.0.push(RunAction::Choose(i as u8)));
+        b.insert(OmenOption(i as u8));
+        // the very cards an option gives or presses on the deck show on hover
+        let cards: Vec<Id> = o.fx.iter().chain(o.all.iter()).filter_map(|f| if let RunFx::Card(id) = f { Some(id.clone()) } else { None }).collect();
+        if !cards.is_empty() {
+            b.insert(OmenCards(cards));
+        }
         b.with_children(|b| {
             b.spawn((Node { flex_direction: FlexDirection::Column, row_gap: px(4), flex_grow: 1.0, ..default() }, Pickable::IGNORE)).with_children(|t| {
                 t.spawn(theme::text(l10n.t(&format!("omen-{id}-{}", o.id)), &fonts.body, 24.0, ink(theme::BONE)));
@@ -1162,6 +1168,111 @@ fn draw_omen(
                 }
             }
         });
+    }
+}
+
+/// Which of an omen's options a button is, for the lot run over them.
+#[derive(Component)]
+struct OmenOption(u8);
+
+/// A lot drawn between an omen's tied options, played out on the omen's own window: the light
+/// runs over the tied options, slowing, and stops on the one chosen; only then does the party
+/// go on to the map.
+#[derive(Resource)]
+pub struct OmenLot {
+    tickets: Vec<u8>,
+    stops: Vec<usize>,
+    step: usize,
+    wait: f32,
+    after: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_omen_lot(
+    mut commands: Commands,
+    mut status: ResMut<NetStatus>,
+    lot: Option<ResMut<OmenLot>>,
+    time: Res<Time>,
+    mut options: Query<(Entity, &OmenOption)>,
+    sfx: Res<crate::audio::Sfx>,
+    mixer: Res<crate::audio::Mixer>,
+) {
+    // votes are seen on the omen's buttons; a lot heard here is played here, not on the map after
+    for ev in std::mem::take(&mut status.map) {
+        if let RunEvent::Lot { tied, chosen } = ev {
+            if tied.len() > 1 {
+                let n = tied.len();
+                let last = tied.iter().rposition(|t| *t == chosen).unwrap_or(0);
+                let stops: Vec<usize> = (0..n * 3 + last + 1).map(|k| k % n).collect();
+                commands.insert_resource(OmenLot { tickets: tied, stops, step: 0, wait: 0.3, after: 1.4 });
+            }
+        }
+    }
+    let Some(mut lot) = lot else { return };
+    let dt = time.delta_secs();
+    if lot.step >= lot.stops.len() {
+        lot.after -= dt;
+        if lot.after <= 0.0 {
+            commands.remove_resource::<OmenLot>();
+        }
+        return;
+    }
+    lot.wait -= dt;
+    if lot.wait > 0.0 {
+        return;
+    }
+    let on = lot.tickets[lot.stops[lot.step]];
+    for (e, o) in &mut options {
+        if o.0 == on {
+            commands.entity(e).insert(Outline::new(px(6), px(2), theme::CANDLE));
+        } else {
+            commands.entity(e).remove::<Outline>();
+        }
+    }
+    lot.step += 1;
+    let left = lot.stops.len() - lot.step;
+    sfx.play(&mut commands, if left == 0 { "lot_land" } else { "lot_tick" }, &mixer, 1.0);
+    lot.wait = 0.07 + 0.5 / (left as f32 + 1.0).powf(1.2);
+}
+
+/// The cards an omen's option would give or press on the deck, named in its line.
+#[derive(Component)]
+struct OmenCards(Vec<Id>);
+
+/// A card shown beside the omen while its option is hovered.
+#[derive(Component)]
+struct OmenPreview;
+
+/// While an option naming cards is hovered, those cards stand whole beside the omen's text, so a
+/// curse is read before it is taken.
+#[allow(clippy::too_many_arguments)]
+fn preview_omen_cards(
+    mut commands: Commands,
+    options: Query<(&OmenCards, &Hovered)>,
+    shown: Query<Entity, With<OmenPreview>>,
+    root: Query<Entity, With<ScreenRoot>>,
+    mut last: Local<Vec<Id>>,
+    db: Res<Db>,
+    l10n: Res<L10n>,
+    fonts: Res<Fonts>,
+    art: Res<Art>,
+    assets: Res<AssetServer>,
+) {
+    let want: Vec<Id> = options.iter().find(|(_, h)| h.get()).map(|(c, _)| c.0.clone()).unwrap_or_default();
+    // a screen drawn anew has lost its previews with it
+    if want == *last && (want.is_empty() || !shown.is_empty()) {
+        return;
+    }
+    *last = want.clone();
+    for e in &shown {
+        commands.entity(e).despawn();
+    }
+    let Ok(root) = root.single() else { return };
+    let n = want.len() as f32;
+    for (k, id) in want.iter().enumerate() {
+        let card = Card { uid: 0, def: id.clone(), upgraded: false, free: false };
+        let at = Vec2::new(470.0 - n * (crate::battle::CARD_W + 20.0) / 2.0 + k as f32 * (crate::battle::CARD_W + 20.0), 380.0);
+        crate::battle::spawn_card(&mut commands, root, &card, Form::Human, Some(at), false, (OmenPreview, GlobalZIndex(30), Pickable::IGNORE), &db.0, &l10n, &fonts, &art, &assets);
     }
 }
 

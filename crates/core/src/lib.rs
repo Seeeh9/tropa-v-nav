@@ -9,7 +9,7 @@ pub mod rng;
 pub mod run;
 pub mod state;
 
-pub use combat::{apply, reduce, start, start_with};
+pub use combat::{apply, reduce, start, start_with, STALL_ROUND};
 pub use data::*;
 pub use rng::Rng;
 pub use run::*;

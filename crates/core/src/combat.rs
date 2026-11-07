@@ -33,6 +33,12 @@ const MOST_LIMBS: u8 = 2;
 /// A killing blow with this much (percent of whole health) still to spend takes the head.
 const BEHEAD_PAST: i32 = 40;
 
+/// Rounds a fight may run before the dark gathers on the heroes (see `StatusKind::Gloom`).
+pub const STALL_ROUND: u32 = 8;
+/// Percent of block and healing each stack of the dark takes away, and the most it can.
+const GLOOM_PCT: i32 = 10;
+const GLOOM_MAX: i32 = 60;
+
 /// Whether a card held by `slot` would meet the condition of a bonus it carries, played now: what
 /// the hand lights up. A condition on the target counts when some unit it may land on meets it; one
 /// that only the playing can tell (a killing blow) never lights.
@@ -359,6 +365,7 @@ impl<'a> Exec<'a> {
     }
 
     pub(crate) fn gain_block(&mut self, u: UnitRef, n: i32) {
+        let n = self.gloomed(u, n);
         if n <= 0 || !self.exists(u) {
             return;
         }
@@ -376,7 +383,18 @@ impl<'a> Exec<'a> {
         self.ev.push(Event::Block { unit: u, amount: n, total });
     }
 
+    /// What the gathering dark leaves of block or healing a hero is given: a tenth less for each
+    /// of its stacks, at most three fifths less.
+    fn gloomed(&self, u: UnitRef, n: i32) -> i32 {
+        let g = self.s.status(u, S::Gloom);
+        if g <= 0 || n <= 0 {
+            return n;
+        }
+        n * (100 - (g * GLOOM_PCT).min(GLOOM_MAX)) / 100
+    }
+
     pub(crate) fn heal(&mut self, u: UnitRef, n: i32) {
+        let n = self.gloomed(u, n);
         if n <= 0 || !self.exists(u) {
             return;
         }
@@ -1021,6 +1039,11 @@ impl<'a> Exec<'a> {
 
     fn shift(&mut self, p: u8) {
         if self.s.status(UnitRef::Hero(p), S::Chained) > 0 {
+            return;
+        }
+        // only a werewolf has a beast to turn into: a copy of its card played by another (the
+        // Skomoroh's echo) turned them into a "beast" with no pictures and no block of their own
+        if self.s.heroes[p as usize].mechanic != Mechanic::Moon {
             return;
         }
         let h = self.hero(p);
@@ -1724,6 +1747,12 @@ impl<'a> Exec<'a> {
         self.s.round += 1;
         self.s.log.clear();
         self.ev.push(Event::RoundStart(self.s.round));
+        // a fight that drags on draws the dark in: each round past the mark it thickens on the heroes
+        if self.s.round > STALL_ROUND {
+            for slot in self.standing() {
+                self.add_status(UnitRef::Hero(slot), S::Gloom, 1);
+            }
+        }
 
         let standing = self.standing();
         for idx in 0..self.s.enemies.len() {
@@ -1827,6 +1856,11 @@ impl<'a> Exec<'a> {
             }
             // a pick left unmade when the round closes is let go
             self.hero(slot).choosing = None;
+            // the gathering dark takes its toll, through any block
+            let gloom = self.s.status(UnitRef::Hero(slot), S::Gloom);
+            if gloom > 0 {
+                self.lose_hp(UnitRef::Hero(slot), gloom);
+            }
             let hand = std::mem::take(&mut self.hero(slot).hand);
             let mut keep = Vec::new();
             for card in hand {

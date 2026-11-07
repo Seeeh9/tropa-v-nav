@@ -1429,3 +1429,32 @@ fn a_discard_of_more_than_the_hand_takes_it_all_without_asking() {
     assert!(s.heroes[0].choosing.is_none());
     assert!(s.heroes[0].hand.is_empty());
 }
+
+
+#[test]
+fn a_fight_drawn_out_gathers_the_dark_on_the_heroes() {
+    let (c, mut s) = solo(&["t_block", "t_block", "t_block", "t_block", "t_block"], &["dummy"]);
+    for _ in 0..STALL_ROUND {
+        end_round(&c, &mut s);
+    }
+    let me = UnitRef::Hero(0);
+    assert_eq!(s.status(me, StatusKind::Gloom), 1, "round {}", s.round);
+    let hp = s.heroes[0].hp;
+    end_round(&c, &mut s);
+    assert_eq!(s.status(me, StatusKind::Gloom), 2);
+    assert!(s.heroes[0].hp < hp, "the dark takes its toll");
+    // two stacks: block is a fifth less
+    play(&c, &mut s, 0, "t_block", None);
+    assert_eq!(s.heroes[0].block, 4);
+}
+
+
+#[test]
+fn only_a_werewolf_turns_into_the_beast() {
+    let c = content();
+    let (mut s, _) = start(&c, &[hero("t_plain", &["t_shift", "t_block"])], &ids(&["dummy"]), 7);
+    play(&c, &mut s, 0, "t_shift", None);
+    assert_eq!(s.heroes[0].form, Form::Human, "an echo of the wolf's card changes no one else");
+    play(&c, &mut s, 0, "t_block", None);
+    assert_eq!(s.heroes[0].block, 5);
+}

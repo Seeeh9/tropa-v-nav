@@ -72,7 +72,7 @@ pub(super) fn chips(l10n: &L10n, session: &Session, unit: UnitRef) -> Vec<Chip> 
             }
             if h.mechanic == Mechanic::Moon {
                 let form = l10n.t(&format!("form-{:?}", h.form));
-                out.push(Chip { icon: format!("status/moon_{:?}", h.form), n: Some(real.moon as i32), shown: None, good: None, name: format!("{form} · {}", l10n.t("res-moon")), help: format!("{}/5", real.moon) });
+                out.push(Chip { icon: format!("status/moon_{:?}", h.form), n: Some(real.moon as i32), shown: None, good: None, name: format!("{form} · {}", l10n.t("res-moon")), help: format!("{}/5. {}", real.moon, l10n.t("mech-Moon")) });
             }
             if let Some(m) = h.mask {
                 let key = format!("mask-{m:?}");

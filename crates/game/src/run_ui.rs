@@ -43,11 +43,18 @@ pub fn plugin(app: &mut App) {
 pub struct CardHints {
     pub lines: Vec<(String, String)>,
     pub open: Option<Entity>,
+    /// The panel opens under the thing hovered, not beside it: for wide lines of text, whose
+    /// right side is near the screen's edge.
+    pub below: bool,
 }
 
 impl CardHints {
     pub fn new(lines: Vec<(String, String)>) -> CardHints {
-        CardHints { lines, open: None }
+        CardHints { lines, open: None, below: false }
+    }
+
+    pub fn below(lines: Vec<(String, String)>) -> CardHints {
+        CardHints { lines, open: None, below: true }
     }
 }
 
@@ -62,10 +69,10 @@ fn explain_cards(mut commands: Commands, mut cards: Query<(Entity, &mut CardHint
                     .spawn((
                         theme::panel(Node {
                             position_type: PositionType::Absolute,
-                            left: percent(100),
-                            top: px(0),
-                            margin: UiRect::left(px(14.0 * k)),
-                            width: px(320.0 * k),
+                            left: if hints.below { px(0) } else { percent(100) },
+                            top: if hints.below { percent(100) } else { px(0) },
+                            margin: if hints.below { UiRect::top(px(10.0 * k)) } else { UiRect::left(px(14.0 * k)) },
+                            width: px(if hints.below { 560.0 } else { 320.0 } * k),
                             padding: UiRect::all(px(12.0 * k)),
                             border: UiRect::all(px(2.0 * k)),
                             flex_direction: FlexDirection::Column,

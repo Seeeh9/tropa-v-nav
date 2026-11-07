@@ -409,19 +409,22 @@ fn draw_lobby(
                     let next = if opens > 0 { format!("{next}
 {}", l10n.tf("lobby-level-opens", &[("n", ((level + 1) as i32).into()), ("k", (opens as i32).into())])) } else { next };
                     p.spawn(theme::text(l10n.n("lobby-hp", def.max_hp), &fonts.num, 26.0, theme::CANDLE));
+                    // a text takes no pointer (see `theme::text`): the hover is the box round it
                     p.spawn((
-                        theme::text(format!("{} (?)", l10n.n("lobby-level", level as i32)), &fonts.num, 26.0, theme::CANDLE),
+                        Node::default(),
                         bevy::picking::hover::Hovered::default(),
-                        crate::run_ui::CardHints::new(vec![(l10n.n("lobby-level", level as i32), format!("{}
+                        crate::run_ui::CardHints::below(vec![(l10n.n("lobby-level", level as i32), format!("{}
 
 {next}", l10n.t("lobby-level-help")))]),
-                    ));
+                    ))
+                    .with_child(theme::text(format!("{} (?)", l10n.n("lobby-level", level as i32)), &fonts.num, 26.0, theme::CANDLE));
                     // what the hero's own mechanic does, told on hover: nothing else says it before a fight
                     p.spawn((
-                        theme::text(format!("{} (?)", l10n.t(&format!("hero-{hero}-desc"))), &fonts.body, 22.0, theme::BONE),
+                        Node::default(),
                         bevy::picking::hover::Hovered::default(),
-                        crate::run_ui::CardHints::new(vec![(l10n.t(&format!("mech-{:?}-name", def.mechanic)), l10n.t(&format!("mech-{:?}", def.mechanic)))]),
-                    ));
+                        crate::run_ui::CardHints::below(vec![(l10n.t(&format!("mech-{:?}-name", def.mechanic)), l10n.t(&format!("mech-{:?}", def.mechanic)))]),
+                    ))
+                    .with_child(theme::text(format!("{} (?)", l10n.t(&format!("hero-{hero}-desc"))), &fonts.body, 22.0, theme::BONE));
                     p.spawn((theme::text(l10n.t("lobby-relic"), &fonts.body, 18.0, theme::DIM), Node { margin: UiRect::top(px(6)), ..default() }));
                     // the shrine lets a hero start with another relic: each choice is a button
                     let shrine = profile.building("shrine").min(2) as usize;

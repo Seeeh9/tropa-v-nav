@@ -502,3 +502,9 @@ lobby-level-opens = Уровень { $n } откроет { $k ->
     [few] { $k } новые карты
    *[other] { $k } новых карт
 }.
+
+settings-screen = Экран
+settings-screen-0 = окно
+settings-screen-1 = весь экран без рамки
+settings-screen-2 = полный экран
+settings-window-size = Размер окна

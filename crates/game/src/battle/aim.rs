@@ -14,7 +14,7 @@ use bevy::asset::RenderAssetUsages;
 /// Dots in the arrow's tail.
 const DOTS: usize = 18;
 /// Where a card being aimed waits: in the middle, above the hand.
-pub(super) const AIM_SPOT: Vec2 = Vec2::new((STAGE_W - CARD_W) / 2.0, HAND_TOP - HAND_LIFT - 90.0);
+pub(super) const AIM_SPOT: Vec2 = Vec2::new((STAGE_W - CARD_W) / 2.0, HAND_RISEN - 85.0);
 /// How far a card must be lifted out of the hand before it is aimed, or played if it needs no aim.
 pub(super) const LIFT_TO_AIM: f32 = 130.0;
 /// How far a potion that needs no target must be pulled from the belt to be drunk on release.
@@ -382,7 +382,7 @@ fn raise_hint(
             TextShadow { offset: Vec2::new(2.0, 2.0), color: Color::BLACK },
             Visibility::Hidden,
             GlobalZIndex(40),
-            Pickable::IGNORE,
+            // `theme::text` brings its own Pickable::IGNORE: a second one panics
             DespawnOnExit(AppState::Battle),
             ChildOf(*stage),
         ));

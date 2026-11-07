@@ -204,7 +204,13 @@ fn test_window(window: Window) -> Window {
     if !hidden {
         return window;
     }
+    // TROPA_WINDOW=<w>x<h> shoots at another window size, to see the stage fit it
+    let resolution = std::env::var("TROPA_WINDOW")
+        .ok()
+        .and_then(|v| v.split_once('x').and_then(|(w, h)| Some(WindowResolution::new(w.parse().ok()?, h.parse().ok()?))))
+        .unwrap_or(window.resolution.clone());
     Window {
+        resolution,
         focused: false,
         window_level: bevy::window::WindowLevel::AlwaysOnBottom,
         position: WindowPosition::At(IVec2::new(-6000, -6000)),

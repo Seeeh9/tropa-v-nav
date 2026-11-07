@@ -501,3 +501,9 @@ lobby-level-opens = Level { $n } opens { $k ->
     [one] { $k } new card
    *[other] { $k } new cards
 }.
+
+settings-screen = Screen
+settings-screen-0 = window
+settings-screen-1 = borderless full screen
+settings-screen-2 = full screen
+settings-window-size = Window size

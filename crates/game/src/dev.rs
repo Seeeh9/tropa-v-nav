@@ -18,6 +18,7 @@
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release),
 //!                               `s <lines>` (turn the wheel, positive up the page), `r` (right click)
+//!   TROPA_WINDOW=<w>x<h>        the hidden screenshot window takes this size
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 //!   TROPA_SHOT_COUNT=<n>        instead a series of n frames, TROPA_SHOT_EVERY seconds apart (default 0.1), as <file>_<i>.png
 //!   TROPA_STORY=<scene>         open a story scene in the book at once (see story.rs), TROPA_STORY_PAGE=<n> on its n-th page

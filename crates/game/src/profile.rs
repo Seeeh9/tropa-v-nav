@@ -29,11 +29,18 @@ pub struct Settings {
     /// Language of the text, once the player has chosen one in the game:
     /// 0 not yet (see `main`), 1 old Russian, 2 Russian, 3 English.
     pub text_lang: u8,
+    /// 0 a window, 1 the whole screen without a frame, 2 true full screen.
+    pub screen: u8,
+    /// The window's size, an index into `WINDOW_SIZES`.
+    pub window_size: u8,
 }
+
+/// Sizes a window may take; the stage is drawn at 1920x1080 and fitted into any of them.
+pub const WINDOW_SIZES: [(u32, u32); 5] = [(1280, 720), (1600, 900), (1920, 1080), (2560, 1440), (3840, 2160)];
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, voice_lang: 0, text_lang: 0 }
+        Settings { anim_speed: 1.0, less_shake: false, ink: false, music: 0.6, sfx: 0.8, narrator: 1.0, voices: 0.8, voice_lang: 0, text_lang: 0, screen: 0, window_size: 1 }
     }
 }
 

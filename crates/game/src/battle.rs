@@ -17,13 +17,12 @@ use nav_core::Event;
 
 pub const CARD_W: f32 = 220.0;
 pub const CARD_H: f32 = 310.0;
-/// Where the hand rests: low, with only the top of each card showing, so the field stays clear.
-const HAND_TOP: f32 = 955.0;
-/// How far the card under the cursor rises out of the hand; its neighbours rise by a share of this.
-const HAND_LIFT: f32 = 205.0;
+/// Where the hand rests: low, the field kept clear, but with each card's name and the top of its
+/// picture showing even at the fan's ends.
+const HAND_TOP: f32 = 905.0;
 /// Where the top of a card in focus comes to, wherever it lay in the fan: the whole of it on the
 /// stage, its text with it, even grown and from the fan's low ends.
-const HAND_RISEN: f32 = HAND_TOP - HAND_LIFT - 5.0;
+const HAND_RISEN: f32 = 745.0;
 pub(crate) const HERO_SIZE: Vec2 = Vec2::new(255.0, 340.0);
 const ENEMY_SIZE: Vec2 = Vec2::new(230.0, 345.0);
 /// Room above a unit's sprite for its intent.
@@ -421,7 +420,8 @@ fn widget_origin(foot: Vec2, size: Vec2) -> Vec2 {
 }
 
 fn hand_spacing(n: usize) -> f32 {
-    (1040.0 / n.max(1) as f32).min(CARD_W * 0.78)
+    // narrow enough that the fan's ends stay clear of the energy orb and the piles
+    (860.0 / n.max(1) as f32).min(CARD_W * 0.78)
 }
 
 fn hand_slot(i: usize, n: usize) -> Vec2 {
@@ -431,7 +431,7 @@ fn hand_slot(i: usize, n: usize) -> Vec2 {
     // a shallow arc: the ends of the fan sit a little lower
     let mid = (n as f32 - 1.0) / 2.0;
     let off = (i as f32 - mid).abs();
-    Vec2::new(x, HAND_TOP + off * off * 3.0)
+    Vec2::new(x, HAND_TOP + off * off * 1.5)
 }
 
 // ---- screen setup ----
@@ -1942,7 +1942,7 @@ fn pick_hover(
     *reaching = match cursor {
         Some(c) if n > 0 && (c.x - STAGE_W / 2.0).abs() <= span => {
             // reaching in starts at the visible strip; once in, the whole risen card keeps it
-            c.y >= HAND_TOP - 20.0 || (*reaching && c.y >= HAND_TOP - HAND_LIFT - 20.0)
+            c.y >= HAND_TOP - 20.0 || (*reaching && c.y >= HAND_RISEN - 15.0)
         }
         _ => false,
     };
@@ -2161,7 +2161,7 @@ fn update_tooltip(
     if let Some(w) = top.0.and_then(|uid| cards.iter().find(|w| w.uid == uid && !w.dragging && !w.hidden)) {
         if let Some((card, def)) = h.hand.iter().find(|c| c.uid == w.uid).and_then(|c| db.0.cards.get(&c.def).map(|d| (c, d))) {
             lines = l10n.card_glossary(&def.view(card.upgraded, h.form));
-            at = Vec2::new(w.pos.x + CARD_W * 1.12 + 14.0, HAND_TOP - HAND_LIFT);
+            at = Vec2::new(w.pos.x + CARD_W * 1.12 + 14.0, HAND_RISEN + 5.0);
             if at.x + 340.0 > STAGE_W {
                 at.x = w.pos.x - 350.0;
             }

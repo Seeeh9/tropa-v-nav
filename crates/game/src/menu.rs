@@ -14,6 +14,7 @@ pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Menu), enter_menu)
         .add_systems(OnEnter(AppState::Settings), enter_settings)
         .add_systems(Update, drag_sliders.run_if(in_state(AppState::Settings)))
+        .add_systems(Update, toggle_full_screen)
         .add_systems(OnEnter(AppState::Village), enter_village)
         .add_systems(OnEnter(AppState::Chronicle), enter_chronicle)
         .add_systems(Update, crate::profile::note_enemies)
@@ -164,8 +165,30 @@ pub fn apply_settings(
     mut speed: ResMut<crate::session::AnimSpeed>,
     mut comfort: ResMut<crate::battle::Comfort>,
     mut mixer: ResMut<crate::audio::Mixer>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let s = profile.settings;
+    // a dev screenshot run keeps its hidden window as it is
+    if !(cfg!(feature = "dev") && std::env::var("TROPA_SHOT").is_ok()) {
+        for mut window in &mut windows {
+            use bevy::window::{MonitorSelection, VideoModeSelection, WindowMode};
+            let mode = match s.screen {
+                1 => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+                2 => WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Current),
+                _ => WindowMode::Windowed,
+            };
+            if window.mode != mode {
+                window.mode = mode;
+            }
+            if mode == WindowMode::Windowed {
+                let (w, h) = crate::profile::WINDOW_SIZES[(s.window_size as usize).min(crate::profile::WINDOW_SIZES.len() - 1)];
+                if (window.resolution.width() - w as f32).abs() > 0.5 || (window.resolution.height() - h as f32).abs() > 0.5 {
+                    window.resolution.set(w as f32, h as f32);
+                    window.position = bevy::window::WindowPosition::Centered(MonitorSelection::Current);
+                }
+            }
+        }
+    }
     speed.0 = s.anim_speed.clamp(1.0, 2.0);
     comfort.less_shake = s.less_shake;
     comfort.ink = s.ink;
@@ -197,6 +220,11 @@ fn enter_settings(
         (format!("{}: {}", l10n.t("settings-shake"), on_off(s.less_shake)), |s| s.less_shake = !s.less_shake),
         (format!("{}: {}", l10n.t("settings-ink"), on_off(s.ink)), |s| s.ink = !s.ink),
         (format!("{}: {}", l10n.t("settings-voice-lang"), l10n.t(&format!("settings-voice-lang-{}", s.voice_lang.min(3)))), |s| s.voice_lang = (s.voice_lang.min(3) + 1) % 4),
+        (format!("{}: {}", l10n.t("settings-screen"), l10n.t(&format!("settings-screen-{}", s.screen.min(2)))), |s| s.screen = (s.screen.min(2) + 1) % 3),
+        ({
+            let (w, h) = crate::profile::WINDOW_SIZES[(s.window_size as usize).min(crate::profile::WINDOW_SIZES.len() - 1)];
+            format!("{}: {w}x{h}", l10n.t("settings-window-size"))
+        }, |s| s.window_size = (s.window_size + 1) % crate::profile::WINDOW_SIZES.len() as u8),
     ];
     commands.spawn((DespawnOnExit(AppState::Settings), backdrop(&art, &assets, "bg/menu", 0.45), ChildOf(*stage)));
     commands.spawn(screen(AppState::Settings, *stage)).with_children(|p| {
@@ -249,6 +277,22 @@ fn enter_settings(
             )],
         ));
     });
+}
+
+/// F11, or Alt+Enter, takes the game between a window and the whole screen, and keeps the choice.
+fn toggle_full_screen(keys: Res<ButtonInput<KeyCode>>, mut profile: ResMut<crate::profile::Profile>, mut commands: Commands, state: Res<State<AppState>>, mut next: ResMut<NextState<AppState>>) {
+    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if !(keys.just_pressed(KeyCode::F11) || (alt && keys.just_pressed(KeyCode::Enter))) {
+        return;
+    }
+    let s = &mut profile.settings;
+    s.screen = if s.screen == 0 { 1 } else { 0 };
+    profile.save();
+    commands.run_system_cached(apply_settings);
+    // the settings screen shows the new choice
+    if *state.get() == AppState::Settings {
+        next.set(AppState::Settings);
+    }
 }
 
 const SLIDER_STEPS: u8 = 20;

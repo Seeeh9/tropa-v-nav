@@ -73,8 +73,9 @@ fn toggle(
                 row_gap: px(18),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.02, 0.03, 0.82)),
-            GlobalZIndex(450),
+            BackgroundColor(Color::srgba(0.02, 0.02, 0.03, 0.88)),
+            // over everything a run screen lays on top, the lot's rings and the map's marks too
+            GlobalZIndex(1000),
             ChildOf(*stage),
         ))
         .with_children(|p| {

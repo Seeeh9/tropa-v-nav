@@ -1077,3 +1077,4 @@ card-stump_shoulder = Lend a Shoulder
 card-stump_spray = Blood in the Eyes
 card-stump_bite = Bite
 card-stump_spite = A Cripple's Spite
+card-toska-desc = Does nothing: it only takes up room in your hand and deck.

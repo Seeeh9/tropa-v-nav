@@ -311,7 +311,8 @@ fn draw_map(
     // legend
     commands
         .spawn((
-            Node { position_type: PositionType::Absolute, right: px(40), top: px(290), flex_direction: FlexDirection::Column, row_gap: px(8), ..default() },
+            // below the hint, which now also tells how to draw on the map
+            Node { position_type: PositionType::Absolute, right: px(40), top: px(400), flex_direction: FlexDirection::Column, row_gap: px(8), ..default() },
             Pickable::IGNORE,
             ChildOf(root),
         ))

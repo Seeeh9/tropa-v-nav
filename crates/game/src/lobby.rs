@@ -410,7 +410,7 @@ fn draw_lobby(
 {}", l10n.tf("lobby-level-opens", &[("n", ((level + 1) as i32).into()), ("k", (opens as i32).into())])) } else { next };
                     p.spawn(theme::text(l10n.n("lobby-hp", def.max_hp), &fonts.num, 26.0, theme::CANDLE));
                     p.spawn((
-                        theme::text(format!("{} ⓘ", l10n.n("lobby-level", level as i32)), &fonts.num, 26.0, theme::CANDLE),
+                        theme::text(format!("{} (?)", l10n.n("lobby-level", level as i32)), &fonts.num, 26.0, theme::CANDLE),
                         bevy::picking::hover::Hovered::default(),
                         crate::run_ui::CardHints::new(vec![(l10n.n("lobby-level", level as i32), format!("{}
 
@@ -418,7 +418,7 @@ fn draw_lobby(
                     ));
                     // what the hero's own mechanic does, told on hover: nothing else says it before a fight
                     p.spawn((
-                        theme::text(format!("{} ⓘ", l10n.t(&format!("hero-{hero}-desc"))), &fonts.body, 22.0, theme::BONE),
+                        theme::text(format!("{} (?)", l10n.t(&format!("hero-{hero}-desc"))), &fonts.body, 22.0, theme::BONE),
                         bevy::picking::hover::Hovered::default(),
                         crate::run_ui::CardHints::new(vec![(l10n.t(&format!("mech-{:?}-name", def.mechanic)), l10n.t(&format!("mech-{:?}", def.mechanic)))]),
                     ));

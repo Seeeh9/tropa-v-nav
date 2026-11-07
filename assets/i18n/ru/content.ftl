@@ -1077,3 +1077,4 @@ card-stump_shoulder = Подставить плечо
 card-stump_spray = Кровь в глаза
 card-stump_bite = Укус
 card-stump_spite = Злоба калеки
+card-toska-desc = Ничего не делает: только занимает место в руке и в колоде.

@@ -17,7 +17,8 @@
 //!   TROPA_DRIVE=<file>          steps written to this file are played as they come (also `p <png>` a shot, `q` quit)
 //!   TROPA_ROBOT=<script>        feed the game mouse input, as the window itself would: steps separated by `;`,
 //!                               `w <seconds>`, `m <x> <y>` (glide there, stage pixels), `d` (press), `u` (release),
-//!                               `s <lines>` (turn the wheel, positive up the page), `r` (right click)
+//!                               `s <lines>` (turn the wheel, positive up the page), `r` (right click),
+//!                               `rd` / `ru` (the right button down / up)
 //!   TROPA_WINDOW=<w>x<h>        the hidden screenshot window takes this size
 //!   TROPA_SHOT=<file.png>       save a screenshot after TROPA_SHOT_AT seconds (default 3) and quit
 //!   TROPA_SHOT_COUNT=<n>        instead a series of n frames, TROPA_SHOT_EVERY seconds apart (default 0.1), as <file>_<i>.png
@@ -125,6 +126,9 @@ enum Step {
     Move(Vec2),
     Down,
     Up,
+    /// The right button held down, and let go.
+    RightDown,
+    RightUp,
     RightClick,
     /// Wheel lines, positive away from the player (up the page).
     Wheel(f32),
@@ -148,6 +152,8 @@ fn parse_steps(text: &str) -> Vec<Step> {
                 ["d"] => Some(Step::Down),
                 ["u"] => Some(Step::Up),
                 ["r"] => Some(Step::RightClick),
+                ["rd"] => Some(Step::RightDown),
+                ["ru"] => Some(Step::RightUp),
                 ["s", n] => n.parse().ok().map(Step::Wheel),
                 ["p", file] => Some(Step::Shot(file.to_string())),
                 ["q"] => Some(Step::Quit),
@@ -223,6 +229,12 @@ fn robot(
             events.write(WindowEvent::MouseButtonInput(MouseButtonInput { button: MouseButton::Right, state, window: entity }));
             buttons.write(MouseButtonInput { button: MouseButton::Right, state, window: entity });
             !held
+        }
+        Step::RightDown | Step::RightUp => {
+            let state = if matches!(step, Step::RightDown) { ButtonState::Pressed } else { ButtonState::Released };
+            events.write(WindowEvent::MouseButtonInput(MouseButtonInput { button: MouseButton::Right, state, window: entity }));
+            buttons.write(MouseButtonInput { button: MouseButton::Right, state, window: entity });
+            true
         }
         Step::Down | Step::Up => {
             let state = if matches!(step, Step::Down) { ButtonState::Pressed } else { ButtonState::Released };

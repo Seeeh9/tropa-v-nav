@@ -69,10 +69,18 @@ fn draw_ink(
     window: Single<&Window>,
     scale: Res<UiScale>,
     scroll: Res<MapScroll>,
+    mut moves: MessageReader<bevy::window::WindowEvent>,
+    mut cursor: Local<Option<Vec2>>,
     sheet: Query<Entity, With<MapSheet>>,
     dots: Query<Entity, With<InkDot>>,
     mut ink: ResMut<MapInk>,
 ) {
+    // where the pointer is, as the window's own events tell it (as the party's pointers are read)
+    for ev in moves.read() {
+        if let bevy::window::WindowEvent::CursorMoved(m) = ev {
+            *cursor = Some(m.position);
+        }
+    }
     let Ok(sheet) = sheet.single() else { return };
     let respawn = |commands: &mut Commands, ink: &MapInk| {
         for e in &dots {
@@ -93,7 +101,8 @@ fn draw_ink(
         ink.drawing = false;
         return;
     }
-    let Some(stage) = crate::stage_cursor(&window, scale.0) else { return };
+    let Some(pos) = window.cursor_position().or(*cursor) else { return };
+    let stage = crate::stage_point(&window, scale.0, pos);
     // below the top bar only, where the sheet shows
     if stage.y < crate::between::BAR_H {
         return;

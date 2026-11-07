@@ -233,6 +233,9 @@ impl Unlocks {
 }
 
 /// The hero level that opens a card to the rewards: its own, or the one its rarity asks.
+/// Percent of the health lost that a hero gets back on coming to a new act.
+pub const ACT_HEAL_PCT: i32 = 80;
+
 pub fn card_level(def: &CardDef) -> u8 {
     if def.level > 0 {
         return def.level;
@@ -1203,13 +1206,17 @@ impl Run {
             self.act += 1;
             self.at = None;
             self.trail.clear();
-            // a new land, rested: everyone still on their feet starts it whole
-            for q in 0..self.players.len() {
-                let pl = &mut self.players[q];
-                if !pl.beheaded && pl.hp < pl.max_hp {
-                    let delta = pl.max_hp - pl.hp;
-                    pl.hp = pl.max_hp;
-                    ev.push(RunEvent::Hp { player: q as u8, delta });
+            // a new land, rested: everyone still on their feet gets back most of what they lost (as
+            // Slay the Spire 2's ancients heal, four fifths of it). Not before Koschei: after Mara
+            // the party goes to him as it is
+            if self.act <= 3 {
+                for q in 0..self.players.len() {
+                    let pl = &mut self.players[q];
+                    if !pl.beheaded && pl.hp < pl.max_hp {
+                        let delta = ((pl.max_hp - pl.hp) * ACT_HEAL_PCT + 99) / 100;
+                        pl.hp += delta;
+                        ev.push(RunEvent::Hp { player: q as u8, delta });
+                    }
                 }
             }
             // the traveller's satchel: there is always something still in it

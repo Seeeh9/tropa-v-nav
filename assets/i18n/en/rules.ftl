@@ -388,7 +388,7 @@ herb-valerian-spill = 1 Weak to a random enemy
 herb-st_john-spill = 1 temporary Strength
 
 status-Gloom = Gathering Dark
-status-Gloom-help = The fight drags on: from round 9 the dark thickens every round. Each stack: 10% less Block and healing (up to 60%) and 1 HP lost at the end of the turn, through Block.
+status-Gloom-help = The fight drags on: from round 9 (13 against an elite, 17 against a boss) the dark thickens every round. Each stack: 10% less Block and healing (up to 60%) and 1 HP lost at the end of the turn, through Block.
 
 mech-Valor-name = Valour
 mech-Valor = The Bogatyr gathers Valour by taking blows: 1 for every 5 damage, even taken on Block. His cards spend it to strike harder or shield the party.

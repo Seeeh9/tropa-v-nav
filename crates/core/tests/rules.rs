@@ -1449,6 +1449,21 @@ fn a_fight_drawn_out_gathers_the_dark_on_the_heroes() {
     assert_eq!(s.heroes[0].block, 4);
 }
 
+#[test]
+fn a_boss_fight_holds_the_dark_off_longer() {
+    let (c, mut s) = solo(&["t_block", "t_block", "t_block", "t_block", "t_block"], &["dummy"]);
+    s.stall = nav_core::combat::STALL_BOSS;
+    for _ in 0..STALL_ROUND {
+        end_round(&c, &mut s);
+    }
+    let me = UnitRef::Hero(0);
+    assert_eq!(s.status(me, StatusKind::Gloom), 0, "round {}", s.round);
+    for _ in STALL_ROUND..nav_core::combat::STALL_BOSS {
+        end_round(&c, &mut s);
+    }
+    assert_eq!(s.status(me, StatusKind::Gloom), 1, "round {}", s.round);
+}
+
 
 #[test]
 fn only_a_werewolf_turns_into_the_beast() {

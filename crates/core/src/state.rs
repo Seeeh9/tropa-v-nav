@@ -158,6 +158,9 @@ pub struct Combat {
     /// Circle 10: breaking the needle also lets Koschei's shadow loose.
     #[serde(default)]
     pub shadow: bool,
+    /// Rounds this fight may run before the dark gathers (longer for elites and bosses).
+    #[serde(default = "stall_default")]
+    pub stall: u32,
     /// A copy played out to foretell a move: what falls on a random foe is left out, with no roll.
     #[serde(skip)]
     pub foretelling: bool,
@@ -171,11 +174,17 @@ pub struct CombatOpts {
     pub enemy_hp: i32,
     pub enemy_dmg: i32,
     pub shadow: bool,
+    /// Rounds before the dark gathers on the heroes.
+    pub stall: u32,
+}
+
+fn stall_default() -> u32 {
+    crate::combat::STALL_ROUND
 }
 
 impl Default for CombatOpts {
     fn default() -> Self {
-        CombatOpts { raise_cost: 2, enemy_hp: 100, enemy_dmg: 100, shadow: false }
+        CombatOpts { raise_cost: 2, enemy_hp: 100, enemy_dmg: 100, shadow: false, stall: crate::combat::STALL_ROUND }
     }
 }
 

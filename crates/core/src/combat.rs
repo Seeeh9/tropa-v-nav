@@ -33,8 +33,11 @@ const MOST_LIMBS: u8 = 2;
 /// A killing blow with this much (percent of whole health) still to spend takes the head.
 const BEHEAD_PAST: i32 = 40;
 
-/// Rounds a fight may run before the dark gathers on the heroes (see `StatusKind::Gloom`).
+/// Rounds a fight may run before the dark gathers on the heroes (see `StatusKind::Gloom`); an
+/// elite and a boss take longer to bring down, so they are given more.
 pub const STALL_ROUND: u32 = 8;
+pub const STALL_ELITE: u32 = 12;
+pub const STALL_BOSS: u32 = 16;
 /// Percent of block and healing each stack of the dark takes away, and the most it can.
 const GLOOM_PCT: i32 = 10;
 const GLOOM_MAX: i32 = 60;
@@ -227,6 +230,7 @@ pub fn start_with(c: &Content, heroes: &[HeroSetup], enemies: &[Id], seed: u64, 
         hp_scale: hp_scale(hs.len()) * opts.enemy_hp / 100,
         enemy_dmg: opts.enemy_dmg,
         shadow: opts.shadow,
+        stall: opts.stall,
         heroes: hs,
         enemies: Vec::new(),
         rng,
@@ -1759,7 +1763,7 @@ impl<'a> Exec<'a> {
         self.s.log.clear();
         self.ev.push(Event::RoundStart(self.s.round));
         // a fight that drags on draws the dark in: each round past the mark it thickens on the heroes
-        if self.s.round > STALL_ROUND {
+        if self.s.round > self.s.stall {
             for slot in self.standing() {
                 self.add_status(UnitRef::Hero(slot), S::Gloom, 1);
             }

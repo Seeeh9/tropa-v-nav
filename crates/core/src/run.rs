@@ -1321,7 +1321,11 @@ impl Run {
             .map(|p| HeroSetup { def: p.hero.clone(), hp: p.hp, max_hp: p.max_hp, deck: p.deck.clone(), relics: p.relics.clone(), falls: p.falls, lost_limbs: p.lost_limbs, lost_arms: p.lost_arms, beheaded: p.beheaded, walks_headless: p.walks_headless, potions: p.potions.clone() })
             .collect();
         let rules = Circle(self.circle);
-        let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind), shadow: rules.koschei_shadow() };
+        let opts = CombatOpts { raise_cost: rules.raise_cost(), enemy_hp: rules.enemy_hp(), enemy_dmg: rules.enemy_dmg(kind), shadow: rules.koschei_shadow(), stall: match want {
+            EncounterKind::Boss => combat::STALL_BOSS,
+            EncounterKind::Elite => combat::STALL_ELITE,
+            _ => combat::STALL_ROUND,
+        } };
         let seed = ((self.rng.next_u32() as u64) << 32) | self.rng.next_u32() as u64;
         let (combat, events) = combat::start_with(c, &party, &enemies, seed, opts);
         self.combat = Some(combat);

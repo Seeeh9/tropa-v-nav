@@ -18,6 +18,7 @@ bevy = { version = "0.20", default-features = false, features = ["android-native
 package = "com.tropa.nav"
 apk_name = "TropaVNav"
 assets = "../../target/pack/mobile/assets"
+resources = "res"
 build_targets = ["aarch64-linux-android"]
 strip = "strip"
 
@@ -27,6 +28,7 @@ target_sdk_version = 34
 
 [package.metadata.android.application]
 label = "Тропа в Навь"
+icon = "@mipmap/ic_launcher"
 
 [package.metadata.android.application.activity]
 orientation = "sensorLandscape"

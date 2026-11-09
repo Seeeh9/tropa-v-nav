@@ -14,7 +14,8 @@ DefaultDirName={autopf}\TropaVNav
 DefaultGroupName={cm:GameName}
 OutputDir=..\target\dist
 OutputBaseFilename=TropaVNav-Setup-{#Version}
-UninstallDisplayIcon={app}\tropa.exe
+UninstallDisplayIcon={app}\tropa.ico
+SetupIconFile=icon.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; pictures and sounds are already packed: more effort only makes the build slower
@@ -47,12 +48,13 @@ Name: "firewall"; Description: "{cm:Firewall}"; GroupDescription: "{cm:Network}"
 [Files]
 Source: "..\target\release\tropa.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\target\release\steam_api64.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "icon.ico"; DestDir: "{app}"; DestName: "tropa.ico"; Flags: ignoreversion
 Source: "..\target\pack\desktop\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{cm:GameName}"; Filename: "{app}\tropa.exe"
+Name: "{group}\{cm:GameName}"; Filename: "{app}\tropa.exe"; IconFilename: "{app}\tropa.ico"
 Name: "{group}\{cm:UninstallProgram,{cm:GameName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{cm:GameName}"; Filename: "{app}\tropa.exe"; Tasks: desktopicon
+Name: "{autodesktop}\{cm:GameName}"; Filename: "{app}\tropa.exe"; IconFilename: "{app}\tropa.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Tropa v Nav"" dir=in action=allow program=""{app}\tropa.exe"" enable=yes"; Flags: runhidden; Tasks: firewall

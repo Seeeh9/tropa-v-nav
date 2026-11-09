@@ -5495,6 +5495,7 @@ dependencies = [
  "steam-stub",
  "steamworks",
  "unic-langid",
+ "winit",
 ]
 
 [[package]]

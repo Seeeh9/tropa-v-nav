@@ -152,6 +152,9 @@ pub fn run() {
     .add_plugins((menu::plugin, battle::plugin, net::plugin, lobby::plugin, run_ui::plugin, audio::plugin, story::plugin, book::plugin, deck_fx::plugin, card_flip::plugin, map_party::plugin, map_ink::plugin, between::plugin, preload::plugin))
     .add_plugins((reconnect::plugin, pause::plugin, touch::plugin));
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    app.add_systems(Update, window_icon);
+
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);
     app.add_plugins(lan::plugin).add_systems(Update, (logfile::note_screens, name_window));
@@ -247,4 +250,31 @@ fn fnv(mut h: u64, bytes: &[u8]) -> u64 {
         h = (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3);
     }
     h
+}
+
+/// Puts the game's icon (`assets/icon.png`) on its window, once the window is there.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn window_icon(art: Res<art::Art>, windows: Query<Entity, With<bevy::window::PrimaryWindow>>, mut done: Local<bool>, _main_thread: bevy::ecs::system::NonSendMarker) {
+    if *done {
+        return;
+    }
+    let Ok(entity) = windows.single() else { return };
+    let icon = art.file("icon.png").and_then(|rel| {
+        let ext = rel.rsplit_once('.')?.1.to_string();
+        let bytes = art.read(&rel)?;
+        let image = Image::from_buffer(&bytes, bevy::image::ImageType::Extension(&ext), default(), true, default(), bevy::asset::RenderAssetUsages::all()).ok()?;
+        let rgba = image.try_into_dynamic().ok()?.into_rgba8();
+        let (w, h) = rgba.dimensions();
+        winit::window::Icon::from_rgba(rgba.into_raw(), w, h).ok()
+    });
+    let Some(icon) = icon else {
+        *done = true;
+        return;
+    };
+    bevy::winit::WINIT_WINDOWS.with_borrow(|windows| {
+        if let Some(window) = windows.get_window(entity) {
+            window.set_window_icon(Some(icon));
+            *done = true;
+        }
+    });
 }

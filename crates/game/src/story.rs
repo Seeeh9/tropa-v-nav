@@ -384,10 +384,15 @@ fn turn_pages(
     // one is closed by a key or the button (read together, by vote)
     let last = tale.pages.len() <= 1;
     // the reader turned the leaf by hand
-    if turned.read().count() > 0 {
-        commands.trigger(Turn::Leaf);
-    } else if turned_back.read().count() > 0 {
-        commands.trigger(Turn::Back);
+    let (on, back) = (turned.read().count(), turned_back.read().count());
+    if on > 0 {
+        for _ in 0..on {
+            commands.trigger(Turn::Leaf);
+        }
+    } else if back > 0 {
+        for _ in 0..back {
+            commands.trigger(Turn::Back);
+        }
     } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) && last {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
@@ -670,6 +675,20 @@ fn show_page(
     book.pages_ahead = tale.pages.len().saturating_sub(1);
     book.next = tale.pages.get(1).map(|p| spread(p, at + 1, before + secret_of(page).is_some() as usize));
     book.prev = tale.past.last().map(|p| spread(p, at - 1, before - secret_of(p).is_some() as usize));
+    // the whole tale, for a turn across leaves torn out
+    let first = at.saturating_sub(tale.past.len());
+    let mut glued_n = 0;
+    book.story = tale
+        .past
+        .iter()
+        .chain(tale.pages.iter())
+        .enumerate()
+        .map(|(i, p)| {
+            let s = spread(p, first + i, glued_n);
+            glued_n += secret_of(p).is_some() as usize;
+            s
+        })
+        .collect();
     book.drag_ok = true;
     book.ending = page.closes;
     book.shared = together;

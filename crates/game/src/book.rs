@@ -328,6 +328,12 @@ pub struct Book {
     /// The spread before this one, when the tale has one: what turning the left-hand page back
     /// over uncovers.
     pub prev: Option<Spread>,
+    /// Every spread of the tale being read, from its first page to its last, in order: where
+    /// leaves were torn out, a turn goes from what lies open to the spread really beside it.
+    pub story: Vec<Spread>,
+    /// How many of the story's pages the turn under way moves the story by (more than one when
+    /// the leaves between were torn out).
+    steps: usize,
     /// May the reader turn the leaf by hand.
     pub drag_ok: bool,
     /// Is the page read together: the reader's hand is shown to the others through `news`.
@@ -445,6 +451,8 @@ impl Book {
             next: None,
             pages_ahead: 0,
             prev: None,
+            story: Vec::new(),
+            steps: 1,
             drag_ok: false,
             shared: false,
             news: Vec::new(),
@@ -547,7 +555,11 @@ impl Book {
         if turn.own {
             return false;
         }
-        turn.story_to = turn.to.clone();
+        let to = turn.to.clone();
+        let story_to = self.story_of(&to);
+        if let Some(turn) = self.turn.as_mut() {
+            turn.story_to = story_to;
+        }
         true
     }
 
@@ -760,14 +772,16 @@ impl Book {
             // torn out: both its sides are gone from the book for good
             if lost > WHOLE_PAGE_GONE {
                 // under the leaf's front (a right page) lies the page after it; under its back
-                // (a left page), the page before it
+                // (a left page), the page before it. Turned forward the later spread is `to`,
+                // turned back it is `from`
+                let (later, earlier) = if back { (&from, &to) } else { (&to, &from) };
                 let front = self.faces[Face::LeafFront as usize].as_ref().map(|(s, _)| s.numbers.1);
-                let back = self.faces[Face::LeafBack as usize].as_ref().map(|(s, _)| s.numbers.0);
+                let back_page = self.faces[Face::LeafBack as usize].as_ref().map(|(s, _)| s.numbers.0);
                 if let Some(n) = front.filter(|n| *n > 0 && !self.under.iter().any(|(m, _)| m == n)) {
-                    self.under.push((n, (to.clone(), Half::Right)));
+                    self.under.push((n, (later.clone(), Half::Right)));
                 }
-                if let Some(n) = back.filter(|n| *n > 0 && !self.under.iter().any(|(m, _)| m == n)) {
-                    self.under.push((n, (from.clone(), Half::Left)));
+                if let Some(n) = back_page.filter(|n| *n > 0 && !self.under.iter().any(|(m, _)| m == n)) {
+                    self.under.push((n, (earlier.clone(), Half::Left)));
                 }
                 for face in [Face::LeafFront, Face::LeafBack] {
                     if let Some((spread, half)) = &self.faces[face as usize] {
@@ -919,27 +933,80 @@ impl Book {
         }
     }
 
+    /// The story's spread a spread belongs to: a secret's is the glued spread it lies in.
+    fn story_of(&self, s: &Spread) -> Spread {
+        if s.peeled {
+            if let Some(parent) = self.story.iter().find(|p| p.secret.as_ref().is_some_and(|(_, inner)| inner.numbers == s.numbers)) {
+                return parent.clone();
+            }
+            return self.spread.clone();
+        }
+        s.clone()
+    }
+
+    /// Where in the story a spread is.
+    fn story_at(&self, s: &Spread) -> Option<usize> {
+        let s = self.story_of(s);
+        self.story.iter().position(|p| p.numbers == s.numbers)
+    }
+
+    /// The spreads as they lie in the book now, in order: a secret once peeled open lies after its
+    /// glued spread.
+    fn in_book(&self) -> Vec<Spread> {
+        let mut all = Vec::new();
+        for p in &self.story {
+            all.push(p.clone());
+            if let Some((_, inner)) = p.secret.as_ref().filter(|(act, _)| self.opened.contains(act)) {
+                all.push((**inner).clone());
+            }
+        }
+        all
+    }
+
+    /// How many of the story's pages lie between two spreads.
+    fn steps_between(&self, from: &Spread, to: &Spread) -> usize {
+        match (self.story_at(from), self.story_at(to)) {
+            (Some(a), Some(b)) => a.abs_diff(b).max(1),
+            _ => 1,
+        }
+    }
+
     /// Starts turning the leaf over to the next spread: the right-hand page shows that spread at
     /// once, and the leaf wears this one's right side and the next one's left.
     fn take_up(&mut self, hand: Hand) -> bool {
         let Some(shown) = self.shown.clone() else { return false };
+        // where the leaf on the right was torn out, the right-hand page is a later spread's, and
+        // that spread is the one turned from
+        let base = self.lying(&shown, Half::Right).0;
         // a glued pair turns over as one, unless its corner has been worked loose: then the hand
         // lifts the top leaf off the secret beneath it. Peeled open once, the secret is a page
         // like any other, though the story has no part in it
-        let (to, peel, own) = match shown.secret.clone() {
-            Some((act, secret)) if self.opened.contains(&act) => (*secret, None, true),
-            Some((act, secret)) if self.loose.contains(&act) => (*secret, Some(act), true),
-            _ => match self.next.clone() {
+        let (to, peel, own) = match base.secret.clone() {
+            Some((act, secret)) if self.opened.contains(&act) => (*secret, None, self.story_of(&base) == self.spread),
+            Some((act, secret)) if self.loose.contains(&act) => (*secret, Some(act), self.story_of(&base) == self.spread),
+            _ if base.numbers == shown.numbers || self.story.is_empty() => match self.next.clone() {
                 Some(next) => (next, None, false),
                 None => return false,
             },
+            _ => {
+                let book = self.in_book();
+                let at = book.iter().position(|p| p.numbers == base.numbers);
+                match at.and_then(|i| book.get(i + 1)) {
+                    Some(next) => {
+                        let own = self.story_of(next) == self.spread;
+                        (next.clone(), None, own)
+                    }
+                    None => return false,
+                }
+            }
         };
-        let story_to = if own { self.spread.clone() } else { to.clone() };
+        let story_to = if own { self.spread.clone() } else { self.story_of(&to) };
+        self.steps = self.steps_between(&self.spread, &story_to);
         self.fresh_leaf();
         if peel.is_some() {
             self.leaf.glue_down();
         }
-        note(format!("take up: to {}|{} peel {peel:?} own {own}; {}", to.numbers.0, to.numbers.1, self.state()));
+        note(format!("take up: to {}|{} peel {peel:?} own {own} steps {}; {}", to.numbers.0, to.numbers.1, self.steps, self.state()));
         // a leaf held on another machine tears there; here it only follows
         self.leaf.tearing = !matches!(hand, Hand::Remote(_));
         self.wear(Face::LeafFront, &shown, Half::Right);
@@ -955,9 +1022,19 @@ impl Book {
     /// the one before's right side under it.
     fn take_up_back(&mut self, hand: Hand) -> bool {
         let Some(shown) = self.shown.clone() else { return false };
-        // from a secret back to its glued page, the book's own turn; a secret opened before lies
-        // between this page and the one before, and is what the leaf uncovers
-        let (to, story_to, own) = if shown.peeled {
+        // where the leaf on the left was torn out, the left-hand page is an earlier spread's, and
+        // the leaf turned back is the one before that spread
+        let base = self.lying(&shown, Half::Left).0;
+        let (to, story_to, own) = if base.numbers != shown.numbers && !self.story.is_empty() {
+            let book = self.in_book();
+            let at = book.iter().position(|p| p.numbers == base.numbers);
+            let Some(before) = at.and_then(|i| i.checked_sub(1)).and_then(|i| book.get(i)).cloned() else { return false };
+            let story_to = self.story_of(&before);
+            let own = story_to == self.spread;
+            (before, story_to, own)
+        } else if shown.peeled {
+            // from a secret back to its glued page, the book's own turn; a secret opened before
+            // lies between this page and the one before, and is what the leaf uncovers
             (self.spread.clone(), self.spread.clone(), true)
         } else {
             let Some(prev) = self.prev.clone() else { return false };
@@ -966,7 +1043,8 @@ impl Book {
                 None => (prev.clone(), prev, false),
             }
         };
-        note(format!("take up back: to {}|{} own {own}; {}", to.numbers.0, to.numbers.1, self.state()));
+        self.steps = self.steps_between(&self.spread, &story_to);
+        note(format!("take up back: to {}|{} own {own} steps {}; {}", to.numbers.0, to.numbers.1, self.steps, self.state()));
         // a torn leaf turned over onto the left is turned back as it is, holes and all
         if !self.fresh_leaf_for(false) {
             self.leaf.lay_left();
@@ -1748,6 +1826,7 @@ fn hold_leaf(
         } else {
             side < 0.15
         };
+        let steps = book.steps.max(1);
         let Some(turn) = book.turn.as_mut() else { return };
         turn.hand = Hand::Gone;
         let told = turn.committed;
@@ -1774,10 +1853,12 @@ fn hold_leaf(
             let Some(turn) = book.turn.as_mut() else { return };
             carry_on(turn, &mut book.leaf);
             if tell {
-                if went_back {
-                    turned_back.write(TurnedBack);
-                } else {
-                    turned.write(Turned);
+                for _ in 0..steps {
+                    if went_back {
+                        turned_back.write(TurnedBack);
+                    } else {
+                        turned.write(Turned);
+                    }
                 }
             }
             play(&mut commands, &art, &assets, &mixer, "book_flip");
@@ -1788,7 +1869,9 @@ fn hold_leaf(
                 turn.committed = true;
                 carry_on(turn, &mut book.leaf);
                 if !turn.own {
-                    turned_back.write(TurnedBack);
+                    for _ in 0..steps {
+                        turned_back.write(TurnedBack);
+                    }
                 }
                 play(&mut commands, &art, &assets, &mixer, "book_flip");
             }
@@ -1800,7 +1883,9 @@ fn hold_leaf(
             turn.committed = true;
             carry_on(turn, &mut book.leaf);
             if !turn.own {
-                turned.write(Turned);
+                for _ in 0..steps {
+                    turned.write(Turned);
+                }
             }
             play(&mut commands, &art, &assets, &mixer, "book_flip");
         }
@@ -2143,7 +2228,9 @@ fn move_leaf(
         torn.write(Torn { lost, mine });
     }
     if settled.read_on {
-        turned.write(Turned);
+        for _ in 0..book.steps.max(1) {
+            turned.write(Turned);
+        }
     }
 }
 
@@ -3061,6 +3148,71 @@ mod tests {
     }
 
     #[test]
+    fn turned_back_across_a_leaf_torn_out_the_leaf_before_it_turns() {
+        let (zero, one, two) = (spread(0, None), spread(2, None), spread(4, None));
+        let mut b = book_at(one.clone());
+        b.story = vec![zero.clone(), one.clone(), two.clone()];
+        b.next = Some(two.clone());
+        assert!(b.take_up(Hand::Reader));
+        tear_off(&mut b);
+        b.settle();
+        b.spread = two.clone();
+        b.prev = Some(one.clone());
+        b.follow();
+        // the book lies open at 2 and 5; the leaf turned back is 1/2, onto 0, the story two back
+        assert!(b.take_up_back(Hand::Reader));
+        assert_eq!(b.faces[Face::LeafBack as usize], Some((one.clone(), Half::Left)));
+        assert_eq!(b.faces[Face::LeafFront as usize], Some((zero.clone(), Half::Right)));
+        assert_eq!(b.faces[Face::Left as usize], Some((zero.clone(), Half::Left)));
+        assert_eq!(b.steps, 2);
+        assert_eq!(b.turn.as_ref().unwrap().story_to, zero);
+    }
+
+    #[test]
+    fn a_leaf_torn_off_after_a_secret_turns_back_onto_the_glued_page() {
+        let inner = secret(4);
+        let glued = spread(2, Some((1, inner.clone())));
+        let after = spread(6, None);
+        let mut b = book_at(glued.clone());
+        b.story = vec![glued.clone(), after.clone()];
+        b.next = Some(after.clone());
+        b.opened.push(1);
+        b.shown = Some(inner.clone());
+        // the leaf 5/6 off the secret, torn out
+        assert!(b.take_up(Hand::Reader));
+        tear_off(&mut b);
+        b.settle();
+        b.spread = after.clone();
+        b.prev = Some(glued.clone());
+        b.next = None;
+        b.follow();
+        assert_eq!(b.faces[Face::Left as usize], Some((inner.clone(), Half::Left)));
+        assert_eq!(b.faces[Face::Right as usize], Some((after.clone(), Half::Right)));
+        // turned back: the leaf is 3/4, page 7 is nowhere on it
+        assert!(b.take_up_back(Hand::Reader));
+        assert_eq!(b.faces[Face::LeafBack as usize], Some((inner, Half::Left)));
+        assert_eq!(b.faces[Face::LeafFront as usize], Some((glued.clone(), Half::Right)));
+        assert_eq!(b.faces[Face::Left as usize], Some((glued.clone(), Half::Left)));
+        assert_eq!(b.turn.as_ref().unwrap().story_to, glued);
+    }
+
+    #[test]
+    fn a_leaf_torn_out_while_turned_back_shows_the_pages_either_side_of_it() {
+        let (zero, one, two) = (spread(0, None), spread(2, None), spread(4, None));
+        let mut b = book_at(two.clone());
+        b.story = vec![zero.clone(), one.clone(), two.clone()];
+        b.prev = Some(one.clone());
+        // the leaf 3/4 taken up off the left and torn out
+        assert!(b.take_up_back(Hand::Reader));
+        tear_off(&mut b);
+        b.settle();
+        // under page 3 lies 5, under page 4 lies 2: never a page standing for itself
+        assert!(b.under.iter().all(|(n, (s, h))| *n != if *h == Half::Left { s.numbers.0 } else { s.numbers.1 }));
+        assert_eq!(b.lying(&one, Half::Right), (two.clone(), Half::Right));
+        assert_eq!(b.lying(&two, Half::Left), (one.clone(), Half::Left));
+    }
+
+    #[test]
     fn leaves_torn_out_one_after_another_show_the_pages_still_there() {
         let (one, two, three) = (spread(2, None), spread(4, None), spread(6, None));
         let mut b = book_at(one.clone());
@@ -3111,7 +3263,7 @@ mod tests {
     #[test]
     fn a_torn_leaf_turned_back_and_left_hanging_shows_one_spread_not_two_halves() {
         let (one, two) = (spread(2, None), spread(4, None));
-        let mut b = book_at(two);
+        let mut b = book_at(two.clone());
         b.prev = Some(one.clone());
         assert!(b.take_up_back(Hand::Reader));
         b.turn.as_mut().unwrap().committed = true;
@@ -3120,8 +3272,9 @@ mod tests {
         b.follow();
         tear_off(&mut b);
         b.settle();
-        assert_eq!(b.faces[Face::Left as usize], Some((one.clone(), Half::Left)));
-        assert_eq!(b.faces[Face::Right as usize], Some((one, Half::Right)));
+        // the leaf 3/4 is gone: the book lies open at 2 and 5, one whole opening
+        assert_eq!(b.faces[Face::Left as usize], Some((one, Half::Left)));
+        assert_eq!(b.faces[Face::Right as usize], Some((two, Half::Right)));
     }
 
     #[test]

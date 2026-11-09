@@ -73,7 +73,7 @@ fn enter_coop(
 ) {
     entry.0.clear();
     // a party given up after the line dropped says so here
-    let lost = status.error.take().filter(|e| e == "coop-error-lost");
+    let lost = status.error.take().filter(|e| e == "coop-error-lost" || e == "coop-error-build");
     status.error = std::mem::take(&mut status.host_gone).then(|| "coop-error-host-gone".into()).or(lost);
     status.busy = false;
     let has_steam = steam.is_some();

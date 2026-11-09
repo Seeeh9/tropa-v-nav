@@ -104,9 +104,16 @@ pub fn run() {
         .or(installed)
         .or_else(|| steam.as_ref().ok().map(steam::ui_lang))
         .unwrap_or(Lang::Old);
+    // the build's fingerprint: its version and every rule file it read, so a party is never
+    // played by two builds that would deal one run out two ways
+    let fingerprint = std::cell::Cell::new(fnv(0xcbf2_9ce4_8422_2325, env!("CARGO_PKG_VERSION").as_bytes()));
     let content = match nav_core::Content::load_with(&|sub| {
         let dir = format!("data/{sub}");
-        Ok(art.list(&dir, "ron").into_iter().filter_map(|name| art.read_text(&format!("{dir}/{name}")).map(|src| (format!("{dir}/{name}"), src))).collect())
+        let files: Vec<(String, String)> = art.list(&dir, "ron").into_iter().filter_map(|name| art.read_text(&format!("{dir}/{name}")).map(|src| (format!("{dir}/{name}"), src))).collect();
+        for (name, src) in &files {
+            fingerprint.set(fnv(fnv(fingerprint.get(), name.as_bytes()), src.replace('\r', "").as_bytes()));
+        }
+        Ok(files)
     }) {
         Ok(c) => c,
         Err(e) => {
@@ -115,6 +122,7 @@ pub fn run() {
         }
     };
 
+    nav_net::set_build(fingerprint.get());
     let config_lang = lang;
     logfile::catch_panics();
     let mut app = App::new();
@@ -231,4 +239,12 @@ fn test_window(window: Window) -> Window {
         skip_taskbar: true,
         ..window
     }
+}
+
+/// FNV-1a over `bytes`, carried on from `h`.
+fn fnv(mut h: u64, bytes: &[u8]) -> u64 {
+    for b in bytes {
+        h = (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3);
+    }
+    h
 }

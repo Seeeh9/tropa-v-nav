@@ -63,10 +63,25 @@ pub struct StartInfo {
     pub unlocks: Unlocks,
 }
 
+/// What build of the game this is (`set_build`): a party is played only by one build, since a
+/// phone and a desktop on different versions would deal the same run out differently.
+static BUILD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Names the build this game is, said in every hello.
+pub fn set_build(fingerprint: u64) {
+    BUILD.store(fingerprint, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn build() -> u64 {
+    BUILD.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Msg {
-    /// Client -> host on joining or rejoining.
-    Hello { name: String },
+    /// Client -> host on joining or rejoining, with the client's build.
+    Hello { name: String, build: u64 },
+    /// Host -> a client whose build is not the host's: it is not let in.
+    OtherBuild,
     /// Host -> everyone whenever the lobby changes.
     Lobby(Lobby),
     /// A hero and the player's level with them.
@@ -148,6 +163,8 @@ pub enum Note {
     MapPointer { from: u8, at: [f32; 2] },
     Nudge { from: u8, node: u8 },
     HostChanged,
+    /// The host plays another build of the game and did not let us in.
+    OtherBuild,
 }
 
 pub struct Node {
@@ -221,7 +238,7 @@ impl Node {
     /// and sends the whole run as it now stands.
     pub fn rejoin(&mut self) {
         if !self.is_host() {
-            self.out.push((To::One(self.lobby.host), Msg::Hello { name: self.name.clone() }));
+            self.out.push((To::One(self.lobby.host), Msg::Hello { name: self.name.clone(), build: build() }));
         }
     }
 
@@ -240,7 +257,7 @@ impl Node {
     pub fn join(me: Peer, name: &str, host: Peer) -> Node {
         let mut node = Node::blank(me, name);
         node.lobby.host = host;
-        node.out.push((To::One(host), Msg::Hello { name: name.into() }));
+        node.out.push((To::One(host), Msg::Hello { name: name.into(), build: build() }));
         node
     }
 
@@ -531,7 +548,11 @@ impl Node {
             self.heard += 1;
         }
         match msg {
-            Msg::Hello { name } if host => {
+            Msg::Hello { build: theirs, .. } if host && theirs != build() => {
+                self.out.push((To::One(from), Msg::OtherBuild));
+            }
+            Msg::OtherBuild if !host => self.notes.push(Note::OtherBuild),
+            Msg::Hello { name, .. } if host => {
                 if let Some(p) = self.lobby.players.iter_mut().find(|p| p.peer == from) {
                     // a returning player takes the wheel back from the autopilot
                     p.connected = true;

@@ -391,3 +391,14 @@ fn a_saved_party_is_picked_up_and_its_players_take_their_seats_again() {
     assert_eq!(again.node(20).my_slot(), Some(1));
     assert_eq!(again.node(20).state.as_ref().unwrap().hash64(), run.hash64());
 }
+
+#[test]
+fn a_player_on_another_build_is_not_let_in() {
+    let c = content();
+    let mut host = Node::host(1, "host");
+    host.handle(&c, 2, Msg::Hello { name: "guest".into(), build: u64::MAX });
+    assert_eq!(host.lobby.players.len(), 1, "another build took a seat");
+    let mut guest = Node::join(2, "guest", 1);
+    guest.handle(&c, 1, Msg::OtherBuild);
+    assert!(guest.take_notes().contains(&Note::OtherBuild));
+}

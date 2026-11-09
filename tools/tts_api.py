@@ -25,7 +25,8 @@ KEYS = os.path.join(ROOT, ".secrets", "gemini_keys.txt")
 # each language its own manner: one style for all of them bleeds one into another
 STYLE = {
     "ru-old": "The line is in Old Russian, read in the solemn old manner: every vowel as written, unstressed O stays a round O, "
-    "E never read as YO; a capital letter inside a word marks its stressed vowel.",
+    "E never read as YO; a capital letter inside a word marks its stressed vowel. "
+    "The speaker is a native Russian: Russian pronunciation through and through, with no English or other foreign accent at all.",
     "ru": "The line is in plain modern Russian: ordinary present-day pronunciation and natural stress, nothing archaic or churchly.",
     "en": "The line is in English, spoken by a Slav: a clear, noticeable Russian accent, rolled R, heavy consonants.",
 }

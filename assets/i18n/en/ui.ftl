@@ -490,6 +490,7 @@ coop-join-hint-lan = Or type the host's IP (local network, Radmin VPN). Ctrl+V p
 coop-error-lan = Could not connect. Check the IP and that the host has gathered a party.
 coop-error-lan-port = The port is taken: a party is already gathered, or the game runs twice.
 coop-error-host-gone = The host has disconnected.
+coop-error-build = The host plays another version of the game. Install the same build on both.
 settings-logs = Log folder
 coop-join-lan = Join
 coop-find-lan = Find nearby

@@ -633,6 +633,12 @@ fn notes(
     for note in notes {
         match note {
             Note::LobbyChanged | Note::HostChanged => status.dirty = true,
+            Note::OtherBuild => {
+                status.error = Some("coop-error-build".into());
+                status.dirty = true;
+                commands.remove_resource::<Net>();
+                return;
+            }
             Note::Started => status.run_dirty = true,
             Note::Applied { events, .. } => {
                 status.run_dirty = true;

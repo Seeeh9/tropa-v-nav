@@ -165,7 +165,7 @@ fn tray_button(commands: &mut ChildSpawnerCommands, label: String, icon: Option<
         if let Some(icon) = icon {
             b.spawn((ImageNode::new(icon), Node { width: px(44), height: px(44), flex_shrink: 0.0, ..default() }, Pickable::IGNORE));
         }
-        b.spawn((theme::text(label, &fonts.title, 24.0, theme::BONE), Pickable::IGNORE));
+        b.spawn(theme::text(label, &fonts.title, 24.0, theme::BONE));
     });
     button.id()
 }

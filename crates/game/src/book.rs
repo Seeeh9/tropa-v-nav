@@ -395,6 +395,9 @@ pub struct Book {
     pub over_glue: bool,
     /// This reader's hand on a leaf another reader is turning: the point it holds and where.
     joined: Option<(usize, Vec3)>,
+    /// This reader's other fingers on the leaf in play (a touch screen): each holds a point of it,
+    /// as another reader's hand would.
+    fingers: Vec<(usize, Vec3)>,
     /// How far the hands on a glued pair have worked it apart by pulling, 0..1.
     pulled: f32,
     /// The tale is at its end: there is nothing left to be sealed.
@@ -472,6 +475,7 @@ impl Book {
             seat: 0,
             over_glue: false,
             joined: None,
+            fingers: Vec::new(),
             pulled: 0.0,
             ending: false,
         }
@@ -563,7 +567,8 @@ impl Book {
     }
 
     /// Does the left-hand page lie open on a secret, with its glued page just before it?
-    pub fn on_secret(&self) -> bool {
+    #[cfg(test)]
+    fn on_secret(&self) -> bool {
         self.shown.as_ref().is_some_and(|s| s.peeled)
     }
 
@@ -639,7 +644,8 @@ impl Book {
     }
 
     /// Turns the left-hand page back over by the book's own hand, from a secret to its glued page.
-    pub fn turn_back_unseen(&mut self) -> bool {
+    #[cfg(test)]
+    fn turn_back_unseen(&mut self) -> bool {
         if self.turn.is_some() || !self.take_up_back(Hand::Gone) {
             return false;
         }
@@ -764,9 +770,17 @@ impl Book {
                 let at = at.clone();
                 self.kept = false;
                 self.fresh_leaf();
-                self.wear(Face::Left, &at, Half::Left);
-                self.wear(Face::Right, &at, Half::Right);
-                self.covered.extend([Half::Left, Half::Right]);
+                // the torn paper stays lying as it was torn, over the pages; a page torn out shows
+                // what lay under it: on the left the page before it, on the right the page after
+                let number = |s: &Spread, h: Half| match h {
+                    Half::Left => s.numbers.0,
+                    Half::Right => s.numbers.1,
+                };
+                let left = if self.gone.contains(&number(&at, Half::Left)) { &from } else { &at };
+                let right = if self.gone.contains(&number(&at, Half::Right)) { &to } else { &at };
+                let (left, right) = (left.clone(), right.clone());
+                self.faces[Face::Left as usize] = Some((left, Half::Left));
+                self.faces[Face::Right as usize] = Some((right, Half::Right));
                 self.shown = Some(at);
             }
         } else if back {
@@ -1419,12 +1433,29 @@ fn hold_leaf(
 ) {
     let Ok((camera, at)) = camera.single() else { return };
     // the mouse, or the first finger on a touch screen
-    let mouse = pointers.iter().find(|(id, ..)| id.is_mouse() && !crate::touch::enabled()).or_else(|| pointers.iter().find(|(id, ..)| id.is_touch()));
+    let mouse = pointers.iter().find(|(id, ..)| id.is_mouse());
     let cursor = mouse.and_then(|(_, loc, _)| loc.location()).map(|l| crate::stage_point(&window, scale.0, l.position));
     let down = mouse.is_some_and(|(.., press)| press.is_primary_pressed());
     let pressed = down && !state.0;
     state.0 = down;
     let book = &mut *book;
+    // more fingers than one on a touch screen: each takes hold of the leaf being turned where it
+    // touches it, and keeps that point while it stays down
+    let extra = crate::touch::more_fingers();
+    if extra.is_empty() || book.turn.is_none() {
+        book.fingers.clear();
+    } else {
+        let mut held = Vec::new();
+        for (i, f) in extra.iter().enumerate() {
+            let c = crate::stage_point(&window, scale.0, *f);
+            let Some(hand) = cursor_on(camera, at, c, LEAF_FLOOR.right + LIFT) else { continue };
+            let point = book.fingers.get(i).map(|(p, _)| *p).or_else(|| book.leaf.pick(|y| cursor_on(camera, at, c, y), CATCH_REACH, false, TOP));
+            if let Some(p) = point.filter(|p| *p < book.leaf.points.len()) {
+                held.push((p, hand));
+            }
+        }
+        book.fingers = held;
+    }
     book.over_glue = false;
     // over a page read together the others see where the hand is, a few times a second
     *since_told += time.delta_secs();
@@ -1846,6 +1877,8 @@ fn lay_on_hands(book: &mut Book, dt: f32) {
     if holder.is_some() {
         others.extend(book.joined.filter(|(p, _)| *p < n));
     }
+    // this reader's own other fingers, whoever turns it
+    others.extend(book.fingers.iter().filter(|(p, _)| *p < n).copied());
     // carried smoothly between tellings, as the turning hand is
     let k = (dt * 20.0).min(1.0);
     for (p, to) in &mut others {
@@ -3006,13 +3039,15 @@ mod tests {
     #[test]
     fn a_page_torn_clean_out_reads_on_and_leaves_one_whole_spread() {
         let (one, two) = (spread(2, None), spread(4, None));
-        let mut b = book_at(one);
+        let mut b = book_at(one.clone());
         b.next = Some(two.clone());
         assert!(b.take_up(Hand::Reader));
         tear_off(&mut b);
         let s = b.settle();
         assert!(s.read_on && s.torn.is_some());
-        assert_eq!(b.faces[Face::Left as usize], Some((two.clone(), Half::Left)));
+        // the leaf's back (page 4) went with it: on the left lies the page before it, as in a book
+        // with a leaf torn out, never a blank stand-in for the lost one
+        assert_eq!(b.faces[Face::Left as usize], Some((one, Half::Left)));
         assert_eq!(b.faces[Face::Right as usize], Some((two.clone(), Half::Right)));
         assert!(!b.kept && !b.leaf.torn() && b.scraps_out.len() == 1, "the paper is a scrap now");
         // the story catches up, with no second page turning over

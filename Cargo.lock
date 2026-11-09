@@ -5488,6 +5488,7 @@ dependencies = [
  "bevy",
  "cpal",
  "fluent-bundle",
+ "jni 0.21.1",
  "nav_core",
  "nav_net",
  "ron",

@@ -341,7 +341,7 @@ fn turn_pages(
     mut profile: ResMut<Profile>,
     net: Option<Res<Net>>,
     mut run_outbox: ResMut<crate::session::RunOutbox>,
-    mut book: ResMut<crate::book::Book>,
+    book: ResMut<crate::book::Book>,
 ) {
     // a secret peeled open whole by this reader: its relic, and the chronicle remembers it
     for f in found.read() {
@@ -380,21 +380,15 @@ fn turn_pages(
     if book.open < 1.0 {
         return;
     }
-    // read together, a page is turned by hand only (the last one is closed by vote)
-    let reading_together = net.as_ref().zip(tale.pages.front()).is_some_and(|(n, p)| shared(n, p)) && tale.pages.len() > 1;
+    // a page is turned by hand only, alone or together: no key turns it on or back; only the last
+    // one is closed by a key or the button (read together, by vote)
+    let last = tale.pages.len() <= 1;
     // the reader turned the leaf by hand
     if turned.read().count() > 0 {
         commands.trigger(Turn::Leaf);
     } else if turned_back.read().count() > 0 {
         commands.trigger(Turn::Back);
-    } else if keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::Backspace]) {
-        // back from a secret is the book's own affair: the story stays on the page it lies under
-        if !book.on_secret() {
-            commands.trigger(Turn::Back);
-        } else {
-            book.turn_back_unseen();
-        }
-    } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) && !reading_together {
+    } else if keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::ArrowRight]) && last {
         commands.trigger(Turn::Next);
     } else if keys.just_pressed(KeyCode::Escape) {
         commands.trigger(Turn::Skip);
@@ -723,9 +717,10 @@ fn show_page(
                             ),
                             (
                                 page_button(l10n.t(onward), &fonts),
-                                // read together, the leaves are turned by hand: hands may meet on
-                                // one, and a glued pair is pulled apart by two of them
-                                if together && !last { Visibility::Hidden } else { Visibility::Inherited },
+                                // the leaves are turned by hand, alone or together (hands may
+                                // meet on one, and a glued pair is pulled apart by two of them):
+                                // only the book's last page is closed by a button
+                                if !last { Visibility::Hidden } else { Visibility::Inherited },
                                 observe(|_: On<Activate>, mut commands: Commands| commands.trigger(Turn::Next)),
                             ),
                         ],

@@ -27,3 +27,4 @@ winit = { version = "0.30", default-features = false }
 steam-stub = { path = "../steam_stub" }
 [target.'cfg(target_os = "android")'.dependencies]
 bevy = { version = "0.20", default-features = false, features = ["android-native-activity"] }
+jni = "0.21"

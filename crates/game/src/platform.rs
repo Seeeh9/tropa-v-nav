@@ -156,6 +156,38 @@ pub fn read_asset(root: &std::path::Path, rel: &str) -> Option<Vec<u8>> {
     std::fs::read(root.join(rel)).ok()
 }
 
+/// Hides the phone's status and navigation bars, sticky: a swipe from an edge shows them only for
+/// a moment, and leaving the game takes a second swipe. Asked again whenever the game comes back to
+/// the front, since the system shows them again then. Nothing on the desktops.
+pub fn immersive() {
+    #[cfg(target_os = "android")]
+    if let Err(e) = android_immersive() {
+        bevy::log::warn!("could not hide the system bars: {e}");
+    }
+}
+
+/// The Java half (`crates/android/java/tropa/Immersive.java`, built into `immersive.dex`) is
+/// loaded from memory and handed to the UI thread, which alone may change the bars.
+#[cfg(target_os = "android")]
+fn android_immersive() -> Result<(), jni::errors::Error> {
+    use jni::objects::{JObject, JValue};
+    static DEX: &[u8] = include_bytes!("../../android/immersive.dex");
+    let Some(app) = bevy::android::ANDROID_APP.get() else { return Ok(()) };
+    let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as *mut _)? };
+    let mut env = vm.attach_current_thread()?;
+    let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jni::sys::jobject) };
+    let bytes = env.byte_array_from_slice(DEX)?;
+    let buffer = env.call_static_method("java/nio/ByteBuffer", "wrap", "([B)Ljava/nio/ByteBuffer;", &[JValue::Object(&bytes)])?.l()?;
+    let parent = env.call_method(&activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?.l()?;
+    let loader = env.new_object("dalvik/system/InMemoryDexClassLoader", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V", &[JValue::Object(&buffer), JValue::Object(&parent)])?;
+    let name = env.new_string("tropa.Immersive")?;
+    let class = env.call_method(&loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;", &[JValue::Object(&name)])?.l()?;
+    let class = jni::objects::JClass::from(class);
+    let task = env.new_object(&class, "(Landroid/app/Activity;)V", &[JValue::Object(&activity)])?;
+    env.call_method(&activity, "runOnUiThread", "(Ljava/lang/Runnable;)V", &[JValue::Object(&task)])?;
+    Ok(())
+}
+
 /// Whether the game's files are packed where `std::fs` cannot see them, so the list of them
 /// (`index.txt`, written by the packer) has to be asked instead.
 pub const PACKED_ONLY: bool = cfg!(target_os = "android");

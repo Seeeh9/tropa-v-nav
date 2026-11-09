@@ -154,6 +154,7 @@ pub fn run() {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     app.add_systems(Update, window_icon);
+    app.add_systems(Update, hide_system_bars);
 
     #[cfg(feature = "dev")]
     app.add_plugins(dev::plugin);
@@ -277,4 +278,14 @@ fn window_icon(art: Res<art::Art>, windows: Query<Entity, With<bevy::window::Pri
             *done = true;
         }
     });
+}
+
+/// On a phone the game fills the screen: the system bars are hidden when it starts and each time it
+/// comes back to the front.
+fn hide_system_bars(mut focus: MessageReader<bevy::window::WindowFocused>, mut started: Local<bool>) {
+    let back = focus.read().fold(false, |any, f| any || f.focused);
+    if back || !*started {
+        *started = true;
+        platform::immersive();
+    }
 }

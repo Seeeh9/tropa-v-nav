@@ -37,7 +37,7 @@ jobs:
             name: windows
           - os: ubuntu-22.04
             name: linux
-          - os: macos-14
+          - os: macos-latest
             name: macos
     runs-on: ${{ matrix.os }}
     steps:
@@ -97,9 +97,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
+      # the toolchain is the one rust-toolchain.toml pins; the phone's target is added to it
+      - name: Rust for Android
+        run: rustup target add aarch64-linux-android
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

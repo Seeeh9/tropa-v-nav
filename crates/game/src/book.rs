@@ -62,6 +62,8 @@ const GHOST_LINGER: f32 = 1.5;
 const PULL: f32 = 2.5;
 /// How far past the paper's reach the hand goes before it pulls at the paper, in page widths.
 const SLACK: f32 = 0.9;
+/// A pull this far out past the slack weakens the paper by the fingers fully (`Leaf::pinch`).
+const PINCH_PULL: f32 = 0.3;
 /// Past this share of its paper lost, a torn leaf is no page any more.
 const WHOLE_PAGE_GONE: f32 = 0.5;
 /// A leaf let go swinging at least this fast (sides a second) goes that way, wherever it is.
@@ -357,6 +359,9 @@ pub struct Book {
     leaf_clock: f32,
     /// Page numbers torn out of the book for good: they lie bare from now on, this whole run.
     gone: Vec<u32>,
+    /// What lies in the book where a page was torn out: the left page before it, the right page
+    /// after it, by the torn-out page's number.
+    under: Vec<(u32, (Spread, Half))>,
     /// Order in which paper came to lie where it lies, and the place of the leaf in play in it.
     paper_tick: u32,
     leaf_layer: u32,
@@ -456,6 +461,7 @@ impl Book {
             charged: 0.0,
             leaf_clock: 0.0,
             gone: Vec::new(),
+            under: Vec::new(),
             paper_tick: 0,
             leaf_layer: 0,
             swing: 0.0,
@@ -547,6 +553,7 @@ impl Book {
     /// A new run: a new reading of the book, its glued leaves whole again.
     pub fn forget_run(&mut self) {
         self.gone.clear();
+        self.under.clear();
         self.drawn = Default::default();
         self.opened.clear();
         self.loose.clear();
@@ -751,6 +758,16 @@ impl Book {
             // book shows one whole spread beneath it, never the halves of two
             // torn out: both its sides are gone from the book for good
             if lost > WHOLE_PAGE_GONE {
+                // under the leaf's front (a right page) lies the page after it; under its back
+                // (a left page), the page before it
+                let front = self.faces[Face::LeafFront as usize].as_ref().map(|(s, _)| s.numbers.1);
+                let back = self.faces[Face::LeafBack as usize].as_ref().map(|(s, _)| s.numbers.0);
+                if let Some(n) = front.filter(|n| *n > 0 && !self.under.iter().any(|(m, _)| m == n)) {
+                    self.under.push((n, (to.clone(), Half::Right)));
+                }
+                if let Some(n) = back.filter(|n| *n > 0 && !self.under.iter().any(|(m, _)| m == n)) {
+                    self.under.push((n, (from.clone(), Half::Left)));
+                }
                 for face in [Face::LeafFront, Face::LeafBack] {
                     if let Some((spread, half)) = &self.faces[face as usize] {
                         let number = match half {
@@ -770,17 +787,10 @@ impl Book {
                 let at = at.clone();
                 self.kept = false;
                 self.fresh_leaf();
-                // the torn paper stays lying as it was torn, over the pages; a page torn out shows
-                // what lay under it: on the left the page before it, on the right the page after
-                let number = |s: &Spread, h: Half| match h {
-                    Half::Left => s.numbers.0,
-                    Half::Right => s.numbers.1,
-                };
-                let left = if self.gone.contains(&number(&at, Half::Left)) { &from } else { &at };
-                let right = if self.gone.contains(&number(&at, Half::Right)) { &to } else { &at };
-                let (left, right) = (left.clone(), right.clone());
-                self.faces[Face::Left as usize] = Some((left, Half::Left));
-                self.faces[Face::Right as usize] = Some((right, Half::Right));
+                // the torn paper stays lying as it was torn, over the pages, and a page torn out
+                // shows what lay under it (`wear`)
+                self.faces[Face::Left as usize] = Some(self.lying(&at, Half::Left));
+                self.faces[Face::Right as usize] = Some(self.lying(&at, Half::Right));
                 self.shown = Some(at);
             }
         } else if back {
@@ -798,8 +808,21 @@ impl Book {
         out
     }
 
+    /// The page that lies in the book as `half` of `spread`: where that page was torn out, the
+    /// one that lay under it.
+    fn lying(&self, spread: &Spread, half: Half) -> (Spread, Half) {
+        let number = match half {
+            Half::Left => spread.numbers.0,
+            Half::Right => spread.numbers.1,
+        };
+        match self.under.iter().find(|(n, _)| *n == number) {
+            Some((_, under)) => under.clone(),
+            None => (spread.clone(), half),
+        }
+    }
+
     fn wear(&mut self, face: Face, spread: &Spread, half: Half) {
-        let new = Some((spread.clone(), half));
+        let new = Some(if matches!(face, Face::Left | Face::Right) { self.lying(spread, half) } else { (spread.clone(), half) });
         // a leaf come down on the left lies over the scraps that lay there
         if face == Face::Left && self.faces[face as usize] != new {
             self.covered.push(Half::Left);
@@ -1795,6 +1818,8 @@ fn hold_leaf(
     // paper being led about never tears of itself: only a real pull, or a jerk at a glued leaf
     let peeling = book.turn.as_ref().is_some_and(|t| t.peel.is_some());
     book.leaf.tearing = peeling || beyond > 0.0;
+    // the harder the pull, the sooner the paper gives by the fingers rather than at the spine
+    book.leaf.pinch = (beyond / PINCH_PULL).min(1.0);
     let pull = out.normalize_or_zero() * beyond * PULL;
     let aim = Vec3::new(x + pull.x, y, z + pull.y);
     // a hand that took the paper off to one side of the cursor comes to it gently: a jump of the
@@ -2370,7 +2395,10 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
             Half::Left => spread.numbers.0,
             Half::Right => spread.numbers.1,
         };
-        if book.gone.contains(&number) {
+        // paper torn out keeps what was printed on it; only a page lying in the book where one
+        // was torn out is bare
+        let lying = matches!(canvas.0, Face::Left | Face::Right);
+        if lying && book.gone.contains(&number) {
             print_stub(&mut commands, entity, half, &art, &assets);
         } else {
             print_page(&mut commands, entity, &spread, half, &fonts, &art, &assets);

@@ -27,6 +27,17 @@ const BEND: f32 = 0.6;
 /// Stretch, as a share of its length, at which an edge of paper gives way: twice what the
 /// briskest calm turn asks of it (about 0.09), so only a pull or a jerk tears.
 const TEAR: f32 = 0.18;
+/// Paper is weakest where fingers pinch it and pull: within `PINCH_REACH` of a hand an edge bears
+/// only `1 / (1 + PINCH * pinch)` of its stretch (`Leaf::pinch`, 0 when the hand only leads the
+/// leaf over, 1 at a hard pull), so a pull tears a bit off by the fingers before it can tear the
+/// whole leaf out at the spine.
+const PINCH: f32 = 3.0;
+const PINCH_REACH: f32 = 0.16;
+/// A yank: past `YANK_FROM` (a calm turn carries the corner at one to three a second) every unit
+/// of the hand's speed makes the paper by the fingers bear `YANK` more stretch than it has, as
+/// the leaf's weight holds back against the hand. A quick tug tears a piece off where it is held.
+const YANK_FROM: f32 = 3.5;
+const YANK: f32 = 0.06;
 /// Edges that may give way in one step: a tear runs, it does not burst.
 const TEARS_PER_STEP: usize = 2;
 /// Glue: how hard a glued point is held to the page under it each solver pass, and how far it
@@ -172,6 +183,9 @@ pub struct Leaf {
     /// Does the paper tear of itself when pulled too far? Not when another reader's machine
     /// holds the leaf: then its tears come from there, edge by edge, in their order.
     pub tearing: bool,
+    /// How hard the hand pulls the paper out past where it reaches, 0..1: the paper by the
+    /// fingers gives the sooner (see `PINCH`).
+    pub pinch: f32,
     /// How far an edge may stretch before it parts, when the book decides it rather than the
     /// paper: hands pulling a glued pair apart hold it whole up to a point, and past that it gives
     /// at once (see `Book`'s `lay_on_hands`).
@@ -235,6 +249,7 @@ impl Leaf {
             last_others: Vec::new(),
             tearing: true,
             tear_at: None,
+            pinch: 0.0,
             fresh: Vec::new(),
             glue: Vec::new(),
             gap,
@@ -581,12 +596,18 @@ impl Leaf {
         // a tear already started, where the pull gathers, so only such edges may give
         // A crack runs across the pull, so a link stretched too far parts the paper along an edge
         // that crosses it at one of its ends
+        let hands: Vec<Vec3> = self.grab.map(|(_, at)| at).into_iter().chain(self.others.iter().map(|(_, at)| *at)).collect();
         let mut strained: Vec<(f32, usize)> = self
             .links
             .iter()
             .filter_map(|l| {
                 let e = l.edge?;
-                let s = self.points[l.a].distance(self.points[l.b]) / l.rest - 1.0;
+                let (a, b) = (self.points[l.a], self.points[l.b]);
+                // near the fingers the paper gives sooner
+                let mid = (a + b) * 0.5;
+                let near = hands.iter().map(|h| (-(mid.distance_squared(*h)) / (PINCH_REACH * PINCH_REACH)).exp()).fold(0.0, f32::max);
+                let yank = (self.hand_speed - YANK_FROM).max(0.0) * YANK;
+                let s = (a.distance(b) / l.rest - 1.0) * (1.0 + PINCH * self.pinch * near) + near * yank;
                 if s <= self.tear_at.unwrap_or(TEAR) {
                     return None;
                 }
@@ -932,6 +953,26 @@ mod tests {
         assert!(lost > 0.0 && lost < 0.6, "lost {lost}");
         // the torn piece is loose: some of the paper now lies on the table
         assert!(l.points.iter().any(|p| p.y < 0.01), "nothing fell to the table");
+    }
+
+    #[test]
+    fn pulled_hard_by_the_edge_a_piece_tears_off_by_the_fingers() {
+        let mut l = leaf();
+        l.pinch = 1.0;
+        let edge = at(NX - 1, NZ / 2);
+        let from = l.points[edge];
+        // taken by the outer edge and pulled out along the table, steadily, not jerked
+        for k in 1..=120 {
+            l.grab = Some((edge, from + Vec3::new(0.004, 0.0, 0.004) * k as f32));
+            l.step(1.0 / 60.0);
+        }
+        l.grab = None;
+        for _ in 0..120 {
+            l.step(1.0 / 60.0);
+        }
+        assert!(l.torn(), "nothing tore");
+        let lost = l.lost();
+        assert!(lost > 0.0 && lost < 0.35, "a piece by the fingers, not the leaf: lost {lost}");
     }
 
     #[test]

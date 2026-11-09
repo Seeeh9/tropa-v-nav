@@ -51,7 +51,9 @@ struct InkTray;
 struct ToolButton(Tool);
 
 /// Pencil grey, a little warm, so it reads on parchment and is not taken for the map's own ink.
-const PENCIL: Color = Color::srgba(0.24, 0.20, 0.30, 0.85);
+/// Opaque: the pieces of a stroke overlap at their ends, and see-through they would show there
+/// as a row of darker beads.
+const PENCIL: Color = Color::srgb(0.33, 0.29, 0.37);
 /// The line's thickness.
 const DOT: f32 = 6.0;
 /// How far apart the points of a stroke are kept; the line is drawn whole between them.
@@ -151,14 +153,21 @@ fn redraw_ink(mut commands: Commands, mut ink: ResMut<MapInk>, net: Option<Res<N
     }
 }
 
-fn tray_button(label: String, fonts: &Fonts) -> impl Bundle {
-    (
+/// A tool's button: its picture (`assets/map/tool_<name>`) beside its name.
+fn tray_button(commands: &mut ChildSpawnerCommands, label: String, icon: Option<Handle<Image>>, fonts: &Fonts) -> Entity {
+    let mut button = commands.spawn((
         Button,
-        Node { width: px(240), padding: UiRect::axes(px(14), px(8)), border: UiRect::all(px(3)), justify_content: JustifyContent::Center, ..default() },
+        Node { width: px(240), padding: UiRect::axes(px(10), px(6)), border: UiRect::all(px(3)), column_gap: px(10), align_items: AlignItems::Center, ..default() },
         BackgroundColor(theme::PEAT),
         BorderColor::all(EDGE),
-        children![(theme::text(label, &fonts.title, 24.0, theme::BONE), TextLayout::justify(Justify::Center))],
-    )
+    ));
+    button.with_children(|b| {
+        if let Some(icon) = icon {
+            b.spawn((ImageNode::new(icon), Node { width: px(44), height: px(44), flex_shrink: 0.0, ..default() }, Pickable::IGNORE));
+        }
+        b.spawn((theme::text(label, &fonts.title, 24.0, theme::BONE), Pickable::IGNORE));
+    });
+    button.id()
 }
 
 fn wipe(commands: &mut Commands, ink: &mut MapInk, dots: &Query<Entity, With<InkDot>>) {
@@ -171,7 +180,7 @@ fn wipe(commands: &mut Commands, ink: &mut MapInk, dots: &Query<Entity, With<Ink
 }
 
 /// The tray lies at the left of the map, beside the parchment, once per map screen.
-fn tray(mut commands: Commands, trays: Query<(), With<InkTray>>, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>) {
+fn tray(mut commands: Commands, trays: Query<(), With<InkTray>>, stage: Single<Entity, With<Stage>>, fonts: Res<Fonts>, l10n: Res<L10n>, art: Res<crate::art::Art>, assets: Res<AssetServer>) {
     if !trays.is_empty() {
         return;
     }
@@ -185,12 +194,13 @@ fn tray(mut commands: Commands, trays: Query<(), With<InkTray>>, stage: Single<E
         ))
         .with_children(|p| {
             p.spawn(theme::text(l10n.t("map-ink-title"), &fonts.body, 22.0, theme::BONE));
-            p.spawn((tray_button(l10n.t("map-ink-pencil"), &fonts), ToolButton(Tool::Pencil), observe(|_: On<Activate>, mut ink: ResMut<MapInk>| ink.tool = Tool::Pencil)));
-            p.spawn((tray_button(l10n.t("map-ink-eraser"), &fonts), ToolButton(Tool::Eraser), observe(|_: On<Activate>, mut ink: ResMut<MapInk>| ink.tool = Tool::Eraser)));
-            p.spawn((
-                tray_button(l10n.t("map-ink-clear"), &fonts),
-                observe(|_: On<Activate>, mut commands: Commands, mut ink: ResMut<MapInk>, dots: Query<Entity, With<InkDot>>| wipe(&mut commands, &mut ink, &dots)),
-            ));
+            let icon = |name: &str| art.image(&assets, &format!("map/tool_{name}"));
+            let pencil = tray_button(p, l10n.t("map-ink-pencil"), icon("pencil"), &fonts);
+            p.commands().entity(pencil).insert((ToolButton(Tool::Pencil), observe(|_: On<Activate>, mut ink: ResMut<MapInk>| ink.tool = Tool::Pencil)));
+            let eraser = tray_button(p, l10n.t("map-ink-eraser"), icon("eraser"), &fonts);
+            p.commands().entity(eraser).insert((ToolButton(Tool::Eraser), observe(|_: On<Activate>, mut ink: ResMut<MapInk>| ink.tool = Tool::Eraser)));
+            let clear = tray_button(p, l10n.t("map-ink-clear"), icon("wipe"), &fonts);
+            p.commands().entity(clear).insert(observe(|_: On<Activate>, mut commands: Commands, mut ink: ResMut<MapInk>, dots: Query<Entity, With<InkDot>>| wipe(&mut commands, &mut ink, &dots)));
         });
 }
 

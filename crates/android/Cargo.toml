@@ -1,0 +1,45 @@
+[package]
+name = "tropa-android"
+description = "The game as an Android library: NativeActivity loads it and calls `android_main`."
+edition.workspace = true
+version.workspace = true
+
+[lib]
+name = "tropa_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+tropa = { path = "../game" }
+bevy = { version = "0.20", default-features = false, features = ["android-native-activity"] }
+
+# `cargo apk build --release -p tropa-android` (cargo-apk) makes the APK; the packer's mobile
+# assets go inside it, read through the asset manager
+[package.metadata.android]
+package = "com.tropa.nav"
+apk_name = "TropaVNav"
+assets = "../../target/pack/mobile/assets"
+build_targets = ["aarch64-linux-android"]
+strip = "strip"
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 34
+
+[package.metadata.android.application]
+label = "Тропа в Навь"
+
+[package.metadata.android.application.activity]
+orientation = "sensorLandscape"
+config_changes = "orientation|screenSize|screenLayout|keyboardHidden"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_WIFI_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"

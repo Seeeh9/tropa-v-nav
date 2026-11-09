@@ -1,6 +1,6 @@
 //! Pencil marks on the path map, as in Slay the Spire 2: the right mouse button held down draws a
-//! line on the sheet, or rubs out the marks under the pointer when the eraser is the tool (or
-//! Shift is held); the little tray at the left picks the tool and wipes this player's own marks,
+//! line on the sheet, or, when the eraser is the tool (or Shift is held), rubs out the marks where a
+//! broad round eraser is drawn over them, cutting a stroke where it passes; the little tray at the left picks the tool and wipes this player's own marks,
 //! as Delete does. The marks are this player's own, kept until the act ends, and never press a
 //! node: the nodes take the left button only.
 
@@ -31,12 +31,18 @@ pub struct MapInk {
     strokes: Vec<Vec<Vec2>>,
     /// A stroke is being drawn now.
     drawing: bool,
+    /// Where the eraser was last frame, while it is rubbing: it rubs the whole way between.
+    rubbed_from: Option<Vec2>,
     pub tool: Tool,
 }
 
 /// One piece of a pencil stroke, child of the sheet.
 #[derive(Component)]
 struct InkDot;
+
+/// The eraser's round outline under the pointer while it rubs.
+#[derive(Component)]
+struct EraserRing;
 
 /// The tray of pencil tools, and the buttons that pick one.
 #[derive(Component)]
@@ -50,8 +56,8 @@ const PENCIL: Color = Color::srgba(0.24, 0.20, 0.30, 0.85);
 const DOT: f32 = 6.0;
 /// How far apart the points of a stroke are kept; the line is drawn whole between them.
 const STEP: f32 = 6.0;
-/// How near the pointer has to come to a stroke to rub it out.
-const RUB: f32 = 26.0;
+/// The eraser's reach from the pointer: it is ten times the pencil's breadth across.
+const RUB: f32 = DOT * 5.0;
 const EDGE: Color = Color::srgb(0.42, 0.33, 0.22);
 
 /// A piece of line from `a` to `b`: a bar with round ends turned along the way, so the pieces of a
@@ -71,18 +77,51 @@ fn piece(commands: &mut Commands, sheet: Entity, a: Vec2, b: Vec2) {
     ));
 }
 
-/// Whether the pointer at `at` touches the stroke anywhere along its line, not only at its points.
-fn near(stroke: &[Vec2], at: Vec2) -> bool {
-    match stroke {
-        [] => false,
-        [p] => p.distance(at) <= RUB,
-        _ => stroke.windows(2).any(|w| {
-            let (a, b) = (w[0], w[1]);
-            let ab = b - a;
-            let t = if ab.length_squared() > 0.0 { ((at - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
-            (a + ab * t).distance(at) <= RUB
-        }),
+/// How far `p` is from the segment `a`-`b`.
+fn off(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let t = if ab.length_squared() > 0.0 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+    (a + ab * t).distance(p)
+}
+
+/// The eraser drawn from `from` to `to` rubs out what of the strokes lies under it: a stroke it
+/// crosses is cut there and the pieces either side stay. Whether anything was rubbed out.
+fn rub(strokes: &mut Vec<Vec<Vec2>>, from: Vec2, to: Vec2) -> bool {
+    let mut any = false;
+    let mut kept = Vec::with_capacity(strokes.len());
+    for stroke in strokes.drain(..) {
+        // the points close enough together that the eraser cannot slip between them
+        let mut fine = Vec::with_capacity(stroke.len());
+        for (k, p) in stroke.iter().enumerate() {
+            if let Some(prev) = k.checked_sub(1).map(|k| stroke[k]) {
+                let n = (prev.distance(*p) / (STEP / 2.0)).ceil().max(1.0) as usize;
+                fine.extend((1..n).map(|i| prev.lerp(*p, i as f32 / n as f32)));
+            }
+            fine.push(*p);
+        }
+        if !fine.iter().any(|p| off(*p, from, to) <= RUB) {
+            kept.push(stroke);
+            continue;
+        }
+        any = true;
+        let mut piece: Vec<Vec2> = Vec::new();
+        for p in fine {
+            if off(p, from, to) <= RUB {
+                // a crumb left at the eraser's edge is rubbed out with the rest
+                if piece.len() > 1 {
+                    kept.push(std::mem::take(&mut piece));
+                }
+                piece.clear();
+            } else {
+                piece.push(p);
+            }
+        }
+        if piece.len() > 1 {
+            kept.push(piece);
+        }
     }
+    *strokes = kept;
+    any
 }
 
 fn lay_stroke(commands: &mut Commands, sheet: Entity, stroke: &[Vec2]) {
@@ -125,6 +164,7 @@ fn tray_button(label: String, fonts: &Fonts) -> impl Bundle {
 fn wipe(commands: &mut Commands, ink: &mut MapInk, dots: &Query<Entity, With<InkDot>>) {
     ink.strokes.clear();
     ink.drawing = false;
+    ink.rubbed_from = None;
     for e in dots {
         commands.entity(e).despawn();
     }
@@ -175,8 +215,25 @@ fn draw_ink(
     mut cursor: Local<Option<Vec2>>,
     sheet: Query<Entity, With<MapSheet>>,
     dots: Query<Entity, With<InkDot>>,
+    rings: Query<Entity, With<EraserRing>>,
     mut ink: ResMut<MapInk>,
 ) {
+    let ring = |commands: &mut Commands, at: Option<(Entity, Vec2)>| {
+        for e in &rings {
+            commands.entity(e).despawn();
+        }
+        if let Some((sheet, at)) = at {
+            commands.spawn((
+                EraserRing,
+                Node { position_type: PositionType::Absolute, left: px(at.x - RUB), top: px(at.y - RUB), width: px(RUB * 2.0), height: px(RUB * 2.0), border: UiRect::all(px(2)), border_radius: BorderRadius::MAX, ..default() },
+                BorderColor::all(PENCIL),
+                BackgroundColor(theme::BONE.with_alpha(0.25)),
+                GlobalZIndex(6),
+                Pickable::IGNORE,
+                ChildOf(sheet),
+            ));
+        }
+    };
     // where the pointer is, as the window's own events tell it (as the party's pointers are read)
     for ev in moves.read() {
         if let bevy::window::WindowEvent::CursorMoved(m) = ev {
@@ -190,6 +247,9 @@ fn draw_ink(
     }
     if !mouse.pressed(MouseButton::Right) {
         ink.drawing = false;
+        if ink.rubbed_from.take().is_some() {
+            ring(&mut commands, None);
+        }
         return;
     }
     let Some(pos) = window.cursor_position().or_else(crate::touch::finger).or(*cursor) else { return };
@@ -204,9 +264,9 @@ fn draw_ink(
     }
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     if shift || ink.tool == Tool::Eraser {
-        let before = ink.strokes.len();
-        ink.strokes.retain(|s| !near(s, at));
-        if ink.strokes.len() != before {
+        let from = ink.rubbed_from.replace(at).unwrap_or(at);
+        ring(&mut commands, Some((sheet, at)));
+        if rub(&mut ink.strokes, from, at) {
             for e in &dots {
                 commands.entity(e).despawn();
             }
@@ -216,6 +276,9 @@ fn draw_ink(
         }
         ink.drawing = false;
         return;
+    }
+    if ink.rubbed_from.take().is_some() {
+        ring(&mut commands, None);
     }
     if !ink.drawing || mouse.just_pressed(MouseButton::Right) {
         ink.drawing = true;
@@ -235,20 +298,31 @@ fn draw_ink(
 
 #[cfg(test)]
 mod tests {
+    use bevy::math::Vec2;
+
     #[test]
-    fn a_stroke_near_the_pointer_is_rubbed_out_and_the_rest_stay() {
-        use bevy::math::Vec2;
-        let mut strokes = vec![vec![Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)], vec![Vec2::new(500.0, 500.0)]];
-        let at = Vec2::new(12.0, 5.0);
-        strokes.retain(|s| !super::near(s, at));
-        assert_eq!(strokes.len(), 1);
+    fn the_eraser_rubs_out_only_what_it_passes_over() {
+        let mut strokes = vec![vec![Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0)], vec![Vec2::new(500.0, 500.0), Vec2::new(520.0, 500.0)]];
+        assert!(super::rub(&mut strokes, Vec2::new(200.0, 10.0), Vec2::new(200.0, 10.0)));
+        // the long line is cut in two where the eraser lay, the far stroke is left alone
+        assert_eq!(strokes.len(), 3);
+        assert!(strokes[0].iter().all(|p| p.x < 200.0 - super::RUB + 1.0));
+        assert!(strokes[1].iter().all(|p| p.x > 200.0 + super::RUB - 1.0));
+        assert_eq!(strokes[2], vec![Vec2::new(500.0, 500.0), Vec2::new(520.0, 500.0)]);
     }
 
     #[test]
-    fn the_middle_of_a_long_piece_is_rubbed_out_too() {
-        use bevy::math::Vec2;
-        let stroke = vec![Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0)];
-        assert!(super::near(&stroke, Vec2::new(200.0, 10.0)));
-        assert!(!super::near(&stroke, Vec2::new(200.0, 60.0)));
+    fn the_eraser_rubs_the_whole_way_it_is_drawn() {
+        let mut strokes = vec![vec![Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0)]];
+        // drawn quickly along the line: nothing of it is left between
+        assert!(super::rub(&mut strokes, Vec2::new(-10.0, 0.0), Vec2::new(410.0, 0.0)));
+        assert!(strokes.is_empty());
+    }
+
+    #[test]
+    fn the_eraser_far_off_leaves_everything() {
+        let mut strokes = vec![vec![Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0)]];
+        assert!(!super::rub(&mut strokes, Vec2::new(200.0, 80.0), Vec2::new(200.0, 80.0)));
+        assert_eq!(strokes, vec![vec![Vec2::new(0.0, 0.0), Vec2::new(400.0, 0.0)]]);
     }
 }

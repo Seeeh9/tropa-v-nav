@@ -424,9 +424,10 @@ fn note(line: String) {
     }
 }
 
+/// In a released game the same lines go to its log file, to send after a bug seen in play.
 #[cfg(not(feature = "dev"))]
 fn note(line: String) {
-    debug!("book: {line}");
+    info!("book: {line}");
 }
 
 impl Book {
@@ -815,14 +816,28 @@ impl Book {
             Half::Left => spread.numbers.0,
             Half::Right => spread.numbers.1,
         };
-        match self.under.iter().find(|(n, _)| *n == number) {
-            Some((_, under)) => under.clone(),
-            None => (spread.clone(), half),
+        // leaves torn out one after another: follow down to the page that is still there
+        let mut at = (spread.clone(), half);
+        let mut number = number;
+        for _ in 0..self.under.len() {
+            match self.under.iter().find(|(n, _)| *n == number) {
+                Some((_, under)) => {
+                    at = under.clone();
+                    number = match at.1 {
+                        Half::Left => at.0.numbers.0,
+                        Half::Right => at.0.numbers.1,
+                    };
+                }
+                None => break,
+            }
         }
+        at
     }
 
     fn wear(&mut self, face: Face, spread: &Spread, half: Half) {
-        let new = Some(if matches!(face, Face::Left | Face::Right) { self.lying(spread, half) } else { (spread.clone(), half) });
+        // where a page was torn out, what lay under it is what is there, on the pages and on a
+        // leaf taken up alike: the leaf lifted off the right is the page after the torn one
+        let new = Some(self.lying(spread, half));
         // a leaf come down on the left lies over the scraps that lay there
         if face == Face::Left && self.faces[face as usize] != new {
             self.covered.push(Half::Left);
@@ -2399,7 +2414,7 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
         // was torn out is bare
         let lying = matches!(canvas.0, Face::Left | Face::Right);
         if lying && book.gone.contains(&number) {
-            print_stub(&mut commands, entity, half, &art, &assets);
+            print_stub(&mut commands, entity, &art, &assets);
         } else {
             print_page(&mut commands, entity, &spread, half, &fonts, &art, &assets);
         }
@@ -2407,32 +2422,13 @@ fn redraw_pages(mut commands: Commands, mut book: ResMut<Book>, canvases: Query<
     }
 }
 
-/// Where a leaf was torn out: bare paper, nothing printed, and the ragged stub left at the spine.
-fn print_stub(commands: &mut Commands, entity: Entity, half: Half, art: &Art, assets: &AssetServer) {
+/// Where every leaf down to the cover was torn out: the cover's endpaper, nothing printed (the
+/// torn paper itself lies over it as it was torn).
+fn print_stub(commands: &mut Commands, entity: Entity, art: &Art, assets: &AssetServer) {
     commands.entity(entity).despawn_children();
-    let mut page = commands.entity(entity);
-    if let Some(p) = art.image(assets, "book/parchment") {
-        page.insert(ImageNode::new(p).with_mode(NodeImageMode::Stretch).with_color(Color::srgb(0.78, 0.72, 0.62)));
+    if let Some(p) = art.image(assets, "book/endpaper").or_else(|| art.image(assets, "book/parchment")) {
+        commands.entity(entity).insert(ImageNode::new(p).with_mode(NodeImageMode::Stretch));
     }
-    let bare = art.find("book/bare", "png", "cut").map(|f| assets.load::<Image>(f));
-    let (w, h) = (PAGE_PX.x as f32, PAGE_PX.y as f32);
-    let band = 150.0;
-    page.with_children(|p| {
-        // down the side of the spine, patch over patch, so its edge is never straight
-        for k in 0..7 {
-            let y = (k as f32 - 0.5) * h / 6.0;
-            let wide = band * (0.7 + 0.6 * hash(k * 13 + 5));
-            let left = match half {
-                Half::Left => w - wide * 0.7,
-                Half::Right => -wide * 0.3,
-            };
-            let mut node = p.spawn(Node { position_type: PositionType::Absolute, left: px(left), top: px(y), width: px(wide), height: px(h / 4.0), ..default() });
-            match &bare {
-                Some(b) => node.insert(ImageNode::new(b.clone()).with_mode(NodeImageMode::Stretch).with_color(Color::WHITE.with_alpha(0.95))),
-                None => node.insert(BackgroundColor(Color::srgba(0.95, 0.92, 0.85, 0.6))),
-            };
-        }
-    });
 }
 
 fn print_page(commands: &mut Commands, entity: Entity, spread: &Spread, half: Half, fonts: &Fonts, art: &Art, assets: &AssetServer) {
@@ -3062,6 +3058,33 @@ mod tests {
             b.leaf.tear_edge(e);
         }
         assert!(b.leaf.lost() > 0.5);
+    }
+
+    #[test]
+    fn leaves_torn_out_one_after_another_show_the_pages_still_there() {
+        let (one, two, three) = (spread(2, None), spread(4, None), spread(6, None));
+        let mut b = book_at(one.clone());
+        b.next = Some(two.clone());
+        assert!(b.take_up(Hand::Reader));
+        tear_off(&mut b);
+        b.settle();
+        b.spread = two.clone();
+        b.follow();
+        b.next = Some(three.clone());
+        assert!(b.take_up(Hand::Reader));
+        tear_off(&mut b);
+        b.settle();
+        // pages 3, 4, 5 and 6 are gone: the book lies open at 2 and 7, nothing blank between
+        assert_eq!(b.faces[Face::Left as usize], Some((one, Half::Left)));
+        assert_eq!(b.faces[Face::Right as usize], Some((three.clone(), Half::Right)));
+        // and the leaf taken up next off the right is page 7's
+        b.next = Some(spread(8, None));
+        b.spread = three;
+        b.follow();
+        if b.take_up(Hand::Reader) {
+            let front = b.faces[Face::LeafFront as usize].as_ref().map(|(s, _)| s.numbers.1);
+            assert_eq!(front, Some(7));
+        }
     }
 
     #[test]

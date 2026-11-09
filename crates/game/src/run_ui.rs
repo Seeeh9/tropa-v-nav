@@ -358,12 +358,14 @@ fn draw_map(
         let seed = hash2(a.x + b.y * 0.37, a.y + b.x * 0.61);
         let bow = (seed - 0.5) * 48.0;
         let steps = ((len - 44.0) / 13.0).floor().max(0.0) as i32;
-        let (size, color) = match (lit, on_parchment) {
-            _ if walked => (9.0, WALKED.with_alpha(0.95)),
-            (true, true) => (7.0, INK.with_alpha(0.95)),
-            (false, true) => (6.0, INK.with_alpha(0.78)),
-            (true, false) => (6.0, theme::BONE.with_alpha(0.85)),
-            (false, false) => (4.5, theme::DIM.with_alpha(0.45)),
+        // on the parchment each dot has a rim of dark ink, so it stands off the paper's stains: the
+        // way walked is blood red, the ways open now are candle gold, the rest plain dark ink
+        let (size, color, rim) = match (lit, on_parchment) {
+            _ if walked => (11.0, Color::srgb(0.66, 0.10, 0.05), Some(INK)),
+            (true, true) => (11.0, Color::srgb(0.93, 0.62, 0.14), Some(INK)),
+            (false, true) => (7.5, INK.with_alpha(0.92), None),
+            (true, false) => (6.0, theme::BONE.with_alpha(0.85), None),
+            (false, false) => (4.5, theme::DIM.with_alpha(0.45), None),
         };
         for k in 0..=steps {
             let s = (22.0 + k as f32 * 13.0) / len;
@@ -372,8 +374,18 @@ fn draw_map(
             // the pen presses harder and lighter
             let size = size * (0.75 + 0.5 * hash2(k as f32, seed * 100.0));
             commands.spawn((
-                Node { position_type: PositionType::Absolute, left: px(p.x - size / 2.0), top: px(p.y - size / 2.0), width: px(size), height: px(size), border_radius: BorderRadius::MAX, ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(p.x - size / 2.0),
+                    top: px(p.y - size / 2.0),
+                    width: px(size),
+                    height: px(size),
+                    border: UiRect::all(px(if rim.is_some() { 2.0 } else { 0.0 })),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
                 BackgroundColor(color),
+                BorderColor::all(rim.unwrap_or(Color::NONE)),
                 Pickable::IGNORE,
                 ChildOf(root_sheet),
             ));

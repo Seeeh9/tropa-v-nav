@@ -70,7 +70,7 @@ jobs:
           mkdir -p "$out"
           steam=$(ls -d target/release/build/steamworks-sys-*/out | head -1)
           case "${{ matrix.name }}" in
-            windows) cp target/release/tropa.exe "$steam/steam_api64.dll" target/release/ ;;
+            windows) cp "$steam/steam_api64.dll" target/release/ ;;
             linux) cp target/release/tropa "$steam/libsteam_api.so" "$out/" ;;
             macos) cp target/release/tropa "$steam/libsteam_api.dylib" "$out/" ;;
           esac

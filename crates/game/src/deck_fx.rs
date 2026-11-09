@@ -165,7 +165,7 @@ fn cue(
             }
             RunEvent::CardRemoved { card, .. } => {
                 show(&mut commands, card, false, SHOW_AT, start, 0.6, Motion::Burn);
-                sfx.play(&mut commands, "status", &mixer, 1.0);
+                sfx.play_or(&mut commands, "card_burn", "status", &mixer, 1.0);
                 1.4
             }
             RunEvent::RelicGained { relic: id, .. } | RunEvent::PotionGained { potion: id, .. } => {

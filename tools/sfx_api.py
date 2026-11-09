@@ -85,6 +85,27 @@ for i, (what, seconds) in enumerate([
     ("A low wet moan of air with no mouth to shape it, bubbling, no words", 2.0),
 ], 1):
     SOUNDS[f"gurgle_{i}"] = (what + ", no music, no speech", seconds)
+# each status laid on: assets/sfx/status_<kind>-flow.wav, the plain "status" for any without one
+SOUNDS.update({
+    "status_strength": ("Warrior's short fierce growl and a gauntlet clenching, leather and iron creak, power rising, no music, no speech", 1.0),
+    "status_tempstrength": ("Quick sharp battle shout swallowed by a rushing whoosh of blood to the head, short, no music, no words", 0.8),
+    "status_drowse": ("Slow heavy drowsy sigh with a soft dreamy hum fading away, sleepy, no music, no words", 1.5),
+    "status_fortitude": ("Heavy chainmail settling and leather straps pulled tight, a solid stone grind, short, no music", 1.0),
+    "status_vulnerable": ("Brittle armour cracking open, dry splintering crack of a shield, short, no music", 0.8),
+    "status_weak": ("Weary limp exhale and a sword point dragging down onto stone, tired, short, no music, no words", 1.0),
+    "status_rot": ("Wet squelch of rotting flesh and a short buzz of carrion flies, disgusting, no music", 1.2),
+    "status_hex": ("Curse taking hold: eerie hissing whisper with a dark shimmer, short, no music", 1.5),
+    "status_bleed": ("Fresh wound opening, a wet tearing slice and blood dripping onto the ground, short, no music, no speech", 1.0),
+    "status_fear": ("Sudden ghostly shriek from far away and two fast pounding heartbeats, horror, short, no music", 1.2),
+    "status_thorns": ("Thorny brambles snapping and twisting around wood, dry crackling vines, short, no music", 1.0),
+    "status_huntmark": ("Short low hunting horn call and an arrow thudding into a wooden post, no music", 1.2),
+    "status_valor": ("Brave warrior's shout and a sword hilt banged on a round shield, short, no music, no words", 1.0),
+    "status_stun": ("Dazing blow to a helmet: dull clang and a high-pitched ringing in the ears, short, no music", 1.2),
+    "status_mist": ("Soft cold breath of drifting fog, a hollow airy whoosh, ghostly, short, no music", 1.2),
+    "status_chained": ("Heavy iron chains rattling and a padlock snapping shut, short, no music", 1.0),
+    "status_gloom": ("Low ominous drone swelling with a dark cold wind, dread, short, no music", 1.8),
+    "card_burn": ("Old parchment card catching fire and crumbling to ash, quick flare and crackle, no music", 1.2),
+})
 # each foe dies its own way: assets/sfx/death_<foe>-flow.wav, the plain "death" for any without one
 SOUNDS.update({
     "death_grey_wolf": ("Big wolf dying, a pained yelp fading into a wet whimper, single sound, no music, no speech", 2.0),

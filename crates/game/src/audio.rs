@@ -13,8 +13,19 @@ use std::collections::HashMap;
 
 const SFX: &[&str] = &[
     "card_play", "card_draw", "hit", "hit_heavy", "block", "heal", "status", "death", "downed", "raised", "click", "ready", "round", "rune", "potion", "gold", "victory",
-    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain", "card_shuffle", "limb_off", "head_off",
+    "defeat", "map_vote", "map_nudge", "lot_tick", "lot_land", "card_gain", "card_shuffle", "limb_off", "head_off", "card_burn",
 ];
+
+/// Each status laid on has its own sound, `status_<kind>`; one without falls back to `status`.
+const STATUSES: &[nav_core::StatusKind] = {
+    use nav_core::StatusKind::*;
+    &[Strength, Drowse, TempStrength, Fortitude, Vulnerable, Weak, Rot, Hex, Bleed, Fear, Thorns, HuntMark, Valor, Stun, Mist, Chained, Gloom]
+};
+
+/// The sound of `status` being laid on.
+pub fn status_sound(status: nav_core::StatusKind) -> String {
+    format!("status_{status:?}").to_lowercase()
+}
 
 /// How many ways a body with no head has of saying something.
 const GURGLES: u32 = 8;
@@ -115,6 +126,15 @@ fn duck_music(time: Res<Time>, mut mixer: ResMut<Mixer>, speaking: Query<(), Wit
 pub struct Sfx(HashMap<String, Handle<AudioSource>>);
 
 impl Sfx {
+    pub fn has(&self, name: &str) -> bool {
+        self.0.contains_key(name)
+    }
+
+    /// `name`, or `fallback` when this build has no such sound.
+    pub fn play_or(&self, commands: &mut Commands, name: &str, fallback: &str, mixer: &Mixer, gain: f32) {
+        self.play(commands, if self.has(name) { name } else { fallback }, mixer, gain);
+    }
+
     pub fn play(&self, commands: &mut Commands, name: &str, mixer: &Mixer, gain: f32) {
         if let Some(handle) = self.0.get(name) {
             commands.spawn((AudioPlayer::new(handle.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(mixer.sfx * gain))));
@@ -126,7 +146,7 @@ fn load(mut commands: Commands, art: Res<Art>, assets: Res<AssetServer>, db: Res
     let mut sfx = Sfx::default();
     let foes = db.0.enemies.keys().map(|foe| format!("death_{foe}"));
     let gurgles = (1..=GURGLES).map(|k| format!("gurgle_{k}"));
-    for name in SFX.iter().map(|n| n.to_string()).chain(foes).chain(gurgles) {
+    for name in SFX.iter().map(|n| n.to_string()).chain(foes).chain(gurgles).chain(STATUSES.iter().map(|s| status_sound(*s))) {
         let stem = format!("sfx/{name}");
         // generated audio first, synthesised stand-in second
         let path = art.find(&stem, "ogg", "flow").filter(|p| p.ends_with("-flow.ogg")).or_else(|| art.find(&stem, "wav", "flow"));
@@ -147,6 +167,17 @@ fn cue_sounds(mut commands: Commands, cues: Res<Cues>, sfx: Res<Sfx>, mixer: Res
             if let Some(own) = own {
                 if !played.contains(&own) {
                     sfx.play(&mut commands, &own, &mixer, 1.0);
+                    played.push(own);
+                }
+                continue;
+            }
+        }
+        // each status is laid on with its own sound
+        if let Event::Status { status, delta, .. } = e {
+            let own = status_sound(*status);
+            if *delta > 0 && sfx.has(&own) {
+                if !played.contains(&own) {
+                    sfx.play(&mut commands, &own, &mixer, 0.8);
                     played.push(own);
                 }
                 continue;
